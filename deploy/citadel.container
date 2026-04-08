@@ -1,0 +1,27 @@
+[Unit]
+Description=CITADEL Dashboard with Tailscale
+
+[Container]
+ContainerName=citadel
+Image=localhost/citadel:latest
+
+# Tailscale needs TUN device and network capabilities
+AddCapability=NET_ADMIN
+AddCapability=NET_RAW
+AddDevice=/dev/net/tun
+
+# Environment
+Environment=TS_HOSTNAME=
+Environment=TS_AUTHKEY=
+
+# Ports
+PublishPort=8443:443
+
+# Named volumes for persistent state
+Volume=citadel-tailscale:/var/lib/tailscale:Z
+Volume=citadel-opt:/opt/citadel:Z
+Volume=citadel-etc:/etc/caddy:Z
+Volume=citadel-home:/root:Z
+
+[Install]
+WantedBy=multi-user.target default.target

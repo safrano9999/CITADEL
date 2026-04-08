@@ -1,0 +1,3 @@
+# Optional — ohne config.ini wird überall -k (skip verify) genutzt.
+[CITADEL]
+ca_cert = /path/to/certs/cert.pem

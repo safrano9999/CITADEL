@@ -1,0 +1,7 @@
+{
+  "id": "subnet",
+  "label": "Subnet",
+  "enabled": true,
+  "provider": "subnet",
+  "version": 1
+}

@@ -1,0 +1,7 @@
+{
+  "id": "localhost",
+  "label": "Localhost",
+  "enabled": true,
+  "provider": "localhost",
+  "version": 1
+}

@@ -1,0 +1,23 @@
+# Runtime data
+cache/
+icons/
+services.json
+ss.json
+tailscale.json
+last_scan.txt
+ports.filter.json
+config.ini
+
+# Extensions runtime
+extensions/providers_state.json
+extensions/enabled/*/routes.json
+extensions/enabled/*/config.ini
+extensions/disabled/*/config.ini
+
+# Caddy generated routes
+CADDYFILES/
+
+# Python
+__pycache__/
+*.py[cod]
+hello_world/venv/

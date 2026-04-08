@@ -1,0 +1,21 @@
+services:
+  citadel:
+    build: .
+    container_name: citadel
+    hostname: citadel
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    environment:
+      - TS_HOSTNAME=${TS_HOSTNAME:-citadel}
+      - TS_AUTHKEY=${TS_AUTHKEY:-}
+    ports:
+      - "${CITADEL_PORT:-8443}:443"
+    restart: unless-stopped
+
+volumes:
+  tailscale-state:

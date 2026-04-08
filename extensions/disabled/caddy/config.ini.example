@@ -1,0 +1,7 @@
+[provider]
+# Minimal (recommended)
+citadel_host = 127.0.0.1
+
+# Optional overrides
+# path_prefix = p
+# path_template = /p/{port}

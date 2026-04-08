@@ -1,0 +1,12 @@
+{
+  "label": "Caddy Path Router",
+  "enabled": false,
+  "citadel_scheme": "https",
+  "citadel_host": "127.0.0.1",
+  "citadel_port": 446,
+  "path_prefix": "p",
+  "path_template": "/p/{port}",
+  "write_generated_file": true,
+  "tls_insecure_skip_verify": true,
+  "example": "https://127.0.0.1:446/p/460"
+}

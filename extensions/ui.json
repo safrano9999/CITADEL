@@ -1,0 +1,4 @@
+{
+  "default_provider": "tailscale",
+  "default_refresh_seconds": 0
+}
