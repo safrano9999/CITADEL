@@ -1,55 +1,76 @@
 #!/bin/bash
 set -euo pipefail
 
+TS_SOCKET="/var/run/tailscale/tailscaled.sock"
+TS_STATE_DIR="${TS_STATE_DIR:-/var/lib/tailscale}"
+TS_STATE_FILE="${TS_STATE_DIR}/tailscaled.state"
+TS_CERT_DIR="${TS_STATE_DIR}/certs"
+CADDY_TEMPLATE="/opt/citadel/deploy/Caddyfile"
+CADDY_CONFIG="/etc/caddy/Caddyfile"
+LOCAL_CERT_DIR="/opt/citadel/certs"
+
+mkdir -p /var/run/tailscale "$TS_STATE_DIR" "$TS_CERT_DIR" "$LOCAL_CERT_DIR"
+
 echo "=== Starting tailscaled ==="
-tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock &
+tailscaled --state="${TS_STATE_FILE}" --socket="${TS_SOCKET}" &
 sleep 2
 
-echo "=== Generating hostname ==="
-if [ -z "${TS_HOSTNAME:-}" ]; then
-    TS_HOSTNAME="citadel-$(python3 -c "
-import random
-adj = ['swift','brave','calm','bold','keen','wild','warm','cool','fair','glad']
-noun = ['falcon','otter','panda','raven','tiger','cedar','brook','ember','ridge','frost']
-print(f'{random.choice(adj)}-{random.choice(noun)}')
-")"
-    echo "Generated hostname: ${TS_HOSTNAME}"
+echo "=== Bringing up Tailscale ==="
+TS_UP_ARGS=()
+
+if [ -n "${TS_AUTHKEY:-}" ]; then
+  TS_UP_ARGS+=(--authkey="${TS_AUTHKEY}")
 fi
 
-echo "=== Authenticating with Tailscale ==="
-tailscale up --hostname="${TS_HOSTNAME}" --authkey="${TS_AUTHKEY:-}"
+if [ -n "${TS_HOSTNAME:-}" ]; then
+  TS_UP_ARGS+=(--hostname="${TS_HOSTNAME}")
+fi
+
+tailscale up "${TS_UP_ARGS[@]}"
+
 if [ -z "${TS_AUTHKEY:-}" ]; then
-    echo "No TS_AUTHKEY set — check logs above for the auth URL and approve in the Tailscale admin console."
+  echo "No TS_AUTHKEY set — approve login if Tailscale prints an auth URL."
 fi
 
 echo "=== Waiting for Tailscale to connect ==="
 for i in $(seq 1 60); do
-    if tailscale status --json 2>/dev/null | python3 -c "import json,sys; sys.exit(0 if json.load(sys.stdin).get('BackendState')=='Running' else 1)" 2>/dev/null; then
-        break
-    fi
-    sleep 2
+  if tailscale status --json 2>/dev/null | python3 -c "import json,sys; sys.exit(0 if json.load(sys.stdin).get('BackendState')=='Running' else 1)" 2>/dev/null; then
+    break
+  fi
+  sleep 2
 done
 
 TS_DOMAIN="$(tailscale status --json | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('Self',{}).get('DNSName','').rstrip('.'))")"
-TS_CERT_DIR="/var/lib/tailscale/certs"
-mkdir -p "$TS_CERT_DIR"
+
+if [ -z "$TS_DOMAIN" ]; then
+  echo "ERROR: Could not determine Tailscale DNS name."
+  exit 1
+fi
+
+echo "=== Tailscale DNS name: ${TS_DOMAIN} ==="
 
 echo "=== Fetching Tailscale TLS cert for ${TS_DOMAIN} ==="
-tailscale cert --cert-file="$TS_CERT_DIR/cert.pem" --key-file="$TS_CERT_DIR/key.pem" "$TS_DOMAIN"
+tailscale cert \
+  --cert-file="${TS_CERT_DIR}/cert.pem" \
+  --key-file="${TS_CERT_DIR}/key.pem" \
+  "${TS_DOMAIN}"
 
-# Write Tailscale domain into Caddyfile
-sed -i "s|{TS_DOMAIN}|${TS_DOMAIN}|g" /etc/caddy/Caddyfile
+echo "=== Rendering Caddyfile ==="
+if [ ! -f "${CADDY_TEMPLATE}" ]; then
+  echo "ERROR: Missing Caddy template at ${CADDY_TEMPLATE}"
+  exit 1
+fi
+
+sed "s|{TS_DOMAIN}|${TS_DOMAIN}|g" "${CADDY_TEMPLATE}" > "${CADDY_CONFIG}"
 
 echo "=== Generating self-signed cert for local access ==="
-LOCAL_CERT_DIR="/opt/citadel/certs"
-mkdir -p "$LOCAL_CERT_DIR"
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
-    -days 3650 -nodes \
-    -keyout "$LOCAL_CERT_DIR/local-key.pem" \
-    -out "$LOCAL_CERT_DIR/local.pem" \
-    -subj "/CN=citadel" \
-    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
-    2>/dev/null
+  -days 3650 -nodes \
+  -keyout "${LOCAL_CERT_DIR}/local-key.pem" \
+  -out "${LOCAL_CERT_DIR}/local.pem" \
+  -subj "/CN=citadel" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+  2>/dev/null
 
 echo "=== Starting PHP-FPM ==="
 php-fpm --daemonize
@@ -58,7 +79,7 @@ echo "=== Starting Flask hello_world ==="
 /opt/citadel/hello_world/venv/bin/python /opt/citadel/hello_world/app.py &
 
 echo "=== Starting Caddy on :443 ==="
-caddy start --config /etc/caddy/Caddyfile
+caddy start --config "${CADDY_CONFIG}"
 
 sleep 2
 
@@ -68,5 +89,4 @@ echo "=== Running initial scan ==="
 echo "CITADEL is live at https://${TS_DOMAIN}/"
 echo "Local access: https://localhost:8443/"
 
-# Keep container alive
 wait
