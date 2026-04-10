@@ -21,3 +21,6 @@ CADDYFILES/
 __pycache__/
 *.py[cod]
 hello_world/venv/
+
+# Local personal files
+PERSONAL/

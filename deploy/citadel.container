@@ -17,11 +17,19 @@ Environment=TS_AUTHKEY=
 # Ports
 PublishPort=8443:443
 
-# Named volumes for persistent state
-Volume=citadel-tailscale:/var/lib/tailscale:Z
-Volume=citadel-opt:/opt/citadel:Z
-Volume=citadel-etc:/etc/caddy:Z
-Volume=citadel-home:/root:Z
+# Full persistence profile:
+# keep system + user state in named volumes so package installs,
+# config changes and session data survive container recreation.
+# Not persistable as normal volumes: /proc, /sys, /dev (kernel-managed).
+Volume=citadel-etc:/etc:Z
+Volume=citadel-bin:/bin:Z
+Volume=citadel-home:/home:Z
+Volume=citadel-opt:/opt:Z
+Volume=citadel-root:/root:Z
+Volume=citadel-sbin:/sbin:Z
+Volume=citadel-srv:/srv:Z
+Volume=citadel-usr:/usr:Z
+Volume=citadel-var:/var:Z
 
 [Install]
-WantedBy=multi-user.target default.target
+WantedBy=default.target
