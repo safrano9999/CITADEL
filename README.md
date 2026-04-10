@@ -29,7 +29,7 @@ Start a service, scan, done. Every port is mapped to every provider automaticall
 
 ## Quick Start (Docker)
 
-CITADEL ships as a single container based on Fedora, bundling Tailscale, Caddy, PHP-FPM, and a Flask demo service.
+CITADEL ships as a single container based on Fedora, bundling Tailscale, Caddy, PHP-FPM, and a Flask demo service. 📗
 
 ### Requirements
 
