@@ -52,7 +52,7 @@ docker compose logs -f
 ### Run with Podman
 
 ```bash
-podman build -t citadel .
+python3 /home/openclaw/safrano9999/CITADEL/build.py
 podman run -d --name citadel \
   --cap-add NET_ADMIN --cap-add NET_RAW \
   --device /dev/net/tun \

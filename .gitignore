@@ -24,3 +24,7 @@ hello_world/venv/
 
 # Local personal files
 PERSONAL/
+
+# Modular container builder
+CONTAINER/REPOS/private.list
+CONTAINER/generated/*.env

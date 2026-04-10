@@ -1,0 +1,4 @@
+# name|kind|source|target_dir|env_ref|description|default
+codeanalyst|repo|https://github.com/safrano9999/CODEANALYST.git|CODEANALYST|CONTAINER/ENV/codeanalyst.env|CODEANALYST web scanner|y
+napoleon|repo|https://github.com/safrano9999/NAPOLEON_HILLS_AI_MASTERMIND_CLASSES.git|NAPOLEON_HILLS_AI_MASTERMIND_CLASSES|CONTAINER/ENV/napoleon.env|Napoleon mastermind web editor|y
+jugo|repo|https://github.com/safrano9999/JUGO.git|JUGO|CONTAINER/ENV/jugo.env|JUGO bridge service|y
