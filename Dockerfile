@@ -1,4 +1,5 @@
-FROM quay.io/fedora/fedora:latest
+ARG BASE_IMAGE=quay.io/fedora/fedora:43
+FROM ${BASE_IMAGE}
 
 RUN dnf install -y \
     caddy \

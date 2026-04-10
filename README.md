@@ -61,6 +61,19 @@ podman run -d --name citadel \
   localhost/citadel:latest
 ```
 
+Build defaults come from `build.toml` (including base image):
+
+```toml
+[build]
+base_image = "quay.io/fedora/fedora:43"
+```
+
+Rawhide example:
+
+```bash
+python3 /home/openclaw/safrano9999/CITADEL/build.py --base-image quay.io/fedora/fedora:rawhide
+```
+
 ### Systemd Quadlet (Podman)
 
 Copy `deploy/citadel.container` to `~/.config/containers/systemd/`, then:
