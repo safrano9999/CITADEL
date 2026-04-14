@@ -1,0 +1,18 @@
+{
+	auto_https off
+}
+
+https://:{$CITADEL_PORT:443} {
+	tls /opt/citadel/certs/local.pem /opt/citadel/certs/local-key.pem
+
+	route {
+		import /opt/citadel/CADDYFILES/*.caddy
+
+		root * /opt/citadel
+		php_fastcgi 127.0.0.1:9000 {
+			header_up Accept-Encoding identity
+		}
+		file_server
+	}
+}
+

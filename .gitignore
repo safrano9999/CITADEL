@@ -27,4 +27,9 @@ PERSONAL/
 
 # Modular container builder
 CONTAINER/REPOS/private.list
-CONTAINER/generated/*.env
+CONTAINER/generated/
+
+# Build artifacts
+generated/
+certs/
+.claude/
