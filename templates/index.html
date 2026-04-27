@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CITADEL</title>
+<link rel="icon" type="image/svg+xml" href="/citadel.svg">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body
+    data-default-mode="{{ data.default_mode|e }}"
+    data-default-refresh="{{ data.default_refresh }}"
+>
+
+<header class="site-header">
+    <div class="brand">
+        <img src="/citadel.svg" alt="CITADEL">
+        <h1>CITADEL</h1>
+    </div>
+    {% for meta in data.provider_header_meta %}
+        <span class="header-meta">{{ meta.label }}: {{ meta.value }}</span>
+    {% endfor %}
+    {% if data.last_scan %}
+    <span class="header-meta">last scan {{ data.last_scan }}</span>
+    {% endif %}
+
+    <div class="header-controls">
+        <label class="control" for="route-mode-sel">
+            <span>Provider</span>
+            <select id="route-mode-sel" {{ '' if data.provider_options else 'disabled' }}>
+                {% for mode, label in data.provider_options.items() %}
+                <option value="{{ mode|e }}">{{ label|e }}</option>
+                {% endfor %}
+            </select>
+            <button id="save-default-btn" class="btn-default" type="button" {{ '' if data.provider_options else 'disabled' }}>
+                Save as default
+            </button>
+            <small id="mode-default-hint">Saved default: -</small>
+        </label>
+
+        <label class="control" for="refresh-sel">
+            <span>Refresh</span>
+            <select id="refresh-sel">
+                <option value="0">off</option>
+                <option value="60">1 min</option>
+                <option value="120">2 min</option>
+                <option value="300">5 min</option>
+                <option value="600">10 min</option>
+                <option value="1800">30 min</option>
+                <option value="3600">1h</option>
+                <option value="21600">6h</option>
+                <option value="43200">12h</option>
+                <option value="86400">24h</option>
+            </select>
+            <small>page reload</small>
+        </label>
+    </div>
+</header>
+
+{% if repos_available %}
+<nav class="tab-bar">
+    <button class="tab-btn active" onclick="switchMainTab('dashboard', this)">Dashboard</button>
+    <button class="tab-btn" onclick="switchMainTab('repos', this)">Repos</button>
+</nav>
+{% endif %}
+
+<div id="tab-dashboard" class="tab-content active">
+<main class="layout">
+    {% if data.alerts %}
+    <section class="alerts">
+        {% for msg in data.alerts %}
+        <div class="alert">{{ msg|e }}</div>
+        {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if data.http_tiles %}
+    <div class="section-title">Services</div>
+    <section class="grid" id="services-grid">
+        {% for svc in data.http_tiles %}
+        {% set port = svc.port|string %}
+        {% set scheme = svc.scheme|default('http') %}
+        <article class="tile" tabindex="0"
+            {% for pid in data.provider_order %}
+            data-url-{{ pid|e }}="{{ svc.provider_urls.get(pid, '')|e }}"
+            {% endfor %}
+        >
+            {% if svc.icon %}
+                <img class="tile-icon" src="/{{ svc.icon|e }}" alt="{{ svc.name|default('Service')|e }}">
+            {% else %}
+                <div class="tile-icon-placeholder">&#127968;</div>
+            {% endif %}
+
+            <span class="tile-name">{{ svc.name|default('Port ' ~ port)|e }}</span>
+            <span class="tile-port">{{ '&#128274; ' if scheme == 'https' else '' }}:{{ port }}</span>
+            <span class="tile-url">-</span>
+        </article>
+        {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if data.other_ports %}
+    <div class="section-title">Other Listening Ports</div>
+    <section class="other-wrap">
+        <table class="other-table">
+            <thead>
+                <tr>
+                    <th>Port</th>
+                    <th>Service</th>
+                    <th>Address</th>
+                    <th>Process</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in data.other_ports %}
+                <tr>
+                    <td>:{{ p.port|default(0)|int }}</td>
+                    <td>{{ p.service|default('—')|e }}</td>
+                    <td>{{ p.addr|default('*')|e }}</td>
+                    <td>{{ p.process|default('—')|e }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+    {% endif %}
+</main>
+</div><!-- /tab-dashboard -->
+
+{% if repos_available %}
+<div id="tab-repos" class="tab-content">
+<main class="layout">
+
+    <div class="repos-hero">
+        <img src="/api/repos/image" alt="REPOS">
+    </div>
+
+    <!-- Saved Configs -->
+    <div class="repos-section">
+        <div class="repos-section-title">Saved Configurations</div>
+        <div class="config-cards" id="repos-configs"></div>
+    </div>
+
+    <!-- Base Config -->
+    <div class="repos-section">
+        <div class="repos-section-title">Stack Configuration</div>
+        <div class="repos-form" id="repos-base-form">
+            <div class="repos-field">
+                <label for="r-stack">Stack Name</label>
+                <input type="text" id="r-stack" placeholder="my-stack">
+            </div>
+            <div class="repos-field">
+                <label for="r-container">Container Name</label>
+                <input type="text" id="r-container" placeholder="citadel-my-stack">
+            </div>
+            <div class="repos-field">
+                <label for="r-hostname">Hostname</label>
+                <input type="text" id="r-hostname" placeholder="my-stack">
+            </div>
+            <div class="repos-field">
+                <label for="r-image">Image Tag</label>
+                <input type="text" id="r-image" placeholder="localhost/my-stack:latest">
+            </div>
+            <div class="repos-field">
+                <label for="r-network">Network</label>
+                <select id="r-network">
+                    <option value="host">host</option>
+                    <option value="bridge">bridge</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Module Selection -->
+    <div class="repos-section">
+        <div class="repos-section-title">Modules</div>
+        <div id="repos-modules"></div>
+    </div>
+
+    <!-- Environment Variables -->
+    <div class="repos-section" id="repos-env-section" style="display:none">
+        <div class="repos-section-title">Environment Variables</div>
+        <div class="env-grid" id="repos-env-grid"></div>
+    </div>
+
+    <!-- Build Controls -->
+    <div class="repos-section">
+        <div class="repos-section-title">Build</div>
+        <div class="build-controls">
+            <button class="build-btn primary" id="repos-generate-btn" onclick="reposBuild('generate')">Generate</button>
+            <button class="build-btn secondary" id="repos-build-btn" onclick="reposBuild('build')">Build Image</button>
+            <button class="build-btn secondary" id="repos-base-btn" onclick="reposBuild('base')">Build Base Image</button>
+            <button class="build-btn danger" id="repos-cancel-btn" onclick="reposCancelBuild()" style="display:none">Cancel</button>
+            <span class="build-status-badge idle" id="repos-build-badge">idle</span>
+            <span class="base-image-badge missing" id="repos-base-badge">base: unknown</span>
+        </div>
+        <div class="build-terminal" id="repos-terminal"></div>
+    </div>
+
+    <!-- Generated Stacks -->
+    <div class="repos-section">
+        <div class="repos-section-title">Generated Stacks</div>
+        <div class="generated-list" id="repos-generated"></div>
+    </div>
+
+</main>
+</div><!-- /tab-repos -->
+{% endif %}
+
+<script>
+const modeSel = document.getElementById('route-mode-sel');
+const saveDefaultBtn = document.getElementById('save-default-btn');
+const modeDefaultHint = document.getElementById('mode-default-hint');
+const refreshSel = document.getElementById('refresh-sel');
+const tiles = Array.from(document.querySelectorAll('.tile'));
+const defaultMode = document.body.dataset.defaultMode || 'localhost';
+const defaultRefresh = parseInt(document.body.dataset.defaultRefresh || '0', 10) || 0;
+const providerOrder = {{ provider_order_json|safe }};
+const routeDefaultKey = 'citadel-route-default';
+
+function getTileUrl(tile, mode) {
+  return tile.getAttribute(`data-url-${mode}`) || '';
+}
+
+function chooseTileUrl(tile, preferredMode) {
+  const preferred = getTileUrl(tile, preferredMode);
+  if (preferred) {
+    return { url: preferred, fallback: false };
+  }
+
+  for (const mode of providerOrder) {
+    const candidate = getTileUrl(tile, mode);
+    if (candidate) {
+      return { url: candidate, fallback: true };
+    }
+  }
+
+  return { url: '', fallback: false };
+}
+
+function compactUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.host + parsed.pathname;
+  } catch {
+    return url;
+  }
+}
+
+function applyMode(mode) {
+  tiles.forEach(tile => {
+    const desired = getTileUrl(tile, mode);
+    const choice = chooseTileUrl(tile, mode);
+
+    tile.dataset.activeUrl = choice.url;
+    tile.classList.toggle('no-link', !choice.url);
+    tile.classList.toggle('mode-fallback', Boolean(choice.url && !desired));
+
+    const label = tile.querySelector('.tile-url');
+    if (!choice.url) {
+      label.textContent = 'no route available';
+    } else if (choice.fallback) {
+      label.textContent = 'fallback: ' + compactUrl(choice.url);
+    } else {
+      label.textContent = compactUrl(choice.url);
+    }
+  });
+}
+
+function renderModeDefaultHint(mode) {
+  if (!modeDefaultHint) {
+    return;
+  }
+  const option = modeSel ? modeSel.querySelector(`option[value="${mode}"]`) : null;
+  if (!option) {
+    modeDefaultHint.textContent = 'Saved default: -';
+    return;
+  }
+  modeDefaultHint.textContent = `Saved default: ${option.textContent}`;
+}
+
+function openTile(tile) {
+  const url = tile.dataset.activeUrl || '';
+  if (!url) {
+    return;
+  }
+  window.open(url, '_blank', 'noopener');
+}
+
+tiles.forEach(tile => {
+  tile.addEventListener('click', () => openTile(tile));
+  tile.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') {
+      ev.preventDefault();
+      openTile(tile);
+    }
+  });
+});
+
+if (modeSel && modeSel.options.length > 0) {
+  const storedMode = localStorage.getItem(routeDefaultKey);
+  const knownModes = Array.from(modeSel.options).map(o => o.value);
+  modeSel.value = knownModes.includes(storedMode) ? storedMode : defaultMode;
+  applyMode(modeSel.value);
+  renderModeDefaultHint(knownModes.includes(storedMode) ? storedMode : defaultMode);
+
+  modeSel.addEventListener('change', () => {
+    applyMode(modeSel.value);
+  });
+
+  if (saveDefaultBtn) {
+    saveDefaultBtn.addEventListener('click', () => {
+      localStorage.setItem(routeDefaultKey, modeSel.value);
+      renderModeDefaultHint(modeSel.value);
+    });
+  }
+} else {
+  applyMode(defaultMode);
+  renderModeDefaultHint('');
+}
+
+let refreshTimer = null;
+function applyRefresh(seconds) {
+  clearInterval(refreshTimer);
+  if (seconds > 0) {
+    refreshTimer = setInterval(() => location.reload(), seconds * 1000);
+  }
+}
+
+const storedRefresh = localStorage.getItem('citadel-refresh');
+refreshSel.value = storedRefresh !== null ? storedRefresh : String(defaultRefresh);
+if (!Array.from(refreshSel.options).some(o => o.value === refreshSel.value)) {
+  refreshSel.value = '0';
+}
+applyRefresh(parseInt(refreshSel.value, 10));
+
+refreshSel.addEventListener('change', () => {
+  localStorage.setItem('citadel-refresh', refreshSel.value);
+  applyRefresh(parseInt(refreshSel.value, 10));
+});
+
+// ── Tab switching ───────────────────────────────────────────────────
+
+function switchMainTab(tabId, btn) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  const target = document.getElementById('tab-' + tabId);
+  if (target) target.classList.add('active');
+  if (btn) btn.classList.add('active');
+  if (tabId === 'repos' && !reposLoaded) loadReposData();
+}
+
+// ── REPOS logic ─────────────────────────────────────────────────────
+
+let reposLoaded = false;
+let reposModules = [];
+let reposSelectedExplicit = new Set();
+let reposSelectedAuto = new Set();
+let reposEventSource = null;
+let activeConfigName = null;
+let terminalUserScrolled = false;
+
+async function loadReposData() {
+  reposLoaded = true;
+  try {
+    const [statusRes, modulesRes] = await Promise.all([
+      fetch('/api/repos/status'),
+      fetch('/api/repos/modules'),
+    ]);
+    if (!statusRes.ok || !modulesRes.ok) {
+      throw new Error('Server returned ' + statusRes.status + '/' + modulesRes.status);
+    }
+    const status = await statusRes.json();
+    reposModules = await modulesRes.json();
+
+    if (!status.available) return;
+
+    renderConfigs(status.configs || []);
+    renderModules();
+    renderGenerated(status.generated || []);
+    updateBuildBadge(status.build || {});
+    updateBaseBadge(status.base_image || {});
+  } catch (e) {
+    console.error('Failed to load REPOS data:', e);
+    const terminal = document.getElementById('repos-terminal');
+    if (terminal) terminal.textContent = 'Error loading REPOS data: ' + e.message;
+    reposLoaded = false; // allow retry on next tab switch
+  }
+}
+
+// ── Configs ─────────────────────────────────────────────────────────
+
+function renderConfigs(configs) {
+  const container = document.getElementById('repos-configs');
+  if (!container) return;
+  if (!configs.length) {
+    container.innerHTML = '<div style="color:var(--muted);font-size:0.82rem">No saved configurations yet.</div>';
+    return;
+  }
+  // Use data attributes instead of inline onclick with unescaped strings
+  container.innerHTML = configs.map(c => {
+    const safeName = esc(c.name);
+    return `
+    <div class="config-card${activeConfigName === c.name ? ' active' : ''}" data-config-name="${safeName}">
+      <button class="config-card-delete" data-delete-name="${safeName}" title="Delete">&times;</button>
+      <div class="config-card-name">${esc(c.stack || c.name)}</div>
+      <div class="config-card-meta">
+        ${c.network ? 'net: ' + esc(c.network) : ''}
+        ${c.selected_modules ? '<br>' + c.selected_modules.length + ' modules' : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  // Attach events via delegation
+  container.querySelectorAll('.config-card').forEach(card => {
+    card.addEventListener('click', function(e) {
+      if (e.target.closest('.config-card-delete')) return;
+      loadReposConfig(this.dataset.configName);
+    });
+  });
+  container.querySelectorAll('.config-card-delete').forEach(btn => {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      deleteReposConfig(this.dataset.deleteName);
+    });
+  });
+}
+
+async function loadReposConfig(name) {
+  try {
+    const res = await fetch('/api/repos/config/' + encodeURIComponent(name));
+    if (!res.ok) {
+      console.error('Config load failed:', res.status);
+      return;
+    }
+    const cfg = await res.json();
+    if (cfg.error) return;
+
+    activeConfigName = name;
+    const meta = cfg.meta || {};
+    setVal('r-stack', meta.stack || name);
+    setVal('r-container', meta.container_name || '');
+    setVal('r-hostname', meta.hostname || '');
+    setVal('r-image', meta.image_tag || '');
+    setVal('r-network', meta.network || 'host');
+
+    // Set modules
+    reposSelectedExplicit = new Set(cfg.selected_modules || []);
+    reposSelectedAuto = new Set(cfg.forced_modules || []);
+    renderModules();
+
+    // Set env values after re-render
+    const envValues = cfg.env || {};
+    document.querySelectorAll('#repos-env-grid .env-field input').forEach(inp => {
+      const key = inp.dataset.envKey;
+      if (key && key in envValues) inp.value = envValues[key];
+    });
+
+    // Re-render configs to show active state
+    const statusRes = await fetch('/api/repos/status');
+    if (statusRes.ok) {
+      const status = await statusRes.json();
+      renderConfigs(status.configs || []);
+    }
+  } catch (e) {
+    console.error('Failed to load config:', e);
+  }
+}
+
+async function deleteReposConfig(name) {
+  if (!confirm('Delete configuration "' + name + '"?')) return;
+  try {
+    await fetch('/api/repos/config/' + encodeURIComponent(name), { method: 'DELETE' });
+    if (activeConfigName === name) activeConfigName = null;
+    const statusRes = await fetch('/api/repos/status');
+    if (statusRes.ok) {
+      const status = await statusRes.json();
+      renderConfigs(status.configs || []);
+    }
+  } catch (e) {
+    console.error('Failed to delete config:', e);
+  }
+}
+
+// ── Modules ─────────────────────────────────────────────────────────
+
+const GROUP_ORDER = ['PUBLIC', 'PRIVATE', '3RDPARTY', '3RDPARTY_DEPENDENCIES'];
+const GROUP_LABELS = {
+  'PUBLIC': 'Public',
+  'PRIVATE': 'Private',
+  '3RDPARTY': '3rd Party',
+  '3RDPARTY_DEPENDENCIES': 'Dependencies (auto)',
+};
+
+function renderModules() {
+  const container = document.getElementById('repos-modules');
+  if (!container) return;
+
+  const allSelected = new Set([...reposSelectedExplicit, ...reposSelectedAuto]);
+  const byGroup = {};
+  for (const m of reposModules) {
+    if (!m || !m.name) continue; // skip error entries
+    if (!byGroup[m.group]) byGroup[m.group] = [];
+    byGroup[m.group].push(m);
+  }
+
+  let html = '';
+  for (const group of GROUP_ORDER) {
+    const items = byGroup[group];
+    if (!items || !items.length) continue;
+
+    html += `<div class="module-group-title">${GROUP_LABELS[group] || esc(group)}</div>`;
+    html += '<div class="module-grid">';
+    for (const m of items) {
+      const isAuto = reposSelectedAuto.has(m.name);
+      const isChecked = allSelected.has(m.name);
+      const isDep = group === '3RDPARTY_DEPENDENCIES';
+      const cls = isChecked ? (isAuto ? 'module-item auto' : 'module-item checked') : 'module-item';
+
+      html += `
+        <div class="${cls}" data-module-name="${esc(m.name)}" data-is-dep="${isDep}">
+          <input type="checkbox" ${isChecked ? 'checked' : ''} ${isDep ? 'disabled' : ''} tabindex="-1">
+          <div class="module-info">
+            <span class="module-name">${esc(m.name)}</span>
+            ${isAuto ? '<span class="module-auto-badge">auto</span>' : ''}
+            ${m.description ? '<div class="module-desc">' + esc(m.description) + '</div>' : ''}
+          </div>
+        </div>`;
+    }
+    html += '</div>';
+  }
+
+  container.innerHTML = html;
+
+  // Event delegation for module toggle
+  container.querySelectorAll('.module-item').forEach(item => {
+    item.addEventListener('click', function() {
+      const name = this.dataset.moduleName;
+      const isDep = this.dataset.isDep === 'true';
+      if (!isDep) toggleReposModule(name);
+    });
+  });
+
+  updateEnvFields();
+}
+
+async function toggleReposModule(name) {
+  if (reposSelectedExplicit.has(name)) {
+    reposSelectedExplicit.delete(name);
+  } else {
+    reposSelectedExplicit.add(name);
+  }
+
+  // Resolve deps server-side
+  try {
+    const res = await fetch('/api/repos/resolve-deps', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selected: [...reposSelectedExplicit] }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      reposSelectedAuto = new Set(data.auto || []);
+    }
+  } catch (e) {
+    console.error('Dep resolution failed:', e);
+  }
+
+  renderModules();
+}
+
+// ── Env Fields ──────────────────────────────────────────────────────
+
+function updateEnvFields() {
+  const section = document.getElementById('repos-env-section');
+  const grid = document.getElementById('repos-env-grid');
+  if (!section || !grid) return;
+
+  const allSelected = new Set([...reposSelectedExplicit, ...reposSelectedAuto]);
+  const network = getVal('r-network');
+
+  const seen = new Set();
+  const prompts = [];
+
+  for (const m of reposModules) {
+    if (!m || !m.name || !allSelected.has(m.name)) continue;
+    for (const ep of (m.env_prompts || [])) {
+      if (!ep || !ep.key || seen.has(ep.key)) continue;
+      if (ep.when_selected && ep.when_selected.length) {
+        if (!ep.when_selected.some(s => allSelected.has(s))) continue;
+      }
+      if (ep.when_network && ep.when_network !== 'any' && ep.when_network !== network) continue;
+      seen.add(ep.key);
+      prompts.push(ep);
+    }
+  }
+
+  // Add port prompts
+  for (const m of reposModules) {
+    if (!m || !m.name || !allSelected.has(m.name)) continue;
+    for (const pp of (m.port_prompts || [])) {
+      if (!pp || !pp.env_key || seen.has(pp.env_key)) continue;
+      seen.add(pp.env_key);
+      prompts.push({
+        key: pp.env_key,
+        default: String(pp.default || ''),
+        description: pp.env_key,
+        required: false,
+      });
+    }
+  }
+
+  if (!prompts.length) {
+    section.style.display = 'none';
+    return;
+  }
+
+  section.style.display = '';
+  // Preserve existing values
+  const existing = {};
+  grid.querySelectorAll('input[data-env-key]').forEach(inp => {
+    if (inp.value) existing[inp.dataset.envKey] = inp.value;
+  });
+
+  grid.innerHTML = prompts.map(ep => `
+    <div class="env-field">
+      <label>${esc(ep.key)}</label>
+      <input type="text" data-env-key="${esc(ep.key)}"
+             value="${esc(existing[ep.key] || ep.default || '')}"
+             placeholder="${esc(ep.default || '')}">
+      ${ep.description && ep.description !== ep.key ? '<small>' + esc(ep.description) + '</small>' : ''}
+    </div>
+  `).join('');
+}
+
+// ── Build ───────────────────────────────────────────────────────────
+
+function collectBuildConfig() {
+  const allSelected = [...reposSelectedExplicit, ...reposSelectedAuto];
+  const env = {};
+  document.querySelectorAll('#repos-env-grid input[data-env-key]').forEach(inp => {
+    if (inp.value) env[inp.dataset.envKey] = inp.value;
+  });
+
+  return {
+    meta: {
+      stack: getVal('r-stack') || 'web-stack',
+      container_name: getVal('r-container') || '',
+      hostname: getVal('r-hostname') || '',
+      image_tag: getVal('r-image') || '',
+      network: getVal('r-network') || 'host',
+    },
+    selected_modules: allSelected,
+    env: env,
+    publish_ports: [],
+    persistence_paths: [],
+  };
+}
+
+async function reposBuild(mode) {
+  const terminal = document.getElementById('repos-terminal');
+
+  // Guard: no modules selected for non-base builds
+  if (mode !== 'base') {
+    const allSelected = new Set([...reposSelectedExplicit, ...reposSelectedAuto]);
+    if (allSelected.size === 0) {
+      if (terminal) terminal.textContent = 'Error: No modules selected. Please select at least one module.';
+      return;
+    }
+  }
+
+  if (terminal) {
+    terminal.textContent = '';
+    terminalUserScrolled = false;
+  }
+
+  const config = mode === 'base' ? {} : collectBuildConfig();
+  config._mode = mode;
+
+  try {
+    const res = await fetch('/api/repos/build/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+    if (!res.ok && res.status !== 409) {
+      if (terminal) terminal.textContent = 'Error: Server returned ' + res.status;
+      return;
+    }
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      if (terminal) terminal.textContent = 'Error: Invalid server response';
+      return;
+    }
+    if (data.error) {
+      if (terminal) terminal.textContent = 'Error: ' + data.error;
+      return;
+    }
+    setBuildRunning(true);
+    streamBuildLog();
+  } catch (e) {
+    if (terminal) terminal.textContent = 'Error: ' + (e.message || 'Network error');
+  }
+}
+
+function streamBuildLog() {
+  // Close any existing stream first
+  if (reposEventSource) {
+    reposEventSource.close();
+    reposEventSource = null;
+  }
+
+  const terminal = document.getElementById('repos-terminal');
+  if (!terminal) return;
+
+  // Track user scroll: auto-scroll only if user hasn't scrolled up
+  terminalUserScrolled = false;
+  terminal.addEventListener('scroll', function onScroll() {
+    const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 30;
+    terminalUserScrolled = !atBottom;
+  }, { passive: true });
+
+  reposEventSource = new EventSource('/api/repos/build/log');
+  let errorCount = 0;
+
+  reposEventSource.onmessage = function(ev) {
+    errorCount = 0; // reset on successful message
+    const line = ev.data;
+    const span = document.createElement('span');
+    if (line.startsWith('[ok]') || line.startsWith('[info]')) {
+      span.className = 'line-info';
+    } else if (line.startsWith('[warn]')) {
+      span.className = 'line-warn';
+    } else if (line.startsWith('[error]') || line.startsWith('Error') || line.startsWith('Traceback')) {
+      span.className = 'line-err';
+    } else if (line.startsWith('[hook]') || line.includes('generated:')) {
+      span.className = 'line-ok';
+    }
+    span.textContent = line + '\n';
+    terminal.appendChild(span);
+    if (!terminalUserScrolled) {
+      terminal.scrollTop = terminal.scrollHeight;
+    }
+  };
+
+  reposEventSource.addEventListener('done', function() {
+    reposEventSource.close();
+    reposEventSource = null;
+    setBuildRunning(false);
+    refreshReposStatus();
+  });
+
+  reposEventSource.onerror = function() {
+    errorCount++;
+    // EventSource auto-reconnects; only give up after repeated failures
+    if (errorCount > 3 || reposEventSource.readyState === EventSource.CLOSED) {
+      reposEventSource.close();
+      reposEventSource = null;
+      setBuildRunning(false);
+    }
+  };
+}
+
+async function reposCancelBuild() {
+  try {
+    await fetch('/api/repos/build/cancel', { method: 'POST' });
+  } catch (e) {
+    console.error('Cancel failed:', e);
+  }
+  if (reposEventSource) {
+    reposEventSource.close();
+    reposEventSource = null;
+  }
+  setBuildRunning(false);
+}
+
+function setBuildRunning(running) {
+  const badge = document.getElementById('repos-build-badge');
+  const cancelBtn = document.getElementById('repos-cancel-btn');
+  const genBtn = document.getElementById('repos-generate-btn');
+  const buildBtn = document.getElementById('repos-build-btn');
+  const baseBtn = document.getElementById('repos-base-btn');
+
+  if (badge) {
+    badge.textContent = running ? 'running' : 'idle';
+    badge.className = 'build-status-badge ' + (running ? 'running' : 'idle');
+  }
+  if (cancelBtn) cancelBtn.style.display = running ? '' : 'none';
+  if (genBtn) genBtn.disabled = running;
+  if (buildBtn) buildBtn.disabled = running;
+  if (baseBtn) baseBtn.disabled = running;
+}
+
+function updateBuildBadge(build) {
+  setBuildRunning(build.running || false);
+  if (build.running) streamBuildLog();
+}
+
+function updateBaseBadge(info) {
+  const badge = document.getElementById('repos-base-badge');
+  if (!badge) return;
+  if (info.exists) {
+    badge.textContent = 'base: ' + (info.engine || 'ready');
+    badge.className = 'base-image-badge exists';
+  } else {
+    badge.textContent = 'base: not built';
+    badge.className = 'base-image-badge missing';
+  }
+}
+
+// ── Generated Stacks ────────────────────────────────────────────────
+
+function renderGenerated(stacks) {
+  const container = document.getElementById('repos-generated');
+  if (!container) return;
+  if (!stacks.length) {
+    container.innerHTML = '<div style="color:var(--muted);font-size:0.82rem">No generated stacks yet.</div>';
+    return;
+  }
+  container.innerHTML = stacks.map(s => {
+    const dir = s._dir || s.stack || '?';
+    const files = s.files || [];
+    const fileButtons = files.map(f => {
+      const url = '/api/repos/generated/' + encodeURIComponent(dir) + '/' + encodeURIComponent(f);
+      const icon = f.endsWith('.Dockerfile') ? '\u{1F4E6}' : f.endsWith('.sh') ? '\u{1F4DC}' : f.endsWith('.env') ? '\u{1F511}' : f === 'fly.toml' ? '\u2708' : '\u{1F4C4}';
+      return `<a class="dl-btn" href="${url}" download="${esc(f)}" title="${esc(f)}">${icon} ${esc(f)}</a>`;
+    }).join('');
+    return `
+      <div class="generated-card">
+        <div class="generated-card-name">${esc(s.stack || dir)}</div>
+        <div class="generated-card-meta">
+          ${s.network ? 'net: ' + esc(s.network) : ''}
+          ${s.selected ? '<br>' + s.selected.length + ' modules' : ''}
+          ${s.image ? '<br>' + esc(s.image) : ''}
+        </div>
+        ${files.length ? '<div class="dl-list">' + fileButtons + '</div>' : ''}
+      </div>`;
+  }).join('');
+}
+
+async function refreshReposStatus() {
+  try {
+    const res = await fetch('/api/repos/status');
+    if (!res.ok) return;
+    const status = await res.json();
+    renderConfigs(status.configs || []);
+    renderGenerated(status.generated || []);
+    updateBaseBadge(status.base_image || {});
+  } catch (e) {}
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+function esc(s) {
+  if (s == null) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+function getVal(id) {
+  const el = document.getElementById(id);
+  return el ? el.value.trim() : '';
+}
+
+function setVal(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.value = val || '';
+}
+</script>
+</body>
+</html>

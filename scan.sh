@@ -5,6 +5,7 @@ set -euo pipefail
 umask 022
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SAF_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CACHE_DIR="$SCRIPT_DIR/cache"
 ICONS_DIR="$SCRIPT_DIR/icons"
 FUNCTIONS_DIR="$SCRIPT_DIR/functions"
@@ -14,12 +15,14 @@ ENABLED_EXT_DIR="$EXTENSIONS_DIR/enabled"
 CONFIG="$SCRIPT_DIR/config.ini"
 SS_FILE="$SCRIPT_DIR/ss.json"
 SERVICES_FILE="$SCRIPT_DIR/services.json"
+MODULES_FILE="$SCRIPT_DIR/modules.json"
 TAILSCALE_FILE="$SCRIPT_DIR/tailscale.json"
 PORT_FILTER_FILE="$SCRIPT_DIR/ports.filter.json"
 PROVIDERS_STATE_FILE="$EXTENSIONS_DIR/providers_state.json"
+CADDYFILES_DIR="$SCRIPT_DIR/CADDYFILES"
 TIMESTAMP_FILE="$SCRIPT_DIR/last_scan.txt"
 
-mkdir -p "$CACHE_DIR" "$ICONS_DIR" "$FUNCTIONS_DIR" "$PROVIDERS_DIR" "$ENABLED_EXT_DIR"
+mkdir -p "$CACHE_DIR" "$ICONS_DIR" "$FUNCTIONS_DIR" "$PROVIDERS_DIR" "$ENABLED_EXT_DIR" "$CADDYFILES_DIR"
 
 CA_CERT=""
 if [[ -f "$CONFIG" ]]; then
@@ -40,6 +43,55 @@ print((d.get('subnet_ip') or '').strip())
 
 LOCAL_SSL="-k"
 [[ -n "$CA_CERT" && -f "$CA_CERT" ]] && NET_SSL="--cacert $CA_CERT" || NET_SSL="-k"
+
+echo "=== Discovering modules (module.toml) ==="
+python3 -c "
+import json
+import sys
+import tomllib
+from pathlib import Path
+
+saf_dir = Path(sys.argv[1])
+out_file = sys.argv[2]
+self_dir = Path(sys.argv[3])
+
+modules = {}
+for candidate in sorted(saf_dir.iterdir()):
+    if candidate.resolve() == self_dir.resolve():
+        continue
+    toml_path = candidate / 'CONTAINER' / 'module.toml'
+    if not toml_path.exists():
+        continue
+    try:
+        with open(toml_path, 'rb') as f:
+            cfg = tomllib.load(f)
+    except Exception:
+        continue
+
+    mod = cfg.get('module', {})
+    name = mod.get('name', candidate.name.lower())
+    desc = mod.get('description', '')
+    ports = cfg.get('ports', [])
+
+    for p in ports:
+        port = p.get('internal') or p.get('default')
+        if port:
+            port = int(port)
+            modules[str(port)] = {
+                'name': name,
+                'description': desc,
+                'dir': candidate.name,
+                'port': port,
+            }
+
+with open(out_file, 'w') as fh:
+    json.dump(modules, fh, indent=2)
+
+print(f'Discovered {len(modules)} module port(s):')
+for port, info in sorted(modules.items(), key=lambda x: int(x[0])):
+    print(f'  :{port} -> {info[\"name\"]} ({info[\"description\"]})')
+" "$SAF_DIR" "$MODULES_FILE" "$SCRIPT_DIR"
+echo
 
 echo "=== Scanning ports (ss -tlnHp) ==="
 ss -tlnHp | python3 -c "
@@ -403,12 +455,18 @@ import json
 import os
 import sys
 
-ss_file, cache_dir, icons_dir, out_file = sys.argv[1:5]
+ss_file, cache_dir, icons_dir, out_file, modules_file = sys.argv[1:6]
 
 try:
     ss_raw = json.load(open(ss_file))
 except Exception:
     ss_raw = []
+
+# Load module.toml discovery data (port -> module info)
+try:
+    modules = json.load(open(modules_file))
+except Exception:
+    modules = {}
 
 http_services = []
 other_ports = []
@@ -433,6 +491,11 @@ for p in ss_raw:
         scheme = None
     title = c.get('title') or None
 
+    # Enrich from module.toml discovery
+    mod = modules.get(str(port), {})
+    mod_name = mod.get('name', '')
+    mod_desc = mod.get('description', '')
+
     icon = None
     icon_name = c.get('icon')
     if icon_name and os.path.exists(os.path.join(icons_dir, icon_name)):
@@ -445,13 +508,16 @@ for p in ss_raw:
                 break
 
     if scheme:
+        # Prefer HTML title, fall back to module name, then port number
+        display_name = title or mod_desc or (mod_name.upper() if mod_name else f'Port {port}')
         http_services.append({
             'port': port,
             'addr': p.get('addr'),
             'process': p.get('process'),
             'service': p.get('service'),
             'title': title,
-            'name': title or f'Port {port}',
+            'name': display_name,
+            'module': mod_name or None,
             'icon': icon,
             'scheme': scheme,
             'network_ip': c.get('network_ip'),
@@ -465,6 +531,7 @@ for p in ss_raw:
             'addr': p.get('addr'),
             'process': p.get('process'),
             'service': p.get('service'),
+            'module': mod_name or None,
         })
 
 payload = {
@@ -474,8 +541,52 @@ payload = {
 }
 with open(out_file, 'w') as fh:
     json.dump(payload, fh)
-" "$SS_FILE" "$CACHE_DIR" "$ICONS_DIR" "$SERVICES_FILE"
+" "$SS_FILE" "$CACHE_DIR" "$ICONS_DIR" "$SERVICES_FILE" "$MODULES_FILE"
 echo "services.json written"
+echo
+
+echo "=== Generating CADDYFILES ==="
+python3 -c "
+import json
+import sys
+from pathlib import Path
+
+services_file, caddyfiles_dir = sys.argv[1:3]
+
+try:
+    payload = json.load(open(services_file))
+except Exception:
+    payload = {}
+
+http_services = payload.get('http_services', [])
+cdir = Path(caddyfiles_dir)
+
+# Remove old generated snippets
+for old in cdir.glob('*.caddy'):
+    old.unlink()
+
+generated = 0
+for svc in http_services:
+    mod = svc.get('module')
+    if not mod:
+        continue
+    port = svc.get('port')
+    if not port:
+        continue
+
+    # Generate a caddy snippet that routes /{module}/* to the service port
+    snippet = (
+        f'handle_path /{mod}/* {{\n'
+        f'\treverse_proxy 127.0.0.1:{port}\n'
+        f'}}\n'
+    )
+    out_path = cdir / f'{mod}.caddy'
+    out_path.write_text(snippet)
+    generated += 1
+    print(f'  /{mod}/* -> 127.0.0.1:{port}')
+
+print(f'{generated} caddyfile snippet(s) written to {cdir}/')
+" "$SERVICES_FILE" "$CADDYFILES_DIR"
 echo
 
 echo "=== Applying Enabled Extensions ==="

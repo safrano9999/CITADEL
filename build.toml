@@ -1,8 +1,0 @@
-[build]
-engine = "podman"
-image = "localhost/citadel:latest"
-dockerfile = "Dockerfile"
-context = "."
-base_image = "quay.io/fedora/fedora:43"
-no_cache = false
-

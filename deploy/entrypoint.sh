@@ -72,11 +72,8 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
   2>/dev/null
 
-echo "=== Starting PHP-FPM ==="
-php-fpm --daemonize
-
-echo "=== Starting Flask hello_world ==="
-/opt/citadel/hello_world/venv/bin/python /opt/citadel/hello_world/app.py &
+echo "=== Starting CITADEL WebUI ==="
+python3 /opt/citadel/webui.py &
 
 echo "=== Starting Caddy on :443 ==="
 caddy start --config "${CADDY_CONFIG}"

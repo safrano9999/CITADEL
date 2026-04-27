@@ -1,0 +1,17 @@
+schema_version = 1
+
+[module]
+name = "citadel"
+kind = "repo"
+source = "https://github.com/safrano9999/CITADEL.git"
+target_dir = "citadel"
+description = "CITADEL reverse proxy + web stack"
+default_selected = true
+runtime_ref = "deploy/supervisor/citadel.conf"
+dependencies = ["caddy", "python3"]
+
+[[ports]]
+env_key = "CITADEL_PORT"
+default = 443
+publish = true
+description = "CITADEL HTTPS entry point"

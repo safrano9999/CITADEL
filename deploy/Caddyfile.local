@@ -8,11 +8,7 @@ https://:{$CITADEL_PORT:443} {
 	route {
 		import /opt/citadel/CADDYFILES/*.caddy
 
-		root * /opt/citadel
-		php_fastcgi 127.0.0.1:9000 {
-			header_up Accept-Encoding identity
-		}
-		file_server
+		reverse_proxy 127.0.0.1:800
 	}
 }
 

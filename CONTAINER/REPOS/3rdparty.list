@@ -1,5 +1,0 @@
-# name|kind|source|target_dir|env_ref|description|default
-openclaw|directive|../../3RDPARTY/openclaw/module.json|-|CONTAINER/ENV/thirdparty-openclaw.env|OpenClaw CLI directive|y
-hermes|directive|../../3RDPARTY/hermes/module.json|-|CONTAINER/ENV/thirdparty-hermes.env|Hermes agent directive|y
-codex-cli|directive|../../3RDPARTY/codex-cli/module.json|-|CONTAINER/ENV/thirdparty-codex-cli.env|Codex CLI directive|y
-claude-code|directive|../../3RDPARTY/claude-code/module.json|-|CONTAINER/ENV/thirdparty-claude-code.env|Claude Code directive|y

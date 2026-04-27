@@ -48,11 +48,7 @@ def _server_block(listen: str, tls_cert: str, tls_key: str,
         f"\troute {{\n"
         f"\t\timport {citadel_root}/CADDYFILES/*.caddy\n"
         f"\n"
-        f"\t\troot * {citadel_root}\n"
-        f"\t\tphp_fastcgi unix//run/php-fpm/www.sock {{\n"
-        f"\t\t\theader_up Accept-Encoding identity\n"
-        f"\t\t}}\n"
-        f"\t\tfile_server\n"
+        f"\t\treverse_proxy 127.0.0.1:800\n"
         f"\t}}\n"
         f"}}"
     )

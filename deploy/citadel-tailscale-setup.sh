@@ -67,11 +67,7 @@ ${TS_DOMAIN}:443 {
 	route {
 		import ${CITADEL_ROOT}/CADDYFILES/*.caddy
 
-		root * ${CITADEL_ROOT}
-		php_fastcgi unix//run/php-fpm/www.sock {
-			header_up Accept-Encoding identity
-		}
-		file_server
+		reverse_proxy 127.0.0.1:800
 	}
 }
 CADDYEOF
