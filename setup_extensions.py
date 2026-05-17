@@ -39,8 +39,13 @@ def move_ext(name: str, to_enabled: bool) -> None:
 
 # ── Caddyfile ─────────────────────────────────────────────────────────────
 
-def _server_block(listen: str, tls_cert: str, tls_key: str,
-                  citadel_root: str = "/opt/citadel") -> str:
+def _server_block(
+    listen: str,
+    tls_cert: str,
+    tls_key: str,
+    upstream_port: int = 800,
+    citadel_root: str = "/opt/citadel",
+) -> str:
     return (
         f"{listen} {{\n"
         f"\ttls {tls_cert} {tls_key}\n"
@@ -48,23 +53,24 @@ def _server_block(listen: str, tls_cert: str, tls_key: str,
         f"\troute {{\n"
         f"\t\timport {citadel_root}/CADDYFILES/*.caddy\n"
         f"\n"
-        f"\t\treverse_proxy 127.0.0.1:800\n"
+        f"\t\treverse_proxy 127.0.0.1:{upstream_port}\n"
         f"\t}}\n"
         f"}}"
     )
 
 
-def write_caddyfile(port: int, target: Path) -> None:
+def write_caddyfile(port: int, upstream_port: int, target: Path) -> None:
     content = "{\n\tauto_https off\n}\n\n"
     content += _server_block(
         f"https://:{port}",
         f"{CERT_DIR}/local.pem",
         f"{CERT_DIR}/local-key.pem",
+        upstream_port=upstream_port,
     )
     content += "\n"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content)
-    print(f"[setup] Caddyfile: port={port}")
+    print(f"[setup] Caddyfile: port={port}, upstream={upstream_port}")
 
 
 # ── Certs ─────────────────────────────────────────────────────────────────
@@ -90,6 +96,7 @@ def generate_local_cert() -> None:
 def do_generate() -> None:
     ts_enabled = get_bool("CITADEL_ENABLE_TAILSCALE")
     port = get_int("CITADEL_PORT", 1000)
+    upstream_port = get_int("CITADEL_WEBUI_PORT", 800)
     out_dir = Path(get("CITADEL_GENERATE_DIR", str(ROOT / "generated")))
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -99,7 +106,7 @@ def do_generate() -> None:
     move_ext("subnet", to_enabled=False)
 
     generate_local_cert()
-    write_caddyfile(port, out_dir / "Caddyfile")
+    write_caddyfile(port, upstream_port, out_dir / "Caddyfile")
     print("[setup] generate done")
 
 
@@ -108,6 +115,7 @@ def do_generate() -> None:
 def do_runtime() -> None:
     ts_enabled = get_bool("CITADEL_ENABLE_TAILSCALE")
     port = get_int("CITADEL_PORT", 1000)
+    upstream_port = get_int("CITADEL_WEBUI_PORT", 800)
 
     ENABLED.mkdir(parents=True, exist_ok=True)
     DISABLED.mkdir(parents=True, exist_ok=True)
@@ -118,9 +126,9 @@ def do_runtime() -> None:
 
     generate_local_cert()
 
-    # Write Caddyfile if not already present (from build)
-    if not CADDYFILE.exists():
-        write_caddyfile(port, CADDYFILE)
+    # Always refresh runtime Caddyfile in-container.
+    # This avoids stale build-time host paths leaking into runtime config.
+    write_caddyfile(port, upstream_port, CADDYFILE)
 
     # Start caddy (exec — replaces this process)
     print(f"[setup] starting caddy on :{port}")

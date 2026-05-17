@@ -61,7 +61,7 @@ def load_server_config() -> tuple[str, int]:
                 port = parsed
 
     host = os.environ.get("HOST") or os.environ.get("CITADEL_HOST") or host
-    env_port = os.environ.get("CITADEL_PORT")
+    env_port = os.environ.get("CITADEL_WEBUI_PORT")
     if env_port:
         port = int(env_port)
 
