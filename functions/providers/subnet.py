@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from common import ensure_provider_ini, ini_get, now_iso, read_json, write_json
 
 
@@ -27,18 +28,19 @@ def main() -> int:
     )
 
     label = ini_get(parser_ini, "label", str(ext_cfg.get("label") or "Subnet"))
-    subnet_ip = ini_get(parser_ini, "subnet_ip", "")
+    env_subnet_ip = os.environ.get("CITADEL_SUBNET_IP", "").strip()
+    subnet_ip = env_subnet_ip or ini_get(parser_ini, "subnet_ip", "")
 
     routes: dict[str, str] = {}
     errors: list[str] = []
 
-    if created_ini:
+    if created_ini and not env_subnet_ip:
         errors.append(f"created {ini_path}; please fill config.ini")
 
     http_services = services_payload.get("http_services", []) if isinstance(services_payload, dict) else []
 
     if not subnet_ip:
-        errors.append(f"Missing subnet_ip in {ini_path} (set subnet_ip = 192.168.x.x)")
+        errors.append(f"Missing CITADEL_SUBNET_IP or subnet_ip in {ini_path}")
 
     for svc in http_services:
         port = int(svc.get("port", 0))
