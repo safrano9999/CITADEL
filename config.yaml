@@ -1,0 +1,17 @@
+services:
+  citadel:
+    title: CITADEL FastAPI web UI
+    webui:
+      host: 0.0.0.0
+      port: 10999
+      publish_port: 10999
+      env_port: CITADEL_WEBUI_PORT
+    container:
+      capabilities:
+        - NET_ADMIN
+        - NET_RAW
+      devices:
+        - /dev/net/tun
+      volumes:
+        - source: tailscale
+          target: /var/lib/tailscale
