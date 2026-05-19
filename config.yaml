@@ -1,11 +1,20 @@
+# Injected process env wins over config.yaml and .env
+inject_overwrite: true
+
 services:
+  # CITADEL FastAPI web UI
   citadel:
     title: CITADEL FastAPI web UI
     webui:
-      host: 0.0.0.0
+      host: 127.0.0.1
       port: 10999
       publish_port: 10999
       env_port: CITADEL_WEBUI_PORT
+    # CITADEL non-secret runtime defaults
+    env:
+      CITADEL_SUBNET_IP:
+      TS_HOSTNAME:
+    # CITADEL container requirements for Tailscale
     container:
       capabilities:
         - NET_ADMIN

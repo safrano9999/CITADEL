@@ -17,7 +17,6 @@ ENABLED_EXT_DIR = EXTENSIONS_DIR / "enabled"
 DISABLED_EXT_DIR = EXTENSIONS_DIR / "disabled"
 PROVIDERS_STATE_FILE = EXTENSIONS_DIR / "providers_state.json"
 UI_CONFIG_FILE = EXTENSIONS_DIR / "ui.json"
-SERVER_CONFIG_FILE = BASE_DIR / "citadel.server.conf"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -40,30 +39,11 @@ def _read_json(path: Path, fallback: dict | list | None = None):
 
 
 def load_server_config() -> tuple[str, int]:
-    """Read host/port from .conf file, with env overrides."""
-    host = "0.0.0.0"
-    port = 800
-
-    if SERVER_CONFIG_FILE.exists():
-        for raw_line in SERVER_CONFIG_FILE.read_text().splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = [part.strip() for part in line.split("=", 1)]
-            if key.lower() == "host" and value:
-                host = value
-            elif key.lower() == "port" and value:
-                parsed = int(value)
-                if not (1 <= parsed <= 65535):
-                    raise ValueError(
-                        f"Port in {SERVER_CONFIG_FILE.name} must be 1-65535."
-                    )
-                port = parsed
-
-    host = os.environ.get("HOST") or os.environ.get("CITADEL_HOST") or host
-    env_port = os.environ.get("CITADEL_WEBUI_PORT")
-    if env_port:
-        port = int(env_port)
+    """Read host/port from the already loaded environment."""
+    host = os.environ.get("HOST") or os.environ.get("CITADEL_HOST") or "0.0.0.0"
+    port = int(os.environ.get("CITADEL_WEBUI_PORT", "800") or "800")
+    if not (1 <= port <= 65535):
+        raise ValueError("CITADEL_WEBUI_PORT must be 1-65535.")
 
     return host, port
 
