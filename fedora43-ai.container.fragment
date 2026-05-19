@@ -1,0 +1,5 @@
+AddCapability=NET_ADMIN
+AddCapability=NET_RAW
+AddDevice=/dev/net/tun
+PublishPort=10999:10999
+Volume=tailscale:/var/lib/tailscale
