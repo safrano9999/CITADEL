@@ -6,7 +6,7 @@ Usage - add this as first import in every entrypoint:
     from python_header import env, get, get_int, get_port
 
 How it works:
-  1. Loads config.conf defaults from the calling script's directory
+  1. Loads config.conf from the calling script's directory
   2. Loads auxiliary *.env files, then .env
   3. INJECT_OVERWRITE decides whether injected process env wins over file values
   4. If HOST was injected by the process, the web server binds 0.0.0.0
@@ -31,7 +31,7 @@ def _find_project_dir() -> Path:
         caller_file = frame_info.filename
         if caller_file and not caller_file.startswith("<"):
             directory = Path(caller_file).resolve().parent
-            if (directory / "config.conf").exists() or (directory / ".env").exists():
+            if (directory / "config.conf").exists() or (directory / "config.conf_example").exists() or (directory / ".env").exists():
                 return directory
     return Path.cwd()
 
@@ -71,7 +71,10 @@ def _read_env_files(env_dir: Path) -> dict[str, str]:
 
 
 _env_dir = _find_project_dir()
-_config_values = _read_env_file(_env_dir / "config.conf")
+_config_file = _env_dir / "config.conf"
+if not _config_file.exists():
+    _config_file = _env_dir / "config.conf_example"
+_config_values = _read_env_file(_config_file)
 _inject_overwrite = _as_bool(_config_values.pop("INJECT_OVERWRITE", "true"), True)
 _file_values = dict(_config_values)
 _file_values.update(_read_env_files(_env_dir))

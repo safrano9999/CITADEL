@@ -7,6 +7,7 @@ tailscale.json
 last_scan.txt
 ports.filter.json
 config.ini
+config.conf
 
 # Extensions runtime
 extensions/providers_state.json
