@@ -9,6 +9,8 @@ ports.filter.json
 config.ini
 config.conf
 config.sh
+docker-compose.yml
+*.container
 
 # Extensions runtime
 extensions/providers_state.json
