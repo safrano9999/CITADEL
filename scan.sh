@@ -379,6 +379,26 @@ with open(f, 'w') as fh:
     NET_LABEL=""
     [[ -n "$NETWORK_IP" ]] && NET_LABEL=" [+net ${NETWORK_IP}]"
 
+    if [[ "$HTTP_KIND" != "html" && -z "$NETWORK_IP" ]]; then
+        if [[ -f "$CACHE_FILE" ]]; then
+            python3 -c "
+import json
+import sys
+f = sys.argv[1]
+try:
+    d = json.load(open(f))
+except Exception:
+    d = {}
+d['scheme'] = None
+d['network_ip'] = None
+with open(f, 'w') as fh:
+    json.dump(d, fh)
+" "$CACHE_FILE"
+        fi
+        echo "→ local HTTP API only (other)"
+        continue
+    fi
+
     if [[ -f "$CACHE_FILE" ]]; then
         IFS=$'\t' read -r EXISTING_TITLE EXISTING_ICON < <(python3 -c "
 import json
