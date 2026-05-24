@@ -264,13 +264,6 @@ body_is_html() {
     return 1
 }
 
-http_responds() {
-    local url="$1" ssl="$2"
-    local status
-    status="$(curl -s $ssl --max-time 3 --location -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || echo "000")"
-    [[ "$status" =~ ^[1-5][0-9][0-9]$ && "$status" != "000" ]]
-}
-
 probe_http() {
     local host="$1" port="$2"
     local ssl
@@ -279,35 +272,9 @@ probe_http() {
         echo "https://${host}:${port}|html"
     elif body_is_html "http://${host}:${port}/" "$ssl"; then
         echo "http://${host}:${port}|html"
-    elif http_responds "https://${host}:${port}/" "$ssl"; then
-        echo "https://${host}:${port}|api"
-    elif http_responds "http://${host}:${port}/" "$ssl"; then
-        echo "http://${host}:${port}|api"
     else
         echo ""
     fi
-}
-
-port_label_from_env() {
-    local port="$1"
-    python3 - "$port" <<'PY'
-import os
-import re
-import sys
-
-port = sys.argv[1]
-matches = []
-for key, value in os.environ.items():
-    if not key.endswith("_PORT") or key.endswith("_PUBLISH_PORT"):
-        continue
-    if value != port:
-        continue
-    label = key[:-5].replace("_", " ").title()
-    label = re.sub(r"\bApi\b", "API", label)
-    label = re.sub(r"\bWebui\b", "WebUI", label)
-    matches.append(label)
-print(matches[0] if matches else "")
-PY
 }
 
 try_fetch_icon() {
@@ -367,7 +334,6 @@ with open(f, 'w') as fh:
     fi
 
     LOCAL_URL="${LOCAL_PROBE%%|*}"
-    HTTP_KIND="${LOCAL_PROBE##*|}"
     SCHEME="${LOCAL_URL%%://*}"
 
     NETWORK_IP=""
@@ -378,26 +344,6 @@ with open(f, 'w') as fh:
 
     NET_LABEL=""
     [[ -n "$NETWORK_IP" ]] && NET_LABEL=" [+net ${NETWORK_IP}]"
-
-    if [[ "$HTTP_KIND" != "html" && -z "$NETWORK_IP" ]]; then
-        if [[ -f "$CACHE_FILE" ]]; then
-            python3 -c "
-import json
-import sys
-f = sys.argv[1]
-try:
-    d = json.load(open(f))
-except Exception:
-    d = {}
-d['scheme'] = None
-d['network_ip'] = None
-with open(f, 'w') as fh:
-    json.dump(d, fh)
-" "$CACHE_FILE"
-        fi
-        echo "→ local HTTP API only (other)"
-        continue
-    fi
 
     if [[ -f "$CACHE_FILE" ]]; then
         IFS=$'\t' read -r EXISTING_TITLE EXISTING_ICON < <(python3 -c "
@@ -424,33 +370,13 @@ except Exception:
     d = {}
 d['scheme'] = sys.argv[2]
 d['network_ip'] = sys.argv[3] or None
-d['kind'] = sys.argv[4]
+d['kind'] = 'html'
 with open(f, 'w') as fh:
     json.dump(d, fh)
-" "$CACHE_FILE" "$SCHEME" "$NETWORK_IP" "$HTTP_KIND"
+" "$CACHE_FILE" "$SCHEME" "$NETWORK_IP"
             printf "%-8s cached: \"%s\"%s\n" "$SCHEME" "$EXISTING_TITLE" "$NET_LABEL"
             continue
         fi
-    fi
-
-    if [[ "$HTTP_KIND" != "html" ]]; then
-        TITLE="$(port_label_from_env "$PORT")"
-        [[ -z "$TITLE" ]] && TITLE="HTTP API"
-        python3 -c "
-import json
-import sys
-with open(sys.argv[6], 'w') as f:
-    json.dump({
-        'title': sys.argv[1],
-        'icon': None,
-        'scheme': sys.argv[2],
-        'network_ip': sys.argv[3] or None,
-        'kind': sys.argv[4],
-        'path': sys.argv[5],
-    }, f)
-" "$TITLE" "$SCHEME" "$NETWORK_IP" "$HTTP_KIND" "/" "$CACHE_FILE"
-        printf "%-8s api: \"%s\"%s\n" "$SCHEME" "$TITLE" "$NET_LABEL"
-        continue
     fi
 
     printf "%-8s fetching title+icons..." "$SCHEME"
