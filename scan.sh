@@ -537,6 +537,25 @@ import sys
 
 ss_file, cache_dir, icons_dir, out_file, modules_file = sys.argv[1:6]
 
+def int_or_none(value):
+    try:
+        port = int(str(value).strip())
+    except Exception:
+        return None
+    return port if port > 0 else None
+
+def publish_port_for(port):
+    for key, value in os.environ.items():
+        if not key.endswith('_PORT') or key.endswith('_PUBLISH_PORT'):
+            continue
+        if int_or_none(value) != port:
+            continue
+        publish_key = f'{key[:-5]}_PUBLISH_PORT'
+        publish_port = int_or_none(os.environ.get(publish_key))
+        if publish_port:
+            return publish_port
+    return port
+
 try:
     ss_raw = json.load(open(ss_file))
 except Exception:
@@ -588,10 +607,12 @@ for p in ss_raw:
                 break
 
     if scheme:
+        publish_port = publish_port_for(port)
         # Prefer HTML title, fall back to module name, then port number
         display_name = title or mod_desc or (mod_name.upper() if mod_name else f'Port {port}')
         http_services.append({
             'port': port,
+            'publish_port': publish_port if publish_port != port else None,
             'addr': p.get('addr'),
             'process': p.get('process'),
             'service': p.get('service'),
@@ -602,7 +623,7 @@ for p in ss_raw:
             'scheme': scheme,
             'network_ip': c.get('network_ip'),
             'urls': {
-                'localhost': f'{scheme}://127.0.0.1:{port}',
+                'localhost': f'{scheme}://127.0.0.1:{publish_port}',
             },
         })
     else:
