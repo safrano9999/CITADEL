@@ -1,7 +1,7 @@
 """
 Shared environment bootstrap for all REPOS programs.
 
-Usage - add this as first import in every entrypoint:
+Usage — add this as first import in every entrypoint:
 
     from python_header import env, get, get_int, get_port
 
@@ -104,7 +104,7 @@ def get_int(key: str, default: int = 0) -> int:
 
 
 def get_bool(key: str, default: bool = False) -> bool:
-    """Get env var as bool (1/true/yes/on -> True)."""
+    """Get env var as bool (1/true/yes/on → True)."""
     raw = os.environ.get(key, "").strip().lower()
     if not raw:
         return default
