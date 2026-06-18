@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import configparser
+import ipaddress
 import os
 import shutil
 from pathlib import Path
@@ -44,6 +45,26 @@ def build_direct_tailscale_url(domain: str, port: int, scheme: str) -> str:
     if scheme == "http" and port == 80:
         return f"http://{domain}"
     return f"{scheme}://{domain}:{port}"
+
+
+def clean_addr(addr: object) -> str:
+    value = str(addr or "").strip()
+    if value.startswith("[") and value.endswith("]"):
+        value = value[1:-1]
+    return value
+
+
+def tailscale_reachable(addr: object, tailscale_ips: set[str]) -> bool:
+    value = clean_addr(addr)
+    if value in {"", "*", "0.0.0.0", "::"}:
+        return True
+    if value in tailscale_ips:
+        return True
+    try:
+        ip = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return not ip.is_loopback and str(ip) in tailscale_ips
 
 
 def read_key_value(path: Path, key: str) -> str:
@@ -131,9 +152,16 @@ def main() -> int:
                 status_payload.get("Self", {}).get("DNSName", "").rstrip(".") or None
             )
             if domain:
+                tailscale_ips = {
+                    clean_addr(ip)
+                    for ip in status_payload.get("Self", {}).get("TailscaleIPs", [])
+                    if clean_addr(ip)
+                }
                 for svc in services_payload.get("http_services", []):
                     port = int(svc.get("port", 0))
                     if port <= 0:
+                        continue
+                    if not tailscale_reachable(svc.get("addr"), tailscale_ips):
                         continue
 
                     scheme = str(svc.get("scheme") or "http").strip().lower()

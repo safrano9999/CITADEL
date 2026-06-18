@@ -28,20 +28,7 @@ if [[ -f "$CONFIG" ]]; then
     CA_CERT="$(grep '^ca_cert' "$CONFIG" 2>/dev/null | cut -d= -f2 | xargs 2>/dev/null || true)"
 fi
 
-SUBNET_CFG="$ENABLED_EXT_DIR/subnet/config.json"
 HOST_IP="${CITADEL_SUBNET_IP:-}"
-if [[ -z "$HOST_IP" ]]; then
-    HOST_IP="$(python3 -c "
-import json
-import sys
-p = sys.argv[1]
-try:
-    d = json.load(open(p))
-except Exception:
-    d = {}
-print((d.get('subnet_ip') or '').strip())
-" "$SUBNET_CFG" 2>/dev/null || true)"
-fi
 
 LOCAL_SSL="-k"
 [[ -n "$CA_CERT" && -f "$CA_CERT" ]] && NET_SSL="--cacert $CA_CERT" || NET_SSL="-k"

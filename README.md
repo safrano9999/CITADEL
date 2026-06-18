@@ -72,7 +72,7 @@ Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled 
 ### Provider Config
 
 - `localhost` and `tailscale` work out of the box (no config required).
-- `subnet` reads `CITADEL_SUBNET_IP` from `config.conf`; provider-local `config.ini` remains a fallback.
+- `subnet` reads `CITADEL_SUBNET_IP` from `config.conf`.
 - `cloudflare` can be configured once enabled.
 
 ### Tailscale Provider
@@ -98,13 +98,6 @@ Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled 
 ```ini
 [CITADEL]
 ca_cert = /path/to/certs/cert.pem
-```
-
-### Subnet provider fallback
-
-```ini
-[provider]
-subnet_ip = 192.168.x.x
 ```
 
 ### UI defaults (`extensions/ui.json`)
