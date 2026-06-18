@@ -126,7 +126,6 @@ Template: `ports.filter.json.example`
 
 - Provider dropdown
 - Save default provider (browser storage)
-- Fallback route indicator
 - Optional auto-refresh
 
 ## Cron Example

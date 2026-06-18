@@ -105,8 +105,10 @@ def ensure_provider_ini(
     return parser, ini_path, created
 
 
-def ini_get(parser: configparser.ConfigParser, key: str, fallback: str = "", *, section: str = "provider") -> str:
+def ini_get(parser: configparser.ConfigParser, key: str, default: str = "", *, section: str = "provider") -> str:
     try:
-        return parser.get(section, key, fallback=fallback).strip()
+        if parser.has_section(section) and parser.has_option(section, key):
+            return parser.get(section, key).strip()
+        return default
     except Exception:
-        return fallback
+        return default

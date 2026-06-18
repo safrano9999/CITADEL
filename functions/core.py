@@ -22,17 +22,17 @@ UI_CONFIG_FILE = EXTENSIONS_DIR / "ui.json"
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 
-def _read_json(path: Path, fallback: dict | list | None = None):
-    """Read a JSON file, returning fallback on any error."""
-    if fallback is None:
-        fallback = {}
+def _read_json(path: Path, default: dict | list | None = None):
+    """Read a JSON file, returning the default on any error."""
+    if default is None:
+        default = {}
     if not path.is_file():
-        return fallback
+        return default
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, (dict, list)) else fallback
+        return data if isinstance(data, (dict, list)) else default
     except Exception:
-        return fallback
+        return default
 
 
 # ── Server Config ─────────────────────────────────────────────────────────
