@@ -19,10 +19,9 @@ MODULES_FILE="$SCRIPT_DIR/modules.json"
 TAILSCALE_FILE="$SCRIPT_DIR/tailscale.json"
 PORT_FILTER_FILE="$SCRIPT_DIR/ports.filter.json"
 PROVIDERS_STATE_FILE="$EXTENSIONS_DIR/providers_state.json"
-CADDYFILES_DIR="$SCRIPT_DIR/CADDYFILES"
 TIMESTAMP_FILE="$SCRIPT_DIR/last_scan.txt"
 
-mkdir -p "$CACHE_DIR" "$ICONS_DIR" "$FUNCTIONS_DIR" "$PROVIDERS_DIR" "$ENABLED_EXT_DIR" "$CADDYFILES_DIR"
+mkdir -p "$CACHE_DIR" "$ICONS_DIR" "$FUNCTIONS_DIR" "$PROVIDERS_DIR" "$ENABLED_EXT_DIR"
 
 CA_CERT=""
 if [[ -f "$CONFIG" ]]; then
@@ -570,50 +569,6 @@ with open(out_file, 'w') as fh:
     json.dump(payload, fh)
 " "$SS_FILE" "$CACHE_DIR" "$ICONS_DIR" "$SERVICES_FILE" "$MODULES_FILE"
 echo "services.json written"
-echo
-
-echo "=== Generating CADDYFILES ==="
-python3 -c "
-import json
-import sys
-from pathlib import Path
-
-services_file, caddyfiles_dir = sys.argv[1:3]
-
-try:
-    payload = json.load(open(services_file))
-except Exception:
-    payload = {}
-
-http_services = payload.get('http_services', [])
-cdir = Path(caddyfiles_dir)
-
-# Remove old generated snippets
-for old in cdir.glob('*.caddy'):
-    old.unlink()
-
-generated = 0
-for svc in http_services:
-    mod = svc.get('module')
-    if not mod:
-        continue
-    port = svc.get('port')
-    if not port:
-        continue
-
-    # Generate a caddy snippet that routes /{module}/* to the service port
-    snippet = (
-        f'handle_path /{mod}/* {{\n'
-        f'\treverse_proxy 127.0.0.1:{port}\n'
-        f'}}\n'
-    )
-    out_path = cdir / f'{mod}.caddy'
-    out_path.write_text(snippet)
-    generated += 1
-    print(f'  /{mod}/* -> 127.0.0.1:{port}')
-
-print(f'{generated} caddyfile snippet(s) written to {cdir}/')
-" "$SERVICES_FILE" "$CADDYFILES_DIR"
 echo
 
 echo "=== Applying Enabled Extensions ==="

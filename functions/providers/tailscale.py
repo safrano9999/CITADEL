@@ -5,6 +5,7 @@ import argparse
 import configparser
 import os
 import shutil
+from pathlib import Path
 
 from common import (
     now_iso,
@@ -45,6 +46,32 @@ def build_direct_tailscale_url(domain: str, port: int, scheme: str) -> str:
     return f"{scheme}://{domain}:{port}"
 
 
+def read_key_value(path: Path, key: str) -> str:
+    if not path.exists():
+        return ""
+    try:
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            name, value = line.split("=", 1)
+            if name.strip() == key:
+                return value.strip().strip('"').strip("'")
+    except Exception:
+        return ""
+    return ""
+
+
+def citadel_bool(provider_dir: str, key: str, default: str = "false") -> bool:
+    raw = os.environ.get(key, "").strip()
+    if not raw:
+        root = Path(provider_dir).resolve().parents[2]
+        raw = read_key_value(root / "config.conf", key)
+    if not raw:
+        raw = default
+    return parse_bool(raw)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--provider-dir", required=True)
@@ -75,30 +102,22 @@ def main() -> int:
     label = get_cfg("label", str(ext_cfg.get("label") or "Tailscale"))
     fetch_enabled = parse_bool(get_cfg("fetch", "true"))
     route_mode = get_cfg("route_mode", "direct_port").lower()
-    require_root = parse_bool(get_cfg("require_root", "true"))
     errors: list[str] = []
-    is_root = (os.geteuid() == 0) if hasattr(os, "geteuid") else False
+    enabled = citadel_bool(args.provider_dir, "CITADEL_TAILSCALE")
 
     running = False
-    if require_root and not is_root:
-        errors.append("skip: needs root (run scan.sh with sudo)")
-    elif shutil.which("tailscale"):
-        running = run(["tailscale", "status"]).returncode == 0
-
-    set_ini_value(args.config_ini, "tailscale", "true" if running else "false")
 
     clear_stale_tailscale(args.cache_dir, services_payload)
 
     routes: dict[str, str] = {}
     domain = None
 
-    if require_root and not is_root:
+    if not enabled:
         write_json(args.services_file, services_payload)
-    elif running and fetch_enabled:
+    elif fetch_enabled and shutil.which("tailscale"):
         status_json = run(["tailscale", "status", "--json"])
-        if status_json.returncode != 0:
-            errors.append("tailscale status --json failed")
-        else:
+        running = status_json.returncode == 0
+        if running:
             status_payload = read_json("/dev/null", {})
             try:
                 import json
@@ -108,10 +127,10 @@ def main() -> int:
                 status_payload = {}
 
             domains = status_payload.get("CertDomains") or []
-            domain = domains[0] if domains else None
-            if not domain:
-                errors.append("Could not determine tailscale domain")
-            else:
+            domain = (domains[0] if domains else None) or (
+                status_payload.get("Self", {}).get("DNSName", "").rstrip(".") or None
+            )
+            if domain:
                 for svc in services_payload.get("http_services", []):
                     port = int(svc.get("port", 0))
                     if port <= 0:
@@ -142,18 +161,18 @@ def main() -> int:
                     cache_payload["tailscale_path"] = None
                     write_json(cache_file, cache_payload)
 
+    set_ini_value(args.config_ini, "tailscale", "true" if running else "false")
     write_json(args.services_file, services_payload)
 
     payload = {
         "provider_id": "tailscale",
         "label": label,
-        "considered": True,
+        "considered": bool(routes),
         "available": bool(routes),
         "generated_at": now_iso(),
         "default_candidate": True,
+        "enabled": enabled,
         "running": running,
-        "require_root": require_root,
-        "executed_as_root": is_root,
         "fetch_enabled": fetch_enabled,
         "route_mode": route_mode,
         "config_file": ini_cfg_path if os.path.exists(ini_cfg_path) else None,

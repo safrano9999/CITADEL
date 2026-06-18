@@ -1,0 +1,5 @@
+{
+  "label": "Tailscale",
+  "fetch": true,
+  "route_mode": "direct_port"
+}

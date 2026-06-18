@@ -11,11 +11,11 @@ CITADEL is built for the real-world homelab/dev workflow:
 - You run multiple services/containers, each on a different port.
 - You want one clean dashboard to discover and open them.
 - You want flexible routing targets (localhost, subnet, tailscale, caddy, cloudflare).
-- You want secure remote access via Tailscale out of the box.
+- You want Tailscale links when Tailscale is already running and logged in.
 
 ## How it works
 
-CITADEL scans all listening ports on the host, probes them for HTTP services, and automatically maps every discovered service to all enabled providers. With Tailscale enabled, that means every local service is instantly reachable from your entire tailnet — no manual config per service needed.
+CITADEL scans all listening ports on the host, probes them for HTTP services, and maps every discovered service to all enabled providers. With `CITADEL_TAILSCALE=true` and an already logged-in Tailscale daemon, it adds tailnet links. CITADEL does not start or authenticate Tailscale.
 
 Example: you start a new service on port 3000. Next scan, it shows up on the dashboard with working links for every provider:
 
@@ -27,99 +27,21 @@ Example: you start a new service on port 3000. Next scan, it shows up on the das
 
 Start a service, scan, done. Every port is mapped to every provider automatically.
 
-## Quick Start (Docker)
-
-CITADEL ships as a single container based on Fedora, bundling Tailscale, Caddy, PHP-FPM, and a Flask demo service. 📗
-
-### Requirements
-
-- Podman or Docker
-- A Tailscale account (auth key or interactive login)
-
-### Run with Docker Compose
+## Quick Start
 
 ```bash
-# Optional: set your Tailscale auth key
-export TS_AUTHKEY=tskey-auth-...
-
-# Build and start
-docker compose up -d
-
-# Check logs for Tailscale auth URL (if no auth key set)
-docker compose logs -f
+cp config.conf_example config.conf
+python3 webui.py
 ```
-
-### Run with Podman
-
-```bash
-python3 /home/openclaw/safrano9999/CITADEL/build.py
-podman run -d --name citadel \
-  --cap-add NET_ADMIN --cap-add NET_RAW \
-  --device /dev/net/tun \
-  -p 8443:443 \
-  -e TS_AUTHKEY=tskey-auth-... \
-  localhost/citadel:latest
-```
-
-Build defaults come from `build.toml` (including base image):
-
-```toml
-[build]
-base_image = "quay.io/fedora/fedora:43"
-```
-
-Rawhide example:
-
-```bash
-python3 /home/openclaw/safrano9999/CITADEL/build.py --base-image quay.io/fedora/fedora:rawhide
-```
-
-### Systemd Quadlet (Podman)
-
-Copy `deploy/citadel.container` to `~/.config/containers/systemd/`, then:
-
-```bash
-systemctl --user daemon-reload
-systemctl --user start citadel.service
-```
-
-Named volumes persist Tailscale state, Caddy config, and application data across restarts.
-
-### What happens on startup
-
-1. **Tailscale** starts and authenticates (generates a random hostname like `citadel-bold-falcon`)
-2. **TLS certs** are fetched: Tailscale cert for the tailnet domain, self-signed cert for local access
-3. **PHP-FPM** starts (serves the dashboard on port 443)
-4. **Flask hello_world** starts on port 5000 (demo service for scan detection)
-5. **Caddy** starts with two site blocks on :443 (SNI-based cert selection)
-6. **scan.sh** runs and discovers all listening services
-
-### Access
-
-- **Tailscale**: `https://citadel-<adj>-<noun>.<tailnet>.ts.net/` (valid TLS cert)
-- **Local**: `https://localhost:8443/` (self-signed cert, port configurable via `CITADEL_PORT`)
-
-### Container contents
-
-| Component | Purpose |
-|---|---|
-| Tailscale | Secure remote access, automatic TLS certs |
-| Caddy | Reverse proxy, serves dashboard on :443 |
-| PHP-FPM | Runs `index.php` (dashboard frontend) |
-| Flask | Demo service (`hello_world/app.py`) on port 5000 |
-| scan.sh | Port discovery and service probing |
 
 ### Environment variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `TS_HOSTNAME` | random (`citadel-<adj>-<noun>`) | Tailscale hostname |
-| `TS_AUTHKEY` | *(empty)* | Tailscale auth key (if empty, check logs for auth URL) |
-| `CITADEL_PORT` | `8443` | Local port mapping (docker-compose only) |
-
-### hello_world
-
-`hello_world/app.py` is a minimal Flask app that serves on port 5000 inside the container. It exists as a demo service so that `scan.sh` has something to discover and display on the dashboard. Replace it with your own services or remove it.
+| `HOST` | `127.0.0.1` | Web UI bind host |
+| `CITADEL_WEBUI_PORT` | `10999` | Web UI port |
+| `CITADEL_SUBNET_IP` | empty | IP used by the subnet provider |
+| `CITADEL_TAILSCALE` | `true` | Generate Tailscale links if `tailscale status` is logged in |
 
 ## Core Idea
 
@@ -152,10 +74,9 @@ Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled 
 
 ### Tailscale Provider
 
-- Checks runtime via `tailscale status`
+- Checks runtime via `tailscale status`; never starts Tailscale
 - Default mode: direct-port routing
 - Generates URLs like `https://<tailnet-domain>:<port>`
-- Requires root by default (`require_root = true`); non-root scan skips with warning.
 
 ### Caddy Provider
 
@@ -215,7 +136,7 @@ Template: `ports.filter.json.example`
 
 ## Frontend
 
-`index.php` reads `services.json`, provider state, and per-provider routes. Features:
+`webui.py` serves the FastAPI dashboard. It reads `services.json`, provider state, and per-provider routes. Features:
 
 - Provider dropdown
 - Save default provider (browser storage)
