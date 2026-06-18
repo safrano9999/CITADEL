@@ -179,11 +179,6 @@ body {
   box-shadow: var(--shadow);
 }
 
-.tile.mode-fallback {
-  border-style: dashed;
-  border-color: #cfd8e6;
-}
-
 .tile-icon {
   width: 46px;
   height: 46px;

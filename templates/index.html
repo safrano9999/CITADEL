@@ -223,19 +223,7 @@ function getTileUrl(tile, mode) {
 }
 
 function chooseTileUrl(tile, preferredMode) {
-  const preferred = getTileUrl(tile, preferredMode);
-  if (preferred) {
-    return { url: preferred, fallback: false };
-  }
-
-  for (const mode of providerOrder) {
-    const candidate = getTileUrl(tile, mode);
-    if (candidate) {
-      return { url: candidate, fallback: true };
-    }
-  }
-
-  return { url: '', fallback: false };
+  return getTileUrl(tile, preferredMode);
 }
 
 function compactUrl(url) {
@@ -252,17 +240,14 @@ function applyMode(mode) {
     const desired = getTileUrl(tile, mode);
     const choice = chooseTileUrl(tile, mode);
 
-    tile.dataset.activeUrl = choice.url;
-    tile.classList.toggle('no-link', !choice.url);
-    tile.classList.toggle('mode-fallback', Boolean(choice.url && !desired));
+    tile.dataset.activeUrl = choice;
+    tile.classList.toggle('no-link', !choice);
 
     const label = tile.querySelector('.tile-url');
-    if (!choice.url) {
+    if (!choice) {
       label.textContent = 'no route available';
-    } else if (choice.fallback) {
-      label.textContent = 'fallback: ' + compactUrl(choice.url);
     } else {
-      label.textContent = compactUrl(choice.url);
+      label.textContent = compactUrl(choice);
     }
   });
 }
