@@ -38,6 +38,23 @@ def parse_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def read_key_value(path: str, key: str) -> str:
+    if not os.path.exists(path):
+        return ""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                name, value = line.split("=", 1)
+                if name.strip() == key:
+                    return value.strip().strip('"').strip("'")
+    except Exception:
+        return ""
+    return ""
+
+
 def set_ini_value(path: str, key: str, value: str) -> None:
     new_line = f"{key} = {value}\n"
     if not os.path.exists(path):

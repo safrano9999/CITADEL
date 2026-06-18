@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import argparse
 import os
-from common import now_iso, read_json, write_json
+from pathlib import Path
+
+from common import now_iso, read_json, read_key_value, write_json
 
 
 def main() -> int:
@@ -20,6 +22,9 @@ def main() -> int:
     services_payload = read_json(args.services_file, {})
     label = str(ext_cfg.get("label") or "Subnet")
     subnet_ip = os.environ.get("CITADEL_SUBNET_IP", "").strip()
+    if not subnet_ip:
+        root = Path(args.provider_dir).resolve().parents[2]
+        subnet_ip = read_key_value(str(root / "config.conf"), "CITADEL_SUBNET_IP")
 
     routes: dict[str, str] = {}
     errors: list[str] = []
