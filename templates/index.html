@@ -245,7 +245,7 @@ function applyMode(mode) {
 
     const label = tile.querySelector('.tile-url');
     if (!choice) {
-      label.textContent = 'no route available';
+      label.textContent = '';
     } else {
       label.textContent = compactUrl(choice);
     }
