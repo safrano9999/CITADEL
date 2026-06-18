@@ -1,6 +1,3 @@
-# Injected process environment wins over config.conf and .env
-INJECT_OVERWRITE=true
-
 # Host bind address for direct run and published ports
 HOST=127.0.0.1
 
