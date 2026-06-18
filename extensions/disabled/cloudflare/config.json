@@ -2,6 +2,5 @@
   "label": "Cloudflare Tunnel Router",
   "enabled": false,
   "hostname": "",
-  "path_template": "/p/{port}",
   "notes": "Placeholder for future cloudflare integration"
 }

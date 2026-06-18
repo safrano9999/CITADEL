@@ -10,7 +10,7 @@ CITADEL is built for the real-world homelab/dev workflow:
 
 - You run multiple services/containers, each on a different port.
 - You want one clean dashboard to discover and open them.
-- You want flexible routing targets (localhost, subnet, tailscale, caddy, cloudflare).
+- You want flexible routing targets (localhost, subnet, tailscale, cloudflare).
 - You want Tailscale links when Tailscale is already running and logged in.
 
 ## How it works
@@ -65,7 +65,6 @@ Enabled by default:
 - `tailscale` — routes to `<tailnet-domain>:<port>`
 
 Disabled by default:
-- `caddy` — generates Caddy reverse proxy routes (`/p/<port>`)
 - `cloudflare` — placeholder for future integration
 
 Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled providers and aggregates state.
@@ -74,23 +73,13 @@ Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled 
 
 - `localhost` and `tailscale` work out of the box (no config required).
 - `subnet` reads `CITADEL_SUBNET_IP` from `config.conf`; provider-local `config.ini` remains a fallback.
-- `caddy` and `cloudflare` can be configured once enabled.
+- `cloudflare` can be configured once enabled.
 
 ### Tailscale Provider
 
 - Checks runtime via `tailscale status`; never starts Tailscale
 - Default mode: direct-port routing
 - Generates URLs like `https://<tailnet-domain>:<port>`
-
-### Caddy Provider
-
-Generates reverse proxy snippets for path-based routing. Output goes to `CADDYFILES/<provider_id>.caddy`, imported via wildcard:
-
-```caddy
-import /opt/citadel/CADDYFILES/*.caddy
-```
-
-When duplicating caddy extensions (`caddy`, `caddy_subnet`, etc.), the directory name is used as provider identity to avoid collisions.
 
 ## Scan Flow (`scan.sh`)
 

@@ -1,7 +1,0 @@
-{
-  "id": "caddy",
-  "label": "Caddy Path Router",
-  "enabled": false,
-  "provider": "caddy",
-  "version": 1
-}
