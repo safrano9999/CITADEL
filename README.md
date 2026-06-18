@@ -21,27 +21,31 @@ Example: you start a new service on port 3000. Next scan, it shows up on the das
 
 | Provider | Generated URL |
 |---|---|
-| localhost | `https://localhost:3000` |
-| subnet | `https://192.168.1.50:3000` |
-| tailscale | `https://citadel-bold-falcon.tailnet.ts.net:3000` |
+| localhost | `http://127.0.0.1:3000` |
+| subnet | `http://192.168.1.50:3000` |
+| tailscale | `http://citadel-bold-falcon.tailnet.ts.net:3000` |
 
-Start a service, scan, done. Every port is mapped to every provider automatically.
+Start a service, scan, done. Every discovered HTTP service is mapped to every enabled provider. CITADEL keeps the detected scheme (`http` or `https`) when it builds links.
 
 ## Quick Start
 
 ```bash
 cp config.conf_example config.conf
+python3 -m pip install -r requirements.txt
 python3 webui.py
 ```
 
-### Environment variables
+### Runtime Config
 
 | Variable | Default | Description |
 |---|---|---|
 | `HOST` | `127.0.0.1` | Web UI bind host |
 | `CITADEL_WEBUI_PORT` | `10999` | Web UI port |
+| `CITADEL_WEBUI_PUBLISH_PORT` | `10999` | Host publish port for container setups; not needed for baremetal |
 | `CITADEL_SUBNET_IP` | empty | IP used by the subnet provider |
 | `CITADEL_TAILSCALE` | `true` | Generate Tailscale links if `tailscale status` is logged in |
+
+These values live in `config.conf` for baremetal and container setup. CITADEL does not need an `.env` file because it has no secrets.
 
 ## Core Idea
 
@@ -57,7 +61,7 @@ python3 webui.py
 
 Enabled by default:
 - `localhost` — routes to `127.0.0.1:<port>`
-- `subnet` — routes to `<subnet_ip>:<port>` (needs `config.ini`)
+- `subnet` — routes to `CITADEL_SUBNET_IP:<port>`
 - `tailscale` — routes to `<tailnet-domain>:<port>`
 
 Disabled by default:
@@ -69,7 +73,7 @@ Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled 
 ### Provider Config
 
 - `localhost` and `tailscale` work out of the box (no config required).
-- `subnet` needs `extensions/enabled/subnet/config.ini` with `subnet_ip`.
+- `subnet` reads `CITADEL_SUBNET_IP` from `config.conf`; provider-local `config.ini` remains a fallback.
 - `caddy` and `cloudflare` can be configured once enabled.
 
 ### Tailscale Provider
@@ -107,7 +111,7 @@ When duplicating caddy extensions (`caddy`, `caddy_subnet`, etc.), the directory
 ca_cert = /path/to/certs/cert.pem
 ```
 
-### Subnet provider
+### Subnet provider fallback
 
 ```ini
 [provider]
