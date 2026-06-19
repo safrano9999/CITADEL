@@ -20,7 +20,6 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=$SCRIPT_DIR
-EnvironmentFile=-$SCRIPT_DIR/config.conf
 ExecStart=$PYTHON_BIN $SCRIPT_DIR/webui.py
 Restart=always
 RestartSec=5

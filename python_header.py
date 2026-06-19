@@ -93,7 +93,7 @@ def get(key: str, default: str = "") -> str:
 
 
 def get_int(key: str, default: int = 0) -> int:
-    """Get env var as int, returning default on bad input."""
+    """Get env var as int, fallback to default on bad input."""
     raw = os.environ.get(key, "").strip()
     if not raw:
         return default
