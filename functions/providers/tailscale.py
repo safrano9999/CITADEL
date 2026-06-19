@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import configparser
-import ipaddress
 import os
 import shutil
 from pathlib import Path
@@ -39,32 +38,13 @@ def clear_stale_tailscale(cache_dir: str, services_payload: dict) -> None:
         urls.pop("tailscale", None)
 
 
-def build_direct_tailscale_url(domain: str, port: int, scheme: str) -> str:
-    if scheme == "https" and port == 443:
-        return f"https://{domain}"
-    if scheme == "http" and port == 80:
-        return f"http://{domain}"
-    return f"{scheme}://{domain}:{port}"
+def build_tailscale_url(domain: str, port: int) -> str:
+    return f"https://{domain}:{port}"
 
 
-def clean_addr(addr: object) -> str:
-    value = str(addr or "").strip()
-    if value.startswith("[") and value.endswith("]"):
-        value = value[1:-1]
-    return value
-
-
-def tailscale_reachable(addr: object, tailscale_ips: set[str]) -> bool:
-    value = clean_addr(addr)
-    if value in {"", "*", "0.0.0.0", "::"}:
-        return True
-    if value in tailscale_ips:
-        return True
-    try:
-        ip = ipaddress.ip_address(value)
-    except ValueError:
-        return False
-    return not ip.is_loopback and str(ip) in tailscale_ips
+def serve_target(port: int, scheme: str) -> str:
+    protocol = "https+insecure" if scheme == "https" else "http"
+    return f"{protocol}://127.0.0.1:{port}"
 
 
 def read_key_value(path: Path, key: str) -> str:
@@ -119,6 +99,9 @@ def main() -> int:
         return default
 
     services_payload = read_json(args.services_file, {})
+    previous_payload = read_json(args.tailscale_file, {})
+    if not isinstance(previous_payload, dict):
+        previous_payload = {}
 
     label = get_cfg("label", str(ext_cfg.get("label") or "Tailscale"))
     fetch_enabled = parse_bool(get_cfg("fetch", "true"))
@@ -131,9 +114,26 @@ def main() -> int:
     clear_stale_tailscale(args.cache_dir, services_payload)
 
     routes: dict[str, str] = {}
+    serve_routes: dict[str, dict[str, object]] = {}
+    previous_ports = {
+        str(port)
+        for port in previous_payload.get("managed_ports", [])
+        if str(port).isdigit()
+    }
+    managed_ports = set(previous_ports)
+    desired_ports: set[str] = set()
     domain = None
 
     if not enabled:
+        if shutil.which("tailscale"):
+            for port in sorted(previous_ports, key=int):
+                removed = run(["tailscale", "serve", "--yes", f"--https={port}", "off"])
+                if removed.returncode == 0:
+                    managed_ports.discard(port)
+                else:
+                    errors.append(
+                        f"port {port}: {removed.stderr.strip() or 'tailscale serve removal failed'}"
+                    )
         write_json(args.services_file, services_payload)
     elif fetch_enabled and shutil.which("tailscale"):
         status_json = run(["tailscale", "status", "--json"])
@@ -147,22 +147,17 @@ def main() -> int:
             except Exception:
                 status_payload = {}
 
+            running = status_payload.get("BackendState") == "Running"
             domains = status_payload.get("CertDomains") or []
             domain = (domains[0] if domains else None) or (
                 status_payload.get("Self", {}).get("DNSName", "").rstrip(".") or None
             )
-            if domain:
-                tailscale_ips = {
-                    clean_addr(ip)
-                    for ip in status_payload.get("Self", {}).get("TailscaleIPs", [])
-                    if clean_addr(ip)
-                }
+            if running and domain:
                 for svc in services_payload.get("http_services", []):
                     port = int(svc.get("port", 0))
                     if port <= 0:
                         continue
-                    if not tailscale_reachable(svc.get("addr"), tailscale_ips):
-                        continue
+                    desired_ports.add(str(port))
 
                     scheme = str(svc.get("scheme") or "http").strip().lower()
                     if scheme not in {"http", "https"}:
@@ -172,8 +167,18 @@ def main() -> int:
                         errors.append(f"unsupported route_mode '{route_mode}' (expected direct_port)")
                         continue
 
-                    route_url = build_direct_tailscale_url(domain, port, scheme)
+                    target = serve_target(port, scheme)
+                    applied = run(
+                        ["tailscale", "serve", "--bg", "--yes", f"--https={port}", target]
+                    )
+                    if applied.returncode != 0:
+                        errors.append(f"port {port}: {applied.stderr.strip() or 'tailscale serve failed'}")
+                        continue
+
+                    route_url = build_tailscale_url(domain, port)
                     routes[str(port)] = route_url
+                    managed_ports.add(str(port))
+                    serve_routes[str(port)] = {"url": route_url, "target": target, "active": True}
 
                     urls = svc.get("urls")
                     if not isinstance(urls, dict):
@@ -188,6 +193,15 @@ def main() -> int:
                     cache_payload["tailscale_url"] = route_url
                     cache_payload["tailscale_path"] = None
                     write_json(cache_file, cache_payload)
+
+                for stale_port in sorted(previous_ports - desired_ports, key=int):
+                    removed = run(["tailscale", "serve", "--yes", f"--https={stale_port}", "off"])
+                    if removed.returncode == 0:
+                        managed_ports.discard(stale_port)
+                    else:
+                        errors.append(
+                            f"port {stale_port}: {removed.stderr.strip() or 'tailscale serve removal failed'}"
+                        )
 
     set_ini_value(args.config_ini, "tailscale", "true" if running else "false")
     write_json(args.services_file, services_payload)
@@ -206,6 +220,8 @@ def main() -> int:
         "config_file": ini_cfg_path if os.path.exists(ini_cfg_path) else None,
         "domain": domain,
         "services": routes,
+        "serve_routes": serve_routes,
+        "managed_ports": sorted(managed_ports, key=int),
         "errors": errors,
     }
 

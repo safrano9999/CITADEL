@@ -23,9 +23,9 @@ Example: you start a new service on port 3000. Next scan, it shows up on the das
 |---|---|
 | localhost | `http://127.0.0.1:3000` |
 | subnet | `http://192.168.1.50:3000` |
-| tailscale | `http://citadel-bold-falcon.tailnet.ts.net:3000` |
+| tailscale | `https://citadel-bold-falcon.tailnet.ts.net:3000` |
 
-Start a service, scan, done. Every discovered HTTP service is mapped to every enabled provider. CITADEL keeps the detected scheme (`http` or `https`) when it builds links.
+Start a service, scan, done. Every discovered HTTP service is mapped to every enabled provider. The Tailscale provider terminates HTTPS and proxies to the detected local HTTP/HTTPS service.
 
 ## Quick Start
 
@@ -43,7 +43,7 @@ python3 webui.py
 | `CITADEL_WEBUI_PORT` | `10999` | Web UI port |
 | `CITADEL_WEBUI_PUBLISH_PORT` | `10999` | Host publish port for container setups; not needed for baremetal |
 | `CITADEL_SUBNET_IP` | empty | IP used by the subnet provider |
-| `CITADEL_TAILSCALE` | `true` | Generate Tailscale links if `tailscale status` is logged in |
+| `CITADEL_TAILSCALE` | `true` | Reconcile native Tailscale Serve routes when Tailscale is logged in |
 
 These values live in `config.conf` for baremetal and container setup. CITADEL does not need an `.env` file because it has no secrets.
 
@@ -62,7 +62,7 @@ These values live in `config.conf` for baremetal and container setup. CITADEL do
 Enabled by default:
 - `localhost` — routes to `127.0.0.1:<port>`
 - `subnet` — routes to `CITADEL_SUBNET_IP:<port>`
-- `tailscale` — routes to `<tailnet-domain>:<port>`
+- `tailscale` — HTTPS routes to `<tailnet-domain>:<port>`
 
 Disabled by default:
 - `cloudflare` — placeholder for future integration
@@ -78,8 +78,10 @@ Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled 
 ### Tailscale Provider
 
 - Checks runtime via `tailscale status`; never starts Tailscale
-- Default mode: direct-port routing
+- Reconciles native, persistent Tailscale Serve routes after every scan
+- Stores URLs, backend targets, status, and managed ports in `tailscale.json`
 - Generates URLs like `https://<tailnet-domain>:<port>`
+- Requires a root scan or a Tailscale operator allowed to change Serve configuration
 
 ## Scan Flow (`scan.sh`)
 
@@ -88,7 +90,7 @@ Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled 
 3. Probe ports for HTTP/HTTPS + HTML detection
 4. Update per-port cache (`cache/<port>.json`)
 5. Build `services.json`
-6. Run provider dispatcher
+6. Run provider dispatcher and reconcile Tailscale Serve routes
 7. Write `last_scan.txt`
 
 ## Config Examples
