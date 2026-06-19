@@ -8,7 +8,7 @@ Self-hosted service dashboard for local/remote routes with a modular provider sy
 
 CITADEL is built for the real-world homelab/dev workflow:
 
-- You run multiple services/containers, each on a different port.
+- You run multiple services, each on a different port.
 - You want one clean dashboard to discover and open them.
 - You want flexible routing targets (localhost, subnet, tailscale, cloudflare).
 - You want Tailscale links when Tailscale is already running and logged in.
@@ -35,17 +35,24 @@ python3 -m pip install -r requirements.txt
 python3 webui.py
 ```
 
+### Baremetal Systemd
+
+```bash
+./set_daemon.sh
+```
+
+The script writes a local systemd unit, symlinks it into `~/.config/systemd/user/`, reloads user systemd, and enables `citadel.service`.
+
 ### Runtime Config
 
 | Variable | Default | Description |
 |---|---|---|
 | `HOST` | `127.0.0.1` | Web UI bind host |
 | `CITADEL_WEBUI_PORT` | `10999` | Web UI port |
-| `CITADEL_WEBUI_PUBLISH_PORT` | `10999` | Host publish port for container setups; not needed for baremetal |
 | `CITADEL_SUBNET_IP` | empty | IP used by the subnet provider |
 | `CITADEL_TAILSCALE` | `true` | Reconcile native Tailscale Serve routes when Tailscale is logged in |
 
-These values live in `config.conf` for baremetal and container setup. CITADEL does not need an `.env` file because it has no secrets.
+These values live in `config.conf`. CITADEL does not need an `.env` file because it has no secrets.
 
 ## Core Idea
 

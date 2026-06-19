@@ -8,9 +8,7 @@ last_scan.txt
 ports.filter.json
 config.ini
 config.conf
-config.sh
-docker-compose.yml
-*.container
+.systemd/
 
 # Extensions runtime
 extensions/providers_state.json
@@ -29,11 +27,6 @@ hello_world/venv/
 # Local personal files
 PERSONAL/
 
-# Modular container builder
-CONTAINER/REPOS/private.list
-CONTAINER/generated/
-
 # Build artifacts
-generated/
 certs/
 .claude/
