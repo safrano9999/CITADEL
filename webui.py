@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "functions"))
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
@@ -37,6 +37,28 @@ def index():
         data=data,
         provider_order_json=json.dumps(data["provider_order"]),
     )
+
+
+@app.put("/api/cloudflare/ports/{port}")
+async def update_cloudflare_port(port: int, request: Request):
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("Request body must be a JSON object.")
+        rule = core.save_cloudflare_rule(port, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "port": port, "rule": rule, "applies_on": "next_scan"}
+
+
+@app.put("/api/cloudflare/ports")
+async def update_all_cloudflare_ports(request: Request):
+    try:
+        payload = await request.json()
+        rules = core.save_all_cloudflare_rules(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "rules": rules, "applies_on": "next_scan"}
 
 
 if __name__ == "__main__":

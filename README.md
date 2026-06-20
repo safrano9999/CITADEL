@@ -10,12 +10,12 @@ CITADEL is built for the real-world homelab/dev workflow:
 
 - You run multiple services, each on a different port.
 - You want one clean dashboard to discover and open them.
-- You want flexible routing targets (localhost, subnet, tailscale, cloudflare).
+- You want flexible routing targets (localhost, subnet, Tailscale, Cloudflare).
 - You want Tailscale links when Tailscale is already running and logged in.
 
 ## How it works
 
-CITADEL scans all listening ports on the host, probes them for HTTP services, and maps every discovered service to all enabled providers. With `CITADEL_TAILSCALE=true` and an already logged-in Tailscale daemon, it adds tailnet links. CITADEL does not start or authenticate Tailscale.
+CITADEL scans listening ports, probes HTTP services, and maps every discovered service to the active providers. Tailscale and Cloudflare integration is reconciliation only: CITADEL never starts or authenticates either daemon.
 
 Example: you start a new service on port 3000. Next scan, it shows up on the dashboard with working links for every provider:
 
@@ -24,6 +24,7 @@ Example: you start a new service on port 3000. Next scan, it shows up on the das
 | localhost | `http://127.0.0.1:3000` |
 | subnet | `http://192.168.1.50:3000` |
 | tailscale | `https://citadel-bold-falcon.tailnet.ts.net:3000` |
+| cloudflare | `https://3000.services.example.net` |
 
 Start a service, scan, done. Every discovered HTTP service is mapped to every enabled provider. The Tailscale provider terminates HTTPS and proxies to the detected local HTTP/HTTPS service.
 
@@ -34,6 +35,8 @@ cp config.conf_example config.conf
 python3 -m pip install -r requirements.txt
 python3 webui.py
 ```
+
+Cloudflare secrets are optional. When Cloudflare is used, create `.env` from `env.example`; `.env` is ignored by Git.
 
 ### Baremetal Systemd
 
@@ -51,8 +54,15 @@ The script writes a local systemd unit, symlinks it into `~/.config/systemd/user
 | `CITADEL_WEBUI_PORT` | `10999` | Web UI port |
 | `CITADEL_SUBNET_IP` | empty | IP used by the subnet provider |
 | `CITADEL_TAILSCALE` | `true` | Reconcile native Tailscale Serve routes when Tailscale is logged in |
+| `CITADEL_CLOUDFLARE` | `false` | Reconcile Cloudflare resources when cloudflared is active |
+| `CITADEL_CLOUDFLARE_DOMAIN` | empty | Hostname suffix, including a subdomain such as `services.example.net` |
+| `CITADEL_CLOUDFLARE_ACCOUNT_ID` | empty | Cloudflare account ID |
+| `CITADEL_CLOUDFLARE_ZONE_ID` | empty | Cloudflare zone ID |
+| `CITADEL_CLOUDFLARE_TUNNEL_ID` | empty | Existing named Tunnel ID |
+| `CITADEL_CLOUDFLARE_ORIGIN_HOST` | `127.0.0.1` | Origin address as seen by cloudflared |
+| `CITADEL_CLOUDFLARE_SERVICE` | `cloudflared.service` | Existing service that must be active |
 
-These values live in `config.conf`. CITADEL does not need an `.env` file because it has no secrets.
+These non-secret values live in `config.conf`. `CLOUDFLARE_API_TOKEN` and the separately consumed `TUNNEL_TOKEN` live in `.env`.
 
 ## Core Idea
 
@@ -70,9 +80,7 @@ Enabled by default:
 - `localhost` — routes to `127.0.0.1:<port>`
 - `subnet` — routes to `CITADEL_SUBNET_IP:<port>`
 - `tailscale` — HTTPS routes to `<tailnet-domain>:<port>`
-
-Disabled by default:
-- `cloudflare` — placeholder for future integration
+- `cloudflare` — DNS, named Tunnel ingress, and optional Access policies; inactive until `CITADEL_CLOUDFLARE=true`
 
 Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled providers and aggregates state.
 
@@ -80,7 +88,7 @@ Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled 
 
 - `localhost` and `tailscale` work out of the box (no config required).
 - `subnet` reads `CITADEL_SUBNET_IP` from `config.conf`.
-- `cloudflare` can be configured once enabled.
+- `cloudflare` reads non-secrets from `config.conf` and its scoped API token from `.env`.
 
 ### Tailscale Provider
 
@@ -90,6 +98,20 @@ Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled 
 - Generates URLs like `https://<tailnet-domain>:<port>`
 - Requires a root scan or a Tailscale operator allowed to change Serve configuration
 
+### Cloudflare Provider
+
+Cloudflare reconciliation runs only when `CITADEL_CLOUDFLARE=true`, the configured `cloudflared.service` is active, the API token is valid, and the selected Tunnel has an active connector. CITADEL preserves unrelated DNS records, Access resources, and Tunnel ingress rules.
+
+Every discovered service receives `<port>.<CITADEL_CLOUDFLARE_DOMAIN>` by default. In the Cloudflare WebUI tab, select **EDIT** to assign either a short label or a complete hostname:
+
+- `citadel` becomes `citadel.services.example.net`.
+- `citadel.internal.example.net` is used directly, provided it belongs to the configured zone.
+- Empty remains the port-based hostname.
+
+Enable **Whitelist** to create a Cloudflare Access email allow policy. At least one email is required, and the Cloudflare One-time PIN identity provider must be enabled. Select **SAVE**, then run `./scan.sh`; the UI only writes policy to `ports.filter.json`, while the scan performs the deterministic API changes.
+
+The API token needs Tunnel Edit, Access Apps and Policies Edit, Access identity-provider read, and DNS Edit permissions scoped to the selected account and zone. `skills/citadel-cloudflare/SKILL.md` documents assisted ID discovery and diagnostics.
+
 ## Scan Flow (`scan.sh`)
 
 1. Build `ss.json` from `ss -tlnHp`
@@ -97,7 +119,7 @@ Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled 
 3. Probe ports for HTTP/HTTPS + HTML detection
 4. Update per-port cache (`cache/<port>.json`)
 5. Build `services.json`
-6. Run provider dispatcher and reconcile Tailscale Serve routes
+6. Run provider dispatcher and reconcile active Tailscale and Cloudflare routes
 7. Write `last_scan.txt`
 
 ## Config Examples
@@ -123,7 +145,14 @@ ca_cert = /path/to/certs/cert.pem
 ```json
 {
   "whitelist": [],
-  "blacklist": [4000, "5000-5010"]
+  "blacklist": [4000, "5000-5010"],
+  "cloudflare": {
+    "399": {
+      "subdomain": "citadel.internal.example.net",
+      "whitelist": true,
+      "emails": ["engineer@example.net"]
+    }
+  }
 }
 ```
 
@@ -135,6 +164,7 @@ Template: `ports.filter.json.example`
 
 - Provider dropdown
 - Save default provider (browser storage)
+- Cloudflare hostname and Access whitelist editor
 - Optional auto-refresh
 
 ## Cron Example

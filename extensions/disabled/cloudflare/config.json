@@ -1,6 +1,0 @@
-{
-  "label": "Cloudflare Tunnel Router",
-  "enabled": false,
-  "hostname": "",
-  "notes": "Placeholder for future cloudflare integration"
-}

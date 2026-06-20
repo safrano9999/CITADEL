@@ -113,7 +113,7 @@ created_default = False
 if not os.path.exists(filter_file):
     created_default = True
     with open(filter_file, 'w', encoding='utf-8') as fh:
-        json.dump({'whitelist': [], 'blacklist': []}, fh, indent=2)
+        json.dump({'whitelist': [], 'blacklist': [], 'cloudflare': {}}, fh, indent=2)
 
 try:
     policy = json.load(open(filter_file))

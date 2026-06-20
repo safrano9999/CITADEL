@@ -1,0 +1,4 @@
+interface:
+  display_name: "CITADEL Cloudflare"
+  short_description: "Configure deterministic CITADEL Cloudflare routing"
+  default_prompt: "Use $citadel-cloudflare to discover Cloudflare resources and configure CITADEL safely."

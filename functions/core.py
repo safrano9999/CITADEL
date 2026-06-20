@@ -7,6 +7,8 @@ import json
 import os
 from pathlib import Path
 
+from cloudflare_policy import cloudflare_rules, normalize_rule, write_cloudflare_rules
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SERVICES_FILE = BASE_DIR / "services.json"
@@ -17,6 +19,7 @@ ENABLED_EXT_DIR = EXTENSIONS_DIR / "enabled"
 DISABLED_EXT_DIR = EXTENSIONS_DIR / "disabled"
 PROVIDERS_STATE_FILE = EXTENSIONS_DIR / "providers_state.json"
 UI_CONFIG_FILE = EXTENSIONS_DIR / "ui.json"
+PORT_FILTER_FILE = BASE_DIR / "ports.filter.json"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -33,6 +36,14 @@ def _read_json(path: Path, default: dict | list | None = None):
         return data if isinstance(data, (dict, list)) else default
     except Exception:
         return default
+
+
+def _cloudflare_assignment(port: str, subdomain: str) -> str:
+    value = subdomain.strip().rstrip(".").lower()
+    domain = os.environ.get("CITADEL_CLOUDFLARE_DOMAIN", "").strip().rstrip(".").lower()
+    if "." in value or not domain:
+        return value or port
+    return f"{value or port}.{domain}"
 
 
 # ── Server Config ─────────────────────────────────────────────────────────
@@ -109,6 +120,8 @@ def _load_providers() -> dict:
             header_value = str(routes.get("subnet_ip") or "")
         elif pid == "tailscale":
             header_value = str(routes.get("domain") or "")
+        elif pid == "cloudflare":
+            header_value = str(routes.get("domain") or "")
 
         if is_considered and header_value:
             provider_header_meta.append({"label": label, "value": header_value})
@@ -163,6 +176,7 @@ def build_dashboard() -> dict:
     })
     http_tiles = services_payload.get("http_services") or []
     other_ports = services_payload.get("other_ports") or []
+    cloudflare = cloudflare_rules(PORT_FILTER_FILE)
 
     # UI config
     ui_cfg = _read_json(UI_CONFIG_FILE, {
@@ -190,6 +204,10 @@ def build_dashboard() -> dict:
     # Build tile URL maps for template
     for tile in http_tiles:
         port = str(int(tile.get("port", 0)))
+        tile["cloudflare_rule"] = cloudflare.get(
+            port,
+            {"subdomain": "", "whitelist": False, "emails": []},
+        )
         tile_urls: dict[str, str] = {}
         for pid in provider_order:
             url = (
@@ -213,3 +231,68 @@ def build_dashboard() -> dict:
         "default_refresh": default_refresh,
         "last_scan": last_scan,
     }
+
+
+def save_cloudflare_rule(port: int, payload: dict) -> dict:
+    if not (1 <= port <= 65535):
+        raise ValueError("Port must be between 1 and 65535.")
+
+    services = _read_json(SERVICES_FILE, {"http_services": []})
+    known_ports = {
+        int(item.get("port", 0))
+        for item in services.get("http_services", [])
+        if isinstance(item, dict) and str(item.get("port", "")).isdigit()
+    }
+    if port not in known_ports:
+        raise ValueError(f"Port {port} is not a discovered HTTP service.")
+
+    rule = normalize_rule(payload)
+    rules = cloudflare_rules(PORT_FILTER_FILE)
+    subdomain = rule["subdomain"]
+    assignment = _cloudflare_assignment(str(port), subdomain)
+    for other_port, other_rule in rules.items():
+        if other_port != str(port):
+            other_assignment = _cloudflare_assignment(
+                other_port,
+                str(other_rule.get("subdomain") or ""),
+            )
+            if other_assignment == assignment:
+                raise ValueError(f"Subdomain or hostname is already assigned to port {other_port}.")
+
+    if not subdomain and not rule["whitelist"]:
+        rules.pop(str(port), None)
+    else:
+        rules[str(port)] = rule
+    write_cloudflare_rules(PORT_FILTER_FILE, rules)
+    return rule
+
+
+def save_all_cloudflare_rules(payload: dict) -> dict[str, dict]:
+    if not isinstance(payload, dict):
+        raise ValueError("Rules must be a JSON object keyed by port.")
+
+    services = _read_json(SERVICES_FILE, {"http_services": []})
+    known_ports = {
+        str(int(item.get("port", 0)))
+        for item in services.get("http_services", [])
+        if isinstance(item, dict) and str(item.get("port", "")).isdigit()
+    }
+    rules: dict[str, dict] = {}
+    assigned: dict[str, str] = {}
+    for raw_port, raw_rule in payload.items():
+        port = str(int(str(raw_port))) if str(raw_port).isdigit() else ""
+        if port not in known_ports:
+            raise ValueError(f"Port {raw_port} is not a discovered HTTP service.")
+        rule = normalize_rule(raw_rule)
+        subdomain = rule["subdomain"]
+        assignment = _cloudflare_assignment(port, subdomain)
+        if assignment in assigned:
+            raise ValueError(
+                f"Subdomain or hostname is assigned to ports {assigned[assignment]} and {port}."
+            )
+        assigned[assignment] = port
+        if subdomain or rule["whitelist"]:
+            rules[port] = rule
+
+    write_cloudflare_rules(PORT_FILTER_FILE, rules)
+    return rules

@@ -8,6 +8,7 @@ last_scan.txt
 ports.filter.json
 config.ini
 config.conf
+.env
 .systemd/
 
 # Extensions runtime

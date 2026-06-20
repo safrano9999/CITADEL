@@ -1,0 +1,5 @@
+{
+  "label": "Cloudflare",
+  "enabled": true,
+  "notes": "Activation is controlled by CITADEL_CLOUDFLARE."
+}

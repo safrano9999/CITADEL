@@ -38,6 +38,8 @@
             <small id="mode-default-hint">Saved default: -</small>
         </label>
 
+        <button id="cloudflare-edit-btn" class="btn-default" type="button" hidden>EDIT</button>
+
         <label class="control" for="refresh-sel">
             <span>Refresh</span>
             <select id="refresh-sel">
@@ -73,6 +75,10 @@
         {% set port = svc.port|string %}
         {% set scheme = svc.scheme|default('http') %}
         <article class="tile" tabindex="0"
+            data-port="{{ port|e }}"
+            data-cloudflare-subdomain="{{ svc.cloudflare_rule.subdomain|default('')|e }}"
+            data-cloudflare-whitelist="{{ '1' if svc.cloudflare_rule.whitelist else '0' }}"
+            data-cloudflare-emails="{{ svc.cloudflare_rule.emails|tojson|e }}"
             {% for pid in data.provider_order %}
             data-url-{{ pid|e }}="{{ svc.provider_urls.get(pid, '')|e }}"
             {% endfor %}
@@ -86,6 +92,18 @@
             <span class="tile-name">{{ svc.name|default('Port ' ~ port)|e }}</span>
             <span class="tile-port">{{ '&#128274; ' if scheme == 'https' else '' }}:{{ port }}</span>
             <span class="tile-url">-</span>
+            <div class="cloudflare-editor" hidden>
+                <label>
+                    <span>Subdomain</span>
+                    <input class="cloudflare-subdomain" type="text" maxlength="253" placeholder="{{ port|e }}">
+                </label>
+                <label class="cloudflare-whitelist-row">
+                    <input class="cloudflare-whitelist" type="checkbox">
+                    <span>Whitelist</span>
+                </label>
+                <div class="cloudflare-emails"></div>
+                <button class="cloudflare-email-add" type="button" title="Add email">+</button>
+            </div>
         </article>
         {% endfor %}
     </section>
@@ -122,6 +140,7 @@
 <script>
 const modeSel = document.getElementById('route-mode-sel');
 const saveDefaultBtn = document.getElementById('save-default-btn');
+const cloudflareEditBtn = document.getElementById('cloudflare-edit-btn');
 const modeDefaultHint = document.getElementById('mode-default-hint');
 const refreshSel = document.getElementById('refresh-sel');
 const tiles = Array.from(document.querySelectorAll('.tile'));
@@ -129,6 +148,58 @@ const defaultMode = document.body.dataset.defaultMode || 'localhost';
 const defaultRefresh = parseInt(document.body.dataset.defaultRefresh || '0', 10) || 0;
 const providerOrder = {{ provider_order_json|safe }};
 const routeDefaultKey = 'citadel-route-default';
+let cloudflareEditing = false;
+
+function addEmailRow(container, value = '') {
+  const row = document.createElement('div');
+  row.className = 'cloudflare-email-row';
+  const input = document.createElement('input');
+  input.type = 'email';
+  input.className = 'cloudflare-email';
+  input.value = value;
+  input.placeholder = 'name@example.net';
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.title = 'Remove email';
+  remove.textContent = '−';
+  remove.addEventListener('click', event => {
+    event.stopPropagation();
+    row.remove();
+  });
+  row.append(input, remove);
+  container.appendChild(row);
+}
+
+function initializeCloudflareEditors() {
+  tiles.forEach(tile => {
+    const editor = tile.querySelector('.cloudflare-editor');
+    if (!editor) return;
+    const subdomain = editor.querySelector('.cloudflare-subdomain');
+    const whitelist = editor.querySelector('.cloudflare-whitelist');
+    const emails = editor.querySelector('.cloudflare-emails');
+    const add = editor.querySelector('.cloudflare-email-add');
+    subdomain.value = tile.dataset.cloudflareSubdomain || '';
+    whitelist.checked = tile.dataset.cloudflareWhitelist === '1';
+    let values = [];
+    try {
+      values = JSON.parse(tile.dataset.cloudflareEmails || '[]');
+    } catch {}
+    values.forEach(value => addEmailRow(emails, value));
+    const syncWhitelist = () => {
+      emails.hidden = !whitelist.checked;
+      add.hidden = !whitelist.checked;
+      if (whitelist.checked && !emails.children.length) addEmailRow(emails);
+    };
+    whitelist.addEventListener('change', syncWhitelist);
+    add.addEventListener('click', event => {
+      event.stopPropagation();
+      addEmailRow(emails);
+    });
+    editor.addEventListener('click', event => event.stopPropagation());
+    editor.addEventListener('keydown', event => event.stopPropagation());
+    syncWhitelist();
+  });
+}
 
 function getTileUrl(tile, mode) {
   return tile.getAttribute(`data-url-${mode}`) || '';
@@ -148,12 +219,18 @@ function compactUrl(url) {
 }
 
 function applyMode(mode) {
+  const cloudflareMode = mode === 'cloudflare';
+  if (cloudflareEditBtn) {
+    cloudflareEditBtn.hidden = !cloudflareMode;
+  }
   tiles.forEach(tile => {
-    const desired = getTileUrl(tile, mode);
     const choice = chooseTileUrl(tile, mode);
 
     tile.dataset.activeUrl = choice;
     tile.classList.toggle('no-link', !choice);
+    tile.classList.toggle('cloudflare-editing', cloudflareMode && cloudflareEditing);
+    const editor = tile.querySelector('.cloudflare-editor');
+    if (editor) editor.hidden = !(cloudflareMode && cloudflareEditing);
 
     const label = tile.querySelector('.tile-url');
     if (!choice) {
@@ -177,6 +254,9 @@ function renderModeDefaultHint(mode) {
 }
 
 function openTile(tile) {
+  if (cloudflareEditing) {
+    return;
+  }
   const url = tile.dataset.activeUrl || '';
   if (!url) {
     return;
@@ -193,6 +273,61 @@ tiles.forEach(tile => {
     }
   });
 });
+
+async function saveCloudflareRules() {
+  const rules = {};
+  for (const tile of tiles) {
+    const editor = tile.querySelector('.cloudflare-editor');
+    if (!editor) continue;
+    const whitelist = editor.querySelector('.cloudflare-whitelist').checked;
+    const emails = Array.from(editor.querySelectorAll('.cloudflare-email'))
+      .map(input => input.value.trim().toLowerCase())
+      .filter(Boolean);
+    if (whitelist && emails.length === 0) {
+      throw new Error(`Port ${tile.dataset.port}: whitelist requires at least one email.`);
+    }
+    rules[tile.dataset.port] = {
+      subdomain: editor.querySelector('.cloudflare-subdomain').value.trim().toLowerCase(),
+      whitelist,
+      emails,
+    };
+  }
+  const response = await fetch('/api/cloudflare/ports', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(rules),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.detail || 'Cloudflare settings could not be saved.');
+  }
+}
+
+if (cloudflareEditBtn) {
+  cloudflareEditBtn.addEventListener('click', async () => {
+    if (!cloudflareEditing) {
+      cloudflareEditing = true;
+      cloudflareEditBtn.textContent = 'SAVE';
+      modeSel.disabled = true;
+      applyMode(modeSel.value);
+      return;
+    }
+    cloudflareEditBtn.disabled = true;
+    try {
+      await saveCloudflareRules();
+      cloudflareEditing = false;
+      cloudflareEditBtn.textContent = 'EDIT';
+      modeSel.disabled = false;
+      applyMode(modeSel.value);
+    } catch (error) {
+      window.alert(error.message);
+    } finally {
+      cloudflareEditBtn.disabled = false;
+    }
+  });
+}
+
+initializeCloudflareEditors();
 
 if (modeSel && modeSel.options.length > 0) {
   const storedMode = localStorage.getItem(routeDefaultKey);

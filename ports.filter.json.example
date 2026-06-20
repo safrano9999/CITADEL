@@ -1,4 +1,13 @@
 {
   "whitelist": [],
-  "blacklist": []
+  "blacklist": [],
+  "cloudflare": {
+    "399": {
+      "subdomain": "citadel",
+      "whitelist": true,
+      "emails": [
+        "name@example.net"
+      ]
+    }
+  }
 }

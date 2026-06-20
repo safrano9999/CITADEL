@@ -1,7 +1,7 @@
 {
   "id": "cloudflare",
-  "label": "Cloudflare Tunnel Router",
-  "enabled": false,
+  "label": "Cloudflare",
+  "enabled": true,
   "provider": "cloudflare",
   "version": 1
 }

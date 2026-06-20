@@ -219,6 +219,80 @@ body {
   text-overflow: ellipsis;
 }
 
+.tile.cloudflare-editing {
+  cursor: default;
+  justify-content: flex-start;
+  grid-column: span 2;
+  min-height: 300px;
+}
+
+.cloudflare-editor {
+  width: 100%;
+  display: grid;
+  gap: 8px;
+}
+
+.cloudflare-editor[hidden] {
+  display: none;
+}
+
+.cloudflare-editor label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.cloudflare-editor input[type="text"],
+.cloudflare-editor input[type="email"] {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 8px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 0.76rem;
+}
+
+.cloudflare-whitelist-row {
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+}
+
+.cloudflare-whitelist-row input {
+  width: 16px;
+  height: 16px;
+}
+
+.cloudflare-emails {
+  display: grid;
+  gap: 6px;
+}
+
+.cloudflare-email-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  gap: 5px;
+}
+
+.cloudflare-email-row button,
+.cloudflare-email-add {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: #f8fafc;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cloudflare-email-add {
+  justify-self: end;
+}
+
 .badge {
   position: absolute;
   top: 8px;
