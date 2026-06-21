@@ -32,6 +32,31 @@ def resolve_hostname(port: int, value: str, base_domain: str, zone_domain: str) 
     return hostname
 
 
+def normalize_subdomains(values: Any, port: int | str | None = None) -> list[str]:
+    if isinstance(values, list):
+        raw_values = values
+    elif values is None:
+        raw_values = []
+    else:
+        raw_values = [values]
+
+    aliases: list[str] = []
+    for raw_value in raw_values:
+        for part in str(raw_value).split(","):
+            item = part.strip().lower()
+            if not item:
+                continue
+            alias = normalize_hostname(item)
+            if alias in aliases:
+                raise ValueError(f"Subdomain or hostname is listed more than once: {alias}")
+            aliases.append(alias)
+
+    if not aliases and port is not None:
+        aliases.append(normalize_hostname(str(port)))
+
+    return aliases
+
+
 def normalize_emails(values: Any) -> list[str]:
     if not isinstance(values, list):
         return []
@@ -47,17 +72,18 @@ def normalize_emails(values: Any) -> list[str]:
     return emails
 
 
-def normalize_rule(value: Any) -> dict[str, Any]:
+def normalize_rule(value: Any, port: int | str | None = None) -> dict[str, Any]:
     rule = value if isinstance(value, dict) else {}
-    subdomain = str(rule.get("subdomain") or "").strip().lower()
-    if subdomain:
-        normalize_hostname(subdomain)
+    raw_subdomains = rule.get("subdomains")
+    if raw_subdomains is None:
+        raw_subdomains = rule.get("subdomain")
+    subdomains = normalize_subdomains(raw_subdomains, port)
     whitelist = bool(rule.get("whitelist", False))
     emails = normalize_emails(rule.get("emails", []))
     if whitelist and not emails:
         raise ValueError("At least one email address is required when whitelist is enabled.")
     return {
-        "subdomain": subdomain,
+        "subdomains": subdomains,
         "whitelist": whitelist,
         "emails": emails if whitelist else [],
     }
@@ -83,7 +109,7 @@ def cloudflare_rules(path: Path, *, strict: bool = False) -> dict[str, dict[str,
             port_number = int(str(port))
             if not (1 <= port_number <= 65535):
                 continue
-            rules[str(port_number)] = normalize_rule(value)
+            rules[str(port_number)] = normalize_rule(value, port_number)
         except (TypeError, ValueError) as exc:
             if strict:
                 raise ValueError(f"Invalid Cloudflare rule for port {port}: {exc}") from exc
@@ -95,7 +121,7 @@ def write_cloudflare_rules(path: Path, rules: dict[str, dict[str, Any]]) -> None
     payload.setdefault("whitelist", [])
     payload.setdefault("blacklist", [])
     payload["cloudflare"] = {
-        str(port): normalize_rule(rule)
+        str(port): normalize_rule(rule, int(port))
         for port, rule in sorted(rules.items(), key=lambda item: int(item[0]))
     }
     path.parent.mkdir(parents=True, exist_ok=True)

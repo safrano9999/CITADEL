@@ -5,7 +5,6 @@ import argparse
 import importlib
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -24,28 +23,6 @@ def load_project_getter(root: Path) -> Callable[[str, str], str]:
     module = importlib.import_module("python_header")
     return module.get
 
-
-def service_active(service: str) -> bool:
-    if not service:
-        return False
-    commands = (
-        ["systemctl", "--user", "is-active", "--quiet", service],
-        ["systemctl", "is-active", "--quiet", service],
-    )
-    for command in commands:
-        try:
-            result = subprocess.run(
-                command,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-        except (OSError, subprocess.SubprocessError):
-            continue
-        if result.returncode == 0:
-            return True
-    return False
 
 
 def access_app_payload(hostname: str, policy_id: str) -> dict[str, Any]:
@@ -284,14 +261,14 @@ def main() -> int:
     services = read_json(args.services_file, {})
     services = services if isinstance(services, dict) else {}
 
-    enabled = parse_bool(get("CITADEL_CLOUDFLARE", "false"))
+    enabled = parse_bool(get("CITADEL_CLOUDFLARE", "0"))
     domain = get("CITADEL_CLOUDFLARE_DOMAIN", "").rstrip(".").lower()
     account_id = get("CITADEL_CLOUDFLARE_ACCOUNT_ID", "")
     zone_id = get("CITADEL_CLOUDFLARE_ZONE_ID", "")
     tunnel_id = get("CITADEL_CLOUDFLARE_TUNNEL_ID", "")
     origin_host = get("CITADEL_CLOUDFLARE_ORIGIN_HOST", "127.0.0.1")
-    service = get("CITADEL_CLOUDFLARE_SERVICE", "cloudflared.service")
     token = get("CLOUDFLARE_API_TOKEN", "")
+    default_email = get("cloudflare_email", "")
     label = str(ext_cfg.get("label") or "Cloudflare")
     errors: list[str] = []
     routes: dict[str, str] = {}
@@ -299,7 +276,7 @@ def main() -> int:
     dns_records: dict[str, str] = {}
     access_apps: dict[str, str] = {}
     access_policies: dict[str, str] = {}
-    running = service_active(service)
+    running = False
     authenticated = False
 
     required = {
@@ -308,22 +285,22 @@ def main() -> int:
         "CITADEL_CLOUDFLARE_ZONE_ID": zone_id,
         "CITADEL_CLOUDFLARE_TUNNEL_ID": tunnel_id,
         "CLOUDFLARE_API_TOKEN": token,
+        "cloudflare_email": default_email,
     }
     missing = [key for key, value in required.items() if not value]
     api = CloudflareAPI(token) if token else None
-
+    if enabled and "cloudflare_email" in missing:
+        enabled = False
+        missing = [key for key in missing if key != "cloudflare_email"]
     try:
         if enabled and missing:
             raise CloudflareAPIError(f"Missing Cloudflare settings: {', '.join(missing)}")
         if enabled and not re.fullmatch(r"[A-Za-z0-9._-]+", origin_host):
             raise CloudflareAPIError("CITADEL_CLOUDFLARE_ORIGIN_HOST is invalid")
-        if enabled and not running:
-            raise CloudflareAPIError(f"Cloudflare service is not active: {service}")
         if enabled and api:
             api.verify_token()
             connections = api.tunnel_connections(account_id, tunnel_id)
-            if not connections:
-                raise CloudflareAPIError("Cloudflare Tunnel has no active connections")
+            running = bool(connections)
             authenticated = True
 
             zone = api.zone(zone_id)
@@ -344,18 +321,19 @@ def main() -> int:
                 port = int(item.get("port") or 0)
                 if not (1 <= port <= 65535):
                     continue
-                rule = policy.get(str(port), {"subdomain": "", "whitelist": False, "emails": []})
-                hostname = resolve_hostname(port, rule["subdomain"], domain, zone_domain)
-                if hostname in hostnames_seen:
-                    raise CloudflareAPIError(f"Duplicate Cloudflare hostname: {hostname}")
-                hostnames_seen.add(hostname)
+                rule = policy.get(str(port), {"subdomains": [str(port)], "whitelist": False, "emails": []})
                 scheme = "https" if item.get("scheme") == "https" else "http"
-                desired[hostname] = {
-                    "port": port,
-                    "scheme": scheme,
-                    "whitelist": bool(rule["whitelist"]),
-                    "emails": list(rule["emails"]),
-                }
+                for subdomain in rule["subdomains"]:
+                    hostname = resolve_hostname(port, subdomain, domain, zone_domain)
+                    if hostname in hostnames_seen:
+                        raise CloudflareAPIError(f"Duplicate Cloudflare hostname: {hostname}")
+                    hostnames_seen.add(hostname)
+                    desired[hostname] = {
+                        "port": port,
+                        "scheme": scheme,
+                        "whitelist": bool(rule["whitelist"]),
+                        "emails": list(rule["emails"]),
+                    }
             managed_hostnames = sorted(desired)
 
             if any(route["whitelist"] for route in desired.values()):
@@ -381,7 +359,7 @@ def main() -> int:
                 if route["scheme"] == "https":
                     entry["originRequest"] = {"noTLSVerify": True}
                 ingress.append(entry)
-                routes[str(route["port"])] = f"https://{hostname}"
+                routes.setdefault(str(route["port"]), f"https://{hostname}")
 
             reconcile_access(
                 api,
@@ -410,28 +388,7 @@ def main() -> int:
                 access_apps,
                 access_policies,
             )
-        elif not enabled and previous_hostnames:
-            if not api or not account_id or not zone_id or not tunnel_id:
-                raise CloudflareAPIError(
-                    "Cloudflare is disabled but managed routes cannot be removed: credentials are incomplete"
-                )
-            api.verify_token()
-            previous_hosts = set(previous_hostnames)
-            if previous_hosts:
-                tunnel_config = api.tunnel_configuration(account_id, tunnel_id)
-                preserved, fallback = remove_managed_ingress(tunnel_config, previous_hosts)
-                tunnel_config["ingress"] = preserved + [fallback]
-                api.update_tunnel_configuration(account_id, tunnel_id, tunnel_config)
-            for record_id in previous_dns_records.values():
-                if record_id:
-                    api.delete_dns_record(zone_id, str(record_id))
-            for app_id in previous_access_apps.values():
-                if app_id:
-                    api.delete_access_app(account_id, str(app_id))
-            for policy_id in previous_access_policies.values():
-                if policy_id:
-                    api.delete_access_policy(account_id, str(policy_id))
-    except (CloudflareAPIError, ValueError, OSError, subprocess.SubprocessError) as exc:
+    except (CloudflareAPIError, ValueError, OSError) as exc:
         errors.append(str(exc))
         routes = {}
         managed_hostnames = sorted(set(previous_hostnames) | set(managed_hostnames))
@@ -453,13 +410,12 @@ def main() -> int:
     payload = {
         "provider_id": "cloudflare",
         "label": label,
-        "considered": bool(enabled and running and authenticated),
+        "considered": bool(enabled and authenticated),
         "available": bool(routes),
         "generated_at": now_iso(),
         "domain": domain,
         "running": running,
         "authenticated": authenticated,
-        "service": service,
         "origin_host": origin_host,
         "managed_hostnames": managed_hostnames,
         "dns_records": dns_records,

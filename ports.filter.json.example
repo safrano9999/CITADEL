@@ -1,12 +1,22 @@
 {
   "whitelist": [],
   "blacklist": [],
+  "cloudflare_defaults": {
+    "configured": true,
+    "whitelist": true,
+    "emails": [
+      "admin@example.com"
+    ]
+  },
   "cloudflare": {
     "399": {
-      "subdomain": "citadel",
+      "subdomains": [
+        "399",
+        "citadel"
+      ],
       "whitelist": true,
       "emails": [
-        "name@example.net"
+        "admin@example.com"
       ]
     }
   }

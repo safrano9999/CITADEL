@@ -46,6 +46,18 @@ def _cloudflare_assignment(port: str, subdomain: str) -> str:
     return f"{value or port}.{domain}"
 
 
+def _cloudflare_assignments(port: str, rule: dict) -> list[str]:
+    aliases = rule.get("subdomains") or [port]
+    return [_cloudflare_assignment(port, str(alias)) for alias in aliases]
+
+
+def _is_implicit_cloudflare_default(port: str, rule: dict) -> bool:
+    return (
+        not rule.get("whitelist")
+        and list(rule.get("subdomains") or []) == [port]
+    )
+
+
 # ── Server Config ─────────────────────────────────────────────────────────
 
 
@@ -206,7 +218,7 @@ def build_dashboard() -> dict:
         port = str(int(tile.get("port", 0)))
         tile["cloudflare_rule"] = cloudflare.get(
             port,
-            {"subdomain": "", "whitelist": False, "emails": []},
+            {"subdomains": [port], "whitelist": False, "emails": []},
         )
         tile_urls: dict[str, str] = {}
         for pid in provider_order:
@@ -246,20 +258,16 @@ def save_cloudflare_rule(port: int, payload: dict) -> dict:
     if port not in known_ports:
         raise ValueError(f"Port {port} is not a discovered HTTP service.")
 
-    rule = normalize_rule(payload)
+    rule = normalize_rule(payload, port)
     rules = cloudflare_rules(PORT_FILTER_FILE)
-    subdomain = rule["subdomain"]
-    assignment = _cloudflare_assignment(str(port), subdomain)
-    for other_port, other_rule in rules.items():
-        if other_port != str(port):
-            other_assignment = _cloudflare_assignment(
-                other_port,
-                str(other_rule.get("subdomain") or ""),
-            )
-            if other_assignment == assignment:
+    for assignment in _cloudflare_assignments(str(port), rule):
+        for other_port, other_rule in rules.items():
+            if other_port == str(port):
+                continue
+            if assignment in _cloudflare_assignments(other_port, other_rule):
                 raise ValueError(f"Subdomain or hostname is already assigned to port {other_port}.")
 
-    if not subdomain and not rule["whitelist"]:
+    if _is_implicit_cloudflare_default(str(port), rule):
         rules.pop(str(port), None)
     else:
         rules[str(port)] = rule
@@ -277,21 +285,36 @@ def save_all_cloudflare_rules(payload: dict) -> dict[str, dict]:
         for item in services.get("http_services", [])
         if isinstance(item, dict) and str(item.get("port", "")).isdigit()
     }
-    rules: dict[str, dict] = {}
-    assigned: dict[str, str] = {}
+
+    existing = cloudflare_rules(PORT_FILTER_FILE)
+    incoming: dict[str, dict] = {}
     for raw_port, raw_rule in payload.items():
         port = str(int(str(raw_port))) if str(raw_port).isdigit() else ""
         if port not in known_ports:
             raise ValueError(f"Port {raw_port} is not a discovered HTTP service.")
-        rule = normalize_rule(raw_rule)
-        subdomain = rule["subdomain"]
-        assignment = _cloudflare_assignment(port, subdomain)
-        if assignment in assigned:
-            raise ValueError(
-                f"Subdomain or hostname is assigned to ports {assigned[assignment]} and {port}."
-            )
-        assigned[assignment] = port
-        if subdomain or rule["whitelist"]:
+        incoming[port] = normalize_rule(raw_rule, int(port))
+
+    rules: dict[str, dict] = {
+        port: rule
+        for port, rule in existing.items()
+        if port not in incoming
+    }
+    assigned: dict[str, str] = {}
+
+    for port, rule in rules.items():
+        for assignment in _cloudflare_assignments(port, rule):
+            assigned[assignment] = port
+
+    for port, rule in incoming.items():
+        for assignment in _cloudflare_assignments(port, rule):
+            if assignment in assigned:
+                raise ValueError(
+                    f"Subdomain or hostname is assigned to ports {assigned[assignment]} and {port}."
+                )
+            assigned[assignment] = port
+        if _is_implicit_cloudflare_default(port, rule):
+            rules.pop(port, None)
+        else:
             rules[port] = rule
 
     write_cloudflare_rules(PORT_FILTER_FILE, rules)

@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import argparse
-import os
+import importlib
+import sys
 from pathlib import Path
 
-from common import now_iso, read_json, read_key_value, write_json
+from common import now_iso, read_json, write_json
 
 
 def main() -> int:
@@ -21,10 +22,11 @@ def main() -> int:
     ext_cfg = read_json(f"{args.provider_dir}/extension.json", {})
     services_payload = read_json(args.services_file, {})
     label = str(ext_cfg.get("label") or "Subnet")
-    subnet_ip = os.environ.get("CITADEL_SUBNET_IP", "").strip()
-    if not subnet_ip:
-        root = Path(args.provider_dir).resolve().parents[2]
-        subnet_ip = read_key_value(str(root / "config.conf"), "CITADEL_SUBNET_IP")
+    root = Path(args.provider_dir).resolve().parents[2]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    header = importlib.import_module("python_header")
+    subnet_ip = header.get("CITADEL_SUBNET_IP", "")
 
     routes: dict[str, str] = {}
     errors: list[str] = []

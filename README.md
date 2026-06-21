@@ -54,15 +54,15 @@ The script writes a local systemd unit, symlinks it into `~/.config/systemd/user
 | `CITADEL_WEBUI_PORT` | `10999` | Web UI port |
 | `CITADEL_SUBNET_IP` | empty | IP used by the subnet provider |
 | `CITADEL_TAILSCALE` | `true` | Reconcile native Tailscale Serve routes when Tailscale is logged in |
-| `CITADEL_CLOUDFLARE` | `false` | Reconcile Cloudflare resources when cloudflared is active |
+| `CITADEL_CLOUDFLARE` | `false` | Reconcile Cloudflare resources when enabled and required values exist |
 | `CITADEL_CLOUDFLARE_DOMAIN` | empty | Hostname suffix, including a subdomain such as `services.example.net` |
 | `CITADEL_CLOUDFLARE_ACCOUNT_ID` | empty | Cloudflare account ID |
 | `CITADEL_CLOUDFLARE_ZONE_ID` | empty | Cloudflare zone ID |
 | `CITADEL_CLOUDFLARE_TUNNEL_ID` | empty | Existing named Tunnel ID |
 | `CITADEL_CLOUDFLARE_ORIGIN_HOST` | `127.0.0.1` | Origin address as seen by cloudflared |
-| `CITADEL_CLOUDFLARE_SERVICE` | `cloudflared.service` | Existing service that must be active |
+| `cloudflare_email` | empty | Default Access email whitelist for new Cloudflare routes; Cloudflare is skipped when missing |
 
-These non-secret values live in `config.conf`. `CLOUDFLARE_API_TOKEN` and the separately consumed `TUNNEL_TOKEN` live in `.env`.
+These non-secret values live in `config.conf`. `CLOUDFLARE_API_TOKEN`, `cloudflare_email`, and the separately consumed `TUNNEL_TOKEN` live in `.env`.
 
 ## Core Idea
 
@@ -96,11 +96,16 @@ Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled 
 - Reconciles native, persistent Tailscale Serve routes after every scan
 - Stores URLs, backend targets, status, and managed ports in `tailscale.json`
 - Generates URLs like `https://<tailnet-domain>:<port>`
-- Requires a root scan or a Tailscale operator allowed to change Serve configuration
+- Set the scanning user as Tailscale operator once, then run scans without sudo:
+
+  ```sh
+  sudo tailscale set --operator="$USER"
+  ./scan.sh
+  ```
 
 ### Cloudflare Provider
 
-Cloudflare reconciliation runs only when `CITADEL_CLOUDFLARE=true`, the configured `cloudflared.service` is active, the API token is valid, and the selected Tunnel has an active connector. CITADEL preserves unrelated DNS records, Access resources, and Tunnel ingress rules.
+Cloudflare reconciliation runs when `CITADEL_CLOUDFLARE=1`, the API token is valid, and the configured account, zone, and Tunnel identifiers are present. Mapping is performed through the API and does not depend on where or how `cloudflared` runs. CITADEL preserves unrelated DNS records, Access resources, and Tunnel ingress rules.
 
 Every discovered service receives `<port>.<CITADEL_CLOUDFLARE_DOMAIN>` by default. In the Cloudflare WebUI tab, select **EDIT** to assign either a short label or a complete hostname:
 

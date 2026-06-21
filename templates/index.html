@@ -9,7 +9,6 @@
 </head>
 <body
     data-default-mode="{{ data.default_mode|e }}"
-    data-default-refresh="{{ data.default_refresh }}"
 >
 
 <header class="site-header">
@@ -38,24 +37,10 @@
             <small id="mode-default-hint">Saved default: -</small>
         </label>
 
+        <button id="page-refresh-btn" class="btn-default" type="button">Refresh</button>
+        <button id="scan-btn" class="btn-default" type="button" title="{{ data.scan_block_reason|default('')|e }}">{{ 'please scan in cli' if data.scan_block_reason else 'Scan' }}</button>
         <button id="cloudflare-edit-btn" class="btn-default" type="button" hidden>EDIT</button>
-
-        <label class="control" for="refresh-sel">
-            <span>Refresh</span>
-            <select id="refresh-sel">
-                <option value="0">off</option>
-                <option value="60">1 min</option>
-                <option value="120">2 min</option>
-                <option value="300">5 min</option>
-                <option value="600">10 min</option>
-                <option value="1800">30 min</option>
-                <option value="3600">1h</option>
-                <option value="21600">6h</option>
-                <option value="43200">12h</option>
-                <option value="86400">24h</option>
-            </select>
-            <small>page reload</small>
-        </label>
+        <button id="cloudflare-save-btn" class="btn-default" type="button" hidden disabled>SAVE</button>
     </div>
 </header>
 
@@ -76,7 +61,7 @@
         {% set scheme = svc.scheme|default('http') %}
         <article class="tile" tabindex="0"
             data-port="{{ port|e }}"
-            data-cloudflare-subdomain="{{ svc.cloudflare_rule.subdomain|default('')|e }}"
+            data-cloudflare-subdomains="{{ svc.cloudflare_rule.subdomains|join(',')|e }}"
             data-cloudflare-whitelist="{{ '1' if svc.cloudflare_rule.whitelist else '0' }}"
             data-cloudflare-emails="{{ svc.cloudflare_rule.emails|tojson|e }}"
             {% for pid in data.provider_order %}
@@ -94,8 +79,8 @@
             <span class="tile-url">-</span>
             <div class="cloudflare-editor" hidden>
                 <label>
-                    <span>Subdomain</span>
-                    <input class="cloudflare-subdomain" type="text" maxlength="253" placeholder="{{ port|e }}">
+                    <span>Subdomains</span>
+                    <input class="cloudflare-subdomains" type="text" placeholder="{{ port|e }}">
                 </label>
                 <label class="cloudflare-whitelist-row">
                     <input class="cloudflare-whitelist" type="checkbox">
@@ -140,15 +125,18 @@
 <script>
 const modeSel = document.getElementById('route-mode-sel');
 const saveDefaultBtn = document.getElementById('save-default-btn');
+const pageRefreshBtn = document.getElementById('page-refresh-btn');
+const scanBtn = document.getElementById('scan-btn');
 const cloudflareEditBtn = document.getElementById('cloudflare-edit-btn');
+const cloudflareSaveBtn = document.getElementById('cloudflare-save-btn');
 const modeDefaultHint = document.getElementById('mode-default-hint');
-const refreshSel = document.getElementById('refresh-sel');
 const tiles = Array.from(document.querySelectorAll('.tile'));
 const defaultMode = document.body.dataset.defaultMode || 'localhost';
-const defaultRefresh = parseInt(document.body.dataset.defaultRefresh || '0', 10) || 0;
 const providerOrder = {{ provider_order_json|safe }};
 const routeDefaultKey = 'citadel-route-default';
 let cloudflareEditing = false;
+let cloudflareInitialState = '';
+let cloudflareDirty = false;
 
 function addEmailRow(container, value = '') {
   const row = document.createElement('div');
@@ -174,11 +162,11 @@ function initializeCloudflareEditors() {
   tiles.forEach(tile => {
     const editor = tile.querySelector('.cloudflare-editor');
     if (!editor) return;
-    const subdomain = editor.querySelector('.cloudflare-subdomain');
+    const subdomains = editor.querySelector('.cloudflare-subdomains');
     const whitelist = editor.querySelector('.cloudflare-whitelist');
     const emails = editor.querySelector('.cloudflare-emails');
     const add = editor.querySelector('.cloudflare-email-add');
-    subdomain.value = tile.dataset.cloudflareSubdomain || '';
+    subdomains.value = tile.dataset.cloudflareSubdomains || tile.dataset.port || '';
     whitelist.checked = tile.dataset.cloudflareWhitelist === '1';
     let values = [];
     try {
@@ -197,6 +185,8 @@ function initializeCloudflareEditors() {
     });
     editor.addEventListener('click', event => event.stopPropagation());
     editor.addEventListener('keydown', event => event.stopPropagation());
+    editor.addEventListener('input', markCloudflareDirty);
+    editor.addEventListener('change', markCloudflareDirty);
     syncWhitelist();
   });
 }
@@ -220,109 +210,59 @@ function compactUrl(url) {
 
 function applyMode(mode) {
   const cloudflareMode = mode === 'cloudflare';
-  if (cloudflareEditBtn) {
-    cloudflareEditBtn.hidden = !cloudflareMode;
-  }
-  tiles.forEach(tile => {
-    const choice = chooseTileUrl(tile, mode);
-
-    tile.dataset.activeUrl = choice;
-    tile.classList.toggle('no-link', !choice);
-    tile.classList.toggle('cloudflare-editing', cloudflareMode && cloudflareEditing);
-    const editor = tile.querySelector('.cloudflare-editor');
-    if (editor) editor.hidden = !(cloudflareMode && cloudflareEditing);
-
-    const label = tile.querySelector('.tile-url');
-    if (!choice) {
-      label.textContent = '';
-    } else {
-      label.textContent = compactUrl(choice);
-    }
-  });
+  if (pageRefreshBtn) {
+  pageRefreshBtn.addEventListener('click', () => location.reload());
 }
 
-function renderModeDefaultHint(mode) {
-  if (!modeDefaultHint) {
-    return;
-  }
-  const option = modeSel ? modeSel.querySelector(`option[value="${mode}"]`) : null;
-  if (!option) {
-    modeDefaultHint.textContent = 'Saved default: -';
-    return;
-  }
-  modeDefaultHint.textContent = `Saved default: ${option.textContent}`;
-}
-
-function openTile(tile) {
-  if (cloudflareEditing) {
-    return;
-  }
-  const url = tile.dataset.activeUrl || '';
-  if (!url) {
-    return;
-  }
-  window.open(url, '_blank', 'noopener');
-}
-
-tiles.forEach(tile => {
-  tile.addEventListener('click', () => openTile(tile));
-  tile.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter' || ev.key === ' ') {
-      ev.preventDefault();
-      openTile(tile);
-    }
-  });
-});
-
-async function saveCloudflareRules() {
-  const rules = {};
-  for (const tile of tiles) {
-    const editor = tile.querySelector('.cloudflare-editor');
-    if (!editor) continue;
-    const whitelist = editor.querySelector('.cloudflare-whitelist').checked;
-    const emails = Array.from(editor.querySelectorAll('.cloudflare-email'))
-      .map(input => input.value.trim().toLowerCase())
-      .filter(Boolean);
-    if (whitelist && emails.length === 0) {
-      throw new Error(`Port ${tile.dataset.port}: whitelist requires at least one email.`);
-    }
-    rules[tile.dataset.port] = {
-      subdomain: editor.querySelector('.cloudflare-subdomain').value.trim().toLowerCase(),
-      whitelist,
-      emails,
-    };
-  }
-  const response = await fetch('/api/cloudflare/ports', {
-    method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(rules),
-  });
-  const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(payload.detail || 'Cloudflare settings could not be saved.');
-  }
-}
-
-if (cloudflareEditBtn) {
-  cloudflareEditBtn.addEventListener('click', async () => {
-    if (!cloudflareEditing) {
-      cloudflareEditing = true;
-      cloudflareEditBtn.textContent = 'SAVE';
-      modeSel.disabled = true;
-      applyMode(modeSel.value);
-      return;
-    }
-    cloudflareEditBtn.disabled = true;
+if (scanBtn) {
+  scanBtn.addEventListener('click', async () => {
+    scanBtn.disabled = true;
+    const original = scanBtn.textContent;
+    scanBtn.textContent = 'Scanning...';
     try {
-      await saveCloudflareRules();
-      cloudflareEditing = false;
-      cloudflareEditBtn.textContent = 'EDIT';
-      modeSel.disabled = false;
-      applyMode(modeSel.value);
+      const response = await fetch('/api/scan', { method: 'POST' });
+      let payload = {};
+      try {
+        payload = await response.json();
+      } catch {}
+      if (!response.ok) {
+        throw new Error(payload.detail || 'Scan failed.');
+      }
     } catch (error) {
       window.alert(error.message);
     } finally {
-      cloudflareEditBtn.disabled = false;
+      scanBtn.textContent = original;
+      scanBtn.disabled = false;
+    }
+  });
+}
+
+if (cloudflareEditBtn) {
+  cloudflareEditBtn.addEventListener('click', () => {
+    cloudflareEditing = !cloudflareEditing;
+    cloudflareEditBtn.textContent = cloudflareEditing ? 'CLOSE' : 'EDIT';
+    if (modeSel) modeSel.disabled = cloudflareEditing;
+    if (cloudflareEditing) {
+      try {
+        cloudflareInitialState = currentCloudflareState();
+      } catch {
+        cloudflareInitialState = '';
+      }
+      cloudflareDirty = false;
+    }
+    applyMode(modeSel.value);
+  });
+}
+
+if (cloudflareSaveBtn) {
+  cloudflareSaveBtn.addEventListener('click', async () => {
+    cloudflareSaveBtn.disabled = true;
+    try {
+      await saveCloudflareRules();
+    } catch (error) {
+      window.alert(error.message);
+    } finally {
+      updateCloudflareSaveState();
     }
   });
 }
@@ -351,25 +291,6 @@ if (modeSel && modeSel.options.length > 0) {
   renderModeDefaultHint('');
 }
 
-let refreshTimer = null;
-function applyRefresh(seconds) {
-  clearInterval(refreshTimer);
-  if (seconds > 0) {
-    refreshTimer = setInterval(() => location.reload(), seconds * 1000);
-  }
-}
-
-const storedRefresh = localStorage.getItem('citadel-refresh');
-refreshSel.value = storedRefresh !== null ? storedRefresh : String(defaultRefresh);
-if (!Array.from(refreshSel.options).some(o => o.value === refreshSel.value)) {
-  refreshSel.value = '0';
-}
-applyRefresh(parseInt(refreshSel.value, 10));
-
-refreshSel.addEventListener('change', () => {
-  localStorage.setItem('citadel-refresh', refreshSel.value);
-  applyRefresh(parseInt(refreshSel.value, 10));
-});
 
 </script>
 </body>

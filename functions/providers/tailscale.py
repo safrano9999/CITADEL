@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import argparse
 import configparser
+import importlib
 import os
 import shutil
+import sys
 from pathlib import Path
 
 from common import (
@@ -47,30 +49,12 @@ def serve_target(port: int, scheme: str) -> str:
     return f"{protocol}://127.0.0.1:{port}"
 
 
-def read_key_value(path: Path, key: str) -> str:
-    if not path.exists():
-        return ""
-    try:
-        for raw in path.read_text(encoding="utf-8").splitlines():
-            line = raw.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            name, value = line.split("=", 1)
-            if name.strip() == key:
-                return value.strip().strip('"').strip("'")
-    except Exception:
-        return ""
-    return ""
-
-
 def citadel_bool(provider_dir: str, key: str, default: str = "false") -> bool:
-    raw = os.environ.get(key, "").strip()
-    if not raw:
-        root = Path(provider_dir).resolve().parents[2]
-        raw = read_key_value(root / "config.conf", key)
-    if not raw:
-        raw = default
-    return parse_bool(raw)
+    root = Path(provider_dir).resolve().parents[2]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    header = importlib.import_module("python_header")
+    return header.get_bool(key, parse_bool(default))
 
 
 def main() -> int:

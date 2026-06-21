@@ -1,5 +1,5 @@
 {
   "label": "Cloudflare",
   "enabled": true,
-  "notes": "Activation is controlled by CITADEL_CLOUDFLARE."
+  "notes": "Activation requires CITADEL_CLOUDFLARE=1 and a valid Cloudflare API token."
 }

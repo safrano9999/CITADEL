@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import sys
 import tempfile
@@ -26,6 +27,7 @@ from cloudflare import (  # noqa: E402
 )
 from cloudflare_api import CloudflareAPI, CloudflareAPIError  # noqa: E402
 import core  # noqa: E402
+import cloudflare_defaults  # noqa: E402
 
 
 class CloudflarePolicyTests(unittest.TestCase):
@@ -51,6 +53,19 @@ class CloudflarePolicyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             normalize_rule({"whitelist": True, "emails": []})
 
+    def test_normalizes_csv_aliases_and_legacy_subdomain(self) -> None:
+        self.assertEqual(
+            normalize_rule({"subdomains": "399, Citadel"}, port=399)["subdomains"],
+            ["399", "citadel"],
+        )
+        self.assertEqual(
+            normalize_rule({"subdomain": "Legacy"}, port=399)["subdomains"],
+            ["legacy"],
+        )
+        self.assertEqual(normalize_rule({}, port=399)["subdomains"], ["399"])
+        with self.assertRaises(ValueError):
+            normalize_rule({"subdomains": "399,399"}, port=399)
+
     def test_strict_policy_rejects_invalid_whitelist(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "ports.filter.json"
@@ -72,7 +87,7 @@ class CloudflarePolicyTests(unittest.TestCase):
                 path,
                 {
                     "399": {
-                        "subdomain": "citadel",
+                        "subdomains": ["399", "citadel"],
                         "whitelist": True,
                         "emails": ["USER@example.net", "user@example.net"],
                     }
@@ -81,10 +96,88 @@ class CloudflarePolicyTests(unittest.TestCase):
             payload = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(payload["whitelist"], [399])
             self.assertEqual(payload["blacklist"], [400])
+            self.assertEqual(cloudflare_rules(path)["399"]["subdomains"], ["399", "citadel"])
             self.assertEqual(
                 cloudflare_rules(path)["399"]["emails"],
                 ["user@example.net"],
             )
+
+
+class CloudflareDefaultsTests(unittest.TestCase):
+    class TTYInput(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    def run_defaults(self, base: Path, stdin: str = "", email: str = "Admin@Example.com, ops@example.com") -> int:
+        old_cloudflare_ready = cloudflare_defaults.cloudflare_ready
+        old_project_get = cloudflare_defaults.project_get
+        old_argv = sys.argv
+        old_stdin = sys.stdin
+        try:
+            cloudflare_defaults.cloudflare_ready = lambda _root: (True, "test")
+            cloudflare_defaults.project_get = lambda _root, key, default="": email if key == "cloudflare_email" else default
+            sys.argv = [
+                "cloudflare_defaults.py",
+                "--root",
+                str(base),
+                "--services-file",
+                str(base / "services.json"),
+                "--policy-file",
+                str(base / "ports.filter.json"),
+            ]
+            sys.stdin = self.TTYInput(stdin)
+            return cloudflare_defaults.main()
+        finally:
+            cloudflare_defaults.cloudflare_ready = old_cloudflare_ready
+            cloudflare_defaults.project_get = old_project_get
+            sys.argv = old_argv
+            sys.stdin = old_stdin
+
+    def test_env_email_defaults_protect_new_ports(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            (base / "services.json").write_text(
+                json.dumps({"http_services": [{"port": 12001}, {"port": 12002}]}),
+                encoding="utf-8",
+            )
+            (base / "ports.filter.json").write_text(
+                json.dumps({
+                    "whitelist": [],
+                    "blacklist": [],
+                    "cloudflare": {
+                        "12001": {
+                            "subdomains": ["custom"],
+                            "whitelist": False,
+                            "emails": [],
+                        }
+                    },
+                }),
+                encoding="utf-8",
+            )
+            self.assertEqual(self.run_defaults(base), 0)
+            policy = json.loads((base / "ports.filter.json").read_text(encoding="utf-8"))
+            self.assertEqual(policy["cloudflare_defaults"]["emails"], ["admin@example.com", "ops@example.com"])
+            self.assertEqual(policy["cloudflare"]["12001"]["subdomains"], ["custom"])
+            self.assertFalse(policy["cloudflare"]["12001"]["whitelist"])
+            self.assertEqual(policy["cloudflare"]["12002"]["subdomains"], ["12002"])
+            self.assertTrue(policy["cloudflare"]["12002"]["whitelist"])
+            self.assertEqual(policy["cloudflare"]["12002"]["emails"], ["admin@example.com", "ops@example.com"])
+
+    def test_missing_env_email_skips_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            (base / "services.json").write_text(
+                json.dumps({"http_services": [{"port": 399}]}),
+                encoding="utf-8",
+            )
+            (base / "ports.filter.json").write_text(
+                json.dumps({"whitelist": [], "blacklist": [], "cloudflare": {}}),
+                encoding="utf-8",
+            )
+            self.assertEqual(self.run_defaults(base, email=""), 0)
+            policy = json.loads((base / "ports.filter.json").read_text(encoding="utf-8"))
+            self.assertNotIn("cloudflare_defaults", policy)
+            self.assertEqual(policy["cloudflare"], {})
 
 
 class CloudflareProviderTests(unittest.TestCase):
@@ -191,8 +284,8 @@ class CloudflareCoreTests(unittest.TestCase):
                 json.dumps(
                     {
                         "http_services": [
-                            {"port": 399},
-                            {"port": 440},
+                            {"port": 12001},
+                            {"port": 12002},
                         ]
                     }
                 ),
@@ -205,32 +298,33 @@ class CloudflareCoreTests(unittest.TestCase):
             try:
                 saved = core.save_all_cloudflare_rules(
                     {
-                        "399": {
-                            "subdomain": "citadel",
+                        "12001": {
+                            "subdomains": ["12001", "citadel"],
                             "whitelist": True,
                             "emails": ["user@example.net"],
                         },
-                        "440": {
-                            "subdomain": "",
+                        "12002": {
+                            "subdomains": ["12002"],
                             "whitelist": False,
                             "emails": [],
                         },
                     }
                 )
-                self.assertEqual(list(saved), ["399"])
+                self.assertEqual(list(saved), ["12001"])
+                self.assertEqual(saved["12001"]["subdomains"], ["12001", "citadel"])
                 self.assertEqual(cloudflare_rules(policy), saved)
                 with self.assertRaises(ValueError):
                     core.save_all_cloudflare_rules(
                         {
-                            "399": {"subdomain": "same", "whitelist": False},
-                            "440": {"subdomain": "same", "whitelist": False},
+                            "12001": {"subdomains": ["same"], "whitelist": False},
+                            "12002": {"subdomains": ["same"], "whitelist": False},
                         }
                     )
                 with self.assertRaises(ValueError):
                     core.save_all_cloudflare_rules(
                         {
-                            "399": {"subdomain": "", "whitelist": False},
-                            "440": {"subdomain": "399", "whitelist": False},
+                            "12001": {"subdomains": ["12001"], "whitelist": False},
+                            "12002": {"subdomains": ["12001"], "whitelist": False},
                         }
                     )
                 self.assertEqual(cloudflare_rules(policy), saved)

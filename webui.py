@@ -1,6 +1,7 @@
 """CITADEL FastAPI WebUI."""
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -33,6 +34,7 @@ def favicon_svg():
 @app.get("/", response_class=HTMLResponse)
 def index():
     data = core.build_dashboard()
+    data["scan_block_reason"] = scan_block_reason()
     return _jinja.get_template("index.html").render(
         data=data,
         provider_order_json=json.dumps(data["provider_order"]),
@@ -59,6 +61,48 @@ async def update_all_cloudflare_ports(request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "rules": rules, "applies_on": "next_scan"}
+
+
+def missing_provider_state_files() -> list[str]:
+    if not core.ENABLED_EXT_DIR.is_dir():
+        return []
+    missing: list[str] = []
+    for provider_dir in sorted(core.ENABLED_EXT_DIR.iterdir(), key=lambda item: item.name):
+        if provider_dir.is_dir() and not (provider_dir / "routes.json").is_file():
+            missing.append(provider_dir.name)
+    return missing
+
+
+def scan_block_reason() -> str:
+    missing_state = missing_provider_state_files()
+    if missing_state:
+        return "Missing routes.json for: " + ", ".join(missing_state)
+    return ""
+
+
+@app.post("/api/scan")
+def run_scan():
+    missing_state = missing_provider_state_files()
+    if missing_state:
+        raise HTTPException(
+            status_code=409,
+            detail="Run ./scan.sh once in the CLI first. Missing routes.json for: " + ", ".join(missing_state),
+        )
+    try:
+        result = subprocess.run(
+            ["./scan.sh"],
+            cwd=core.BASE_DIR,
+            text=True,
+            capture_output=True,
+            timeout=600,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=504, detail="Scan timed out.") from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "Scan failed.").strip()
+        raise HTTPException(status_code=500, detail=detail[-4000:])
+    return {"ok": True, "stdout": result.stdout[-4000:]}
 
 
 if __name__ == "__main__":

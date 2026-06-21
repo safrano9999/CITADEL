@@ -13,7 +13,7 @@ CITADEL_TAILSCALE=true
 
 # Reconcile Cloudflare DNS, Tunnel ingress, and optional Access email policies.
 # CITADEL never starts or authenticates cloudflared.
-CITADEL_CLOUDFLARE=false
+CITADEL_CLOUDFLARE=1
 
 # Default suffix for generated hostnames. May be the zone itself or a subdomain.
 CITADEL_CLOUDFLARE_DOMAIN=
@@ -26,5 +26,3 @@ CITADEL_CLOUDFLARE_TUNNEL_ID=
 # Origin as seen by cloudflared. Keep 127.0.0.1 for baremetal or host networking.
 CITADEL_CLOUDFLARE_ORIGIN_HOST=127.0.0.1
 
-# Existing authenticated systemd service checked before routes are changed.
-CITADEL_CLOUDFLARE_SERVICE=cloudflared.service

@@ -493,6 +493,17 @@ with open(out_file, 'w') as fh:
 echo "services.json written"
 echo
 
+echo "=== Applying Cloudflare Defaults ==="
+if [[ -f "$FUNCTIONS_DIR/cloudflare_defaults.py" ]]; then
+    python3 "$FUNCTIONS_DIR/cloudflare_defaults.py" \
+        --root "$SCRIPT_DIR" \
+        --services-file "$SERVICES_FILE" \
+        --policy-file "$PORT_FILTER_FILE" || true
+else
+    echo "cloudflare_defaults.py missing: $FUNCTIONS_DIR/cloudflare_defaults.py"
+fi
+echo
+
 echo "=== Applying Enabled Extensions ==="
 if [[ -f "$PROVIDERS_DIR/dispatch.py" ]]; then
     python3 "$PROVIDERS_DIR/dispatch.py" \
