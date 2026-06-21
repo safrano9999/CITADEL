@@ -36,8 +36,7 @@ Do not commit either token.
 
 Verify all conditions before setting `CITADEL_CLOUDFLARE=true`:
 
-- `cloudflared.service` is active.
-- The selected Tunnel has an active connection.
+- The selected Tunnel is the intended Tunnel for this host.
 - The API token can read the zone and edit DNS, Tunnel config, and Access apps/policies.
 - One-time PIN is enabled when any port uses an email whitelist.
 

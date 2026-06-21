@@ -84,7 +84,6 @@ def main() -> int:
             "CITADEL_CLOUDFLARE_ZONE_ID": str(zone.get("id") or ""),
             "CITADEL_CLOUDFLARE_TUNNEL_ID": tunnel_id,
             "CITADEL_CLOUDFLARE_ORIGIN_HOST": "127.0.0.1",
-            "CITADEL_CLOUDFLARE_SERVICE": "cloudflared.service",
             "one_time_pin_enabled": otp_enabled,
             "tunnel_name": str(tunnel.get("name") or ""),
             "tunnel_connections": len(api.tunnel_connections(account_id, tunnel_id)),
