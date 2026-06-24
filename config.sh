@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ -f "$SCRIPT_DIR/env.example" ] || [ -f "$SCRIPT_DIR/config.conf_example" ]; then
+if [ -f "$SCRIPT_DIR/env.example" ] || [ -f "$SCRIPT_DIR/config.conf_example" ] || [ -f "$SCRIPT_DIR/container.example" ]; then
     DIR="$SCRIPT_DIR"
 else
     DIR="$(pwd)"
@@ -47,7 +47,7 @@ config_value() {
     local key="$1"
     local file
 
-    for file in "$DIR/config.conf" "$DIR/config.conf_example" "$DIR/.env" "$DIR/env.example"; do
+    for file in "$DIR/container.conf" "$DIR/config.conf" "$DIR/.env" "$DIR/container.example" "$DIR/config.conf_example" "$DIR/env.example"; do
         read_kv_file "$file" "$key" && return 0
     done
     return 1
@@ -288,6 +288,8 @@ configure_from_example() {
         env_existing=""
         if [ "$(basename "$target")" = "config.conf" ]; then
             env_existing="$(read_kv_file "$DIR/.env" "$key" || true)"
+        elif [ "$(basename "$target")" = "container.conf" ]; then
+            env_existing="$(read_kv_file "$DIR/config.conf" "$key" || read_kv_file "$DIR/.env" "$key" || true)"
         fi
 
         existing_line="$(grep "^${key}=" "$target" 2>/dev/null | head -1 || true)"
@@ -399,13 +401,16 @@ project_image() {
     printf 'localhost/%s:latest\n' "$CONTAINER_NAME"
 }
 
-config_source_file() {
+config_source_files() {
     if [ -f "$DIR/config.conf" ]; then
         printf '%s\n' "$DIR/config.conf"
     elif [ -f "$DIR/config.conf_example" ]; then
         printf '%s\n' "$DIR/config.conf_example"
-    else
-        return 1
+    fi
+    if [ -f "$DIR/container.conf" ]; then
+        printf '%s\n' "$DIR/container.conf"
+    elif [ -f "$DIR/container.example" ]; then
+        printf '%s\n' "$DIR/container.example"
     fi
 }
 
@@ -420,68 +425,70 @@ generate_container_files() {
     local -a named_volumes=()
     local item source
 
-    source_file="$(config_source_file)" || return 0
     host="$(config_value HOST || true)"
     [ -n "$host" ] || host="127.0.0.1"
     image="$(project_image)"
     compose_file="$DIR/docker-compose.yml"
     quadlet_file="$DIR/$CONTAINER_NAME.container"
 
-    while IFS= read -r line || [ -n "$line" ]; do
-        stripped="$(trim "$line")"
-        [[ -z "$stripped" || "$stripped" == \#* ]] && continue
+    while IFS= read -r source_file || [ -n "$source_file" ]; do
+        [ -f "$source_file" ] || continue
+        while IFS= read -r line || [ -n "$line" ]; do
+            stripped="$(trim "$line")"
+            [[ -z "$stripped" || "$stripped" == \#* ]] && continue
 
-        entry="${line%%#*}"
-        entry="$(trim "$entry")"
-        [[ "$entry" == *=* ]] || continue
+            entry="${line%%#*}"
+            entry="$(trim "$entry")"
+            [[ "$entry" == *=* ]] || continue
 
-        key="$(trim "${entry%%=*}")"
-        value="$(config_value "$key" || true)"
+            key="$(trim "${entry%%=*}")"
+            value="$(config_value "$key" || true)"
 
-        if [[ "$key" == *_PUBLISH_PORT ]]; then
-            prefix="${key%_PUBLISH_PORT}"
-            internal_key="${prefix}_PORT"
-            internal_port="$(config_value "$internal_key" || true)"
-            [ -n "$internal_port" ] || internal_port="$value"
-            publish_port="$value"
-            publish_host="$(config_value "${prefix}_PUBLISH_HOST" || true)"
-            [ -n "$publish_host" ] || publish_host="$host"
-            map="${publish_host}:${publish_port}:${internal_port}"
-            add_unique "$map" ports
-            [ -n "$first_port" ] || first_port="$internal_port"
-            continue
-        fi
+            if [[ "$key" == *_PUBLISH_PORT ]]; then
+                prefix="${key%_PUBLISH_PORT}"
+                internal_key="${prefix}_PORT"
+                internal_port="$(config_value "$internal_key" || true)"
+                [ -n "$internal_port" ] || internal_port="$value"
+                publish_port="$value"
+                publish_host="$(config_value "${prefix}_PUBLISH_HOST" || true)"
+                [ -n "$publish_host" ] || publish_host="$host"
+                map="${publish_host}:${publish_port}:${internal_port}"
+                add_unique "$map" ports
+                [ -n "$first_port" ] || first_port="$internal_port"
+                continue
+            fi
 
-        if [[ "$key" == "PORT" || ( "$key" == *_PORT && "$key" != *_PUBLISH_PORT ) ]]; then
-            [ -n "$first_port" ] || first_port="$value"
-            continue
-        fi
+            if [[ "$key" == "PORT" || ( "$key" == *_PORT && "$key" != *_PUBLISH_PORT ) ]]; then
+                [ -n "$first_port" ] || first_port="$value"
+                continue
+            fi
 
-        if [[ "$key" == *_CAPABILITIES ]]; then
-            IFS=',' read -ra items <<< "$value"
-            for item in "${items[@]}"; do add_unique "$(trim "$item")" caps; done
-            continue
-        fi
+            if [[ "$key" == *_CAPABILITIES ]]; then
+                IFS=',' read -ra items <<< "$value"
+                for item in "${items[@]}"; do add_unique "$(trim "$item")" caps; done
+                continue
+            fi
 
-        if [[ "$key" == *_DEVICES ]]; then
-            IFS=',' read -ra items <<< "$value"
-            for item in "${items[@]}"; do add_unique "$(trim "$item")" devices; done
-            continue
-        fi
+            if [[ "$key" == *_DEVICES ]]; then
+                IFS=',' read -ra items <<< "$value"
+                for item in "${items[@]}"; do add_unique "$(trim "$item")" devices; done
+                continue
+            fi
 
-        if [[ "$key" == *_VOLUMES ]]; then
-            IFS=',' read -ra items <<< "$value"
-            for item in "${items[@]}"; do
-                item="$(trim "$item")"
-                add_unique "$item" volumes
-                source="${item%%:*}"
-                if [[ "$source" != /* && "$source" != .* && "$source" != *"/"* ]]; then
-                    add_unique "$source" named_volumes
-                fi
-            done
-            continue
-        fi
-    done < "$source_file"
+            if [[ "$key" == *_VOLUMES ]]; then
+                IFS=',' read -ra items <<< "$value"
+                for item in "${items[@]}"; do
+                    item="$(trim "$item")"
+                    add_unique "$item" volumes
+                    source="${item%%:*}"
+                    if [[ "$source" != /* && "$source" != .* && "$source" != *"/"* ]]; then
+                        add_unique "$source" named_volumes
+                    fi
+                done
+                continue
+            fi
+        done < "$source_file"
+    done < <(config_source_files)
 
     if [ "${#ports[@]}" -eq 0 ] && [ -n "$first_port" ]; then
         add_unique "${host}:${first_port}:${first_port}" ports
@@ -515,14 +522,15 @@ generate_container_files() {
         printf '    container_name: %s\n' "$CONTAINER_NAME"
         printf '    hostname: %s\n' "$CONTAINER_NAME"
         if [ "${#ports[@]}" -gt 0 ]; then
-            printf '    # Port mappings: HOST:PUBLISH_PORT:PORT from config.conf\n'
+            printf '    # Port mappings: HOST:PUBLISH_PORT:PORT from config.conf/container.conf\n'
             printf '    ports:\n'
             for item in "${ports[@]}"; do printf '      - "%s"\n' "$item"; done
         fi
-        if [ -f "$DIR/config.conf" ] || [ -f "$DIR/.env" ]; then
+        if [ -f "$DIR/config.conf" ] || [ -f "$DIR/container.conf" ] || [ -f "$DIR/.env" ]; then
             printf '    # Runtime configuration files generated from *example files\n'
             printf '    env_file:\n'
             [ -f "$DIR/config.conf" ] && printf '      - %s\n' "$DIR/config.conf"
+            [ -f "$DIR/container.conf" ] && printf '      - %s\n' "$DIR/container.conf"
             [ -f "$DIR/.env" ] && printf '      - %s\n' "$DIR/.env"
         fi
         if [ -f "$DIR/webui.py" ]; then
@@ -561,12 +569,13 @@ generate_container_files() {
         printf 'ContainerName=%s\n' "$CONTAINER_NAME"
         printf '# Container image from config or existing generated file\n'
         printf 'Image=%s\n' "$image"
-        if [ -f "$DIR/config.conf" ] || [ -f "$DIR/.env" ]; then
+        if [ -f "$DIR/config.conf" ] || [ -f "$DIR/container.conf" ] || [ -f "$DIR/.env" ]; then
             printf '# Runtime configuration files generated from *example files\n'
         fi
         [ -f "$DIR/config.conf" ] && printf 'EnvironmentFile=%s\n' "$DIR/config.conf"
+        [ -f "$DIR/container.conf" ] && printf 'EnvironmentFile=%s\n' "$DIR/container.conf"
         [ -f "$DIR/.env" ] && printf 'EnvironmentFile=%s\n' "$DIR/.env"
-        [ "${#ports[@]}" -gt 0 ] && printf '# Port mappings: HOST:PUBLISH_PORT:PORT from config.conf\n'
+        [ "${#ports[@]}" -gt 0 ] && printf '# Port mappings: HOST:PUBLISH_PORT:PORT from config.conf/container.conf\n'
         for item in "${ports[@]}"; do printf 'PublishPort=%s\n' "$item"; done
         if [ -f "$DIR/webui.py" ]; then
             printf '# Container-internal bind address; published host is controlled by HOST\n'
@@ -588,8 +597,8 @@ generate_container_files() {
     echo "  Written: $quadlet_file"
 }
 
-if [ ! -f "$DIR/env.example" ] && [ ! -f "$DIR/config.conf_example" ]; then
-    echo "No env.example or config.conf_example"
+if [ ! -f "$DIR/env.example" ] && [ ! -f "$DIR/config.conf_example" ] && [ ! -f "$DIR/container.example" ]; then
+    echo "No env.example, config.conf_example or container.example"
     exit 1
 fi
 
@@ -598,6 +607,7 @@ echo "  Configuring $PROJECT_NAME"
 
 configure_from_example "$DIR/env.example" "$DIR/.env" ".env"
 configure_from_example "$DIR/config.conf_example" "$DIR/config.conf" "config.conf"
+configure_from_example "$DIR/container.example" "$DIR/container.conf" "container.conf"
 generate_container_files
 
 echo ""
