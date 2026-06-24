@@ -1,5 +1,5 @@
-# Host bind address for the baremetal Web UI
-HOST=127.0.0.1
+# FastAPI bind address for the baremetal Web UI
+FASTAPI_HOST=127.0.0.1
 
 # CITADEL FastAPI Web UI port
 CITADEL_WEBUI_PORT=10999

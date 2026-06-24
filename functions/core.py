@@ -63,7 +63,7 @@ def _is_implicit_cloudflare_default(port: str, rule: dict) -> bool:
 
 def load_server_config() -> tuple[str, int]:
     """Read host/port from the already loaded environment."""
-    host = os.environ.get("HOST") or os.environ.get("CITADEL_HOST") or "0.0.0.0"
+    host = os.environ.get("FASTAPI_HOST") or "0.0.0.0"
     port = int(os.environ.get("CITADEL_WEBUI_PORT", "800") or "800")
     if not (1 <= port <= 65535):
         raise ValueError("CITADEL_WEBUI_PORT must be 1-65535.")

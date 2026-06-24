@@ -8,8 +8,8 @@ Usage — add this as first import in every entrypoint:
 How it works:
   1. Loads config.conf from the calling script's directory
   2. Loads auxiliary *.env files, then .env
-  3. INJECT_OVERWRITE decides whether injected process env wins over file values
-  4. If HOST was injected by the process, the web server binds 0.0.0.0
+  3. Injected process env wins over file values
+  4. If FASTAPI_HOST was injected by the process, the web server binds 0.0.0.0
   5. All values are accessible via env dict, get(), or os.environ
 
 Requires: pip install python-dotenv
@@ -21,7 +21,7 @@ from pathlib import Path
 from dotenv import dotenv_values
 
 _process_env = dict(os.environ)
-_process_env_has_host = "HOST" in _process_env
+_process_env_has_fastapi_host = "FASTAPI_HOST" in _process_env
 
 
 def _find_project_dir() -> Path:
@@ -34,12 +34,6 @@ def _find_project_dir() -> Path:
             if (directory / "config.conf").exists() or (directory / "config.conf_example").exists() or (directory / ".env").exists():
                 return directory
     return Path.cwd()
-
-
-def _as_bool(value: str, default: bool) -> bool:
-    if not value:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _apply_values(values: dict[str, str], overwrite: bool) -> None:
@@ -75,16 +69,14 @@ _config_file = _env_dir / "config.conf"
 if not _config_file.exists():
     _config_file = _env_dir / "config.conf_example"
 _config_values = _read_env_file(_config_file)
-_inject_overwrite = _as_bool(_config_values.pop("INJECT_OVERWRITE", "true"), True)
 _file_values = dict(_config_values)
 _file_values.update(_read_env_files(_env_dir))
-_apply_values(_file_values, overwrite=not _inject_overwrite)
+_apply_values(_file_values, overwrite=False)
 
-if _inject_overwrite:
-    _apply_values(_process_env, overwrite=True)
+_apply_values(_process_env, overwrite=True)
 
-if _process_env_has_host:
-    os.environ["HOST"] = "0.0.0.0"
+if _process_env_has_fastapi_host:
+    os.environ["FASTAPI_HOST"] = "0.0.0.0"
 
 
 def get(key: str, default: str = "") -> str:

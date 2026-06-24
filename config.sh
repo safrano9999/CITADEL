@@ -425,7 +425,7 @@ generate_container_files() {
     local -a named_volumes=()
     local item source
 
-    host="$(config_value HOST || true)"
+    host="$(config_value FASTAPI_HOST || true)"
     [ -n "$host" ] || host="127.0.0.1"
     image="$(project_image)"
     compose_file="$DIR/docker-compose.yml"
@@ -522,7 +522,7 @@ generate_container_files() {
         printf '    container_name: %s\n' "$CONTAINER_NAME"
         printf '    hostname: %s\n' "$CONTAINER_NAME"
         if [ "${#ports[@]}" -gt 0 ]; then
-            printf '    # Port mappings: HOST:PUBLISH_PORT:PORT from config.conf/container.conf\n'
+            printf '    # Port mappings: FASTAPI_HOST:PUBLISH_PORT:PORT from config.conf/container.conf\n'
             printf '    ports:\n'
             for item in "${ports[@]}"; do printf '      - "%s"\n' "$item"; done
         fi
@@ -534,7 +534,7 @@ generate_container_files() {
             [ -f "$DIR/.env" ] && printf '      - %s\n' "$DIR/.env"
         fi
         if [ -f "$DIR/webui.py" ]; then
-            printf '    # Container-internal bind address; published host is controlled by HOST\n'
+            printf '    # Container-internal bind address; published host is controlled by FASTAPI_HOST\n'
             printf '    command: uvicorn webui:app --host %s --port %s\n' "$command_host" "$first_port"
         fi
         if [ "${#volumes[@]}" -gt 0 ]; then
@@ -575,10 +575,10 @@ generate_container_files() {
         [ -f "$DIR/config.conf" ] && printf 'EnvironmentFile=%s\n' "$DIR/config.conf"
         [ -f "$DIR/container.conf" ] && printf 'EnvironmentFile=%s\n' "$DIR/container.conf"
         [ -f "$DIR/.env" ] && printf 'EnvironmentFile=%s\n' "$DIR/.env"
-        [ "${#ports[@]}" -gt 0 ] && printf '# Port mappings: HOST:PUBLISH_PORT:PORT from config.conf/container.conf\n'
+        [ "${#ports[@]}" -gt 0 ] && printf '# Port mappings: FASTAPI_HOST:PUBLISH_PORT:PORT from config.conf/container.conf\n'
         for item in "${ports[@]}"; do printf 'PublishPort=%s\n' "$item"; done
         if [ -f "$DIR/webui.py" ]; then
-            printf '# Container-internal bind address; published host is controlled by HOST\n'
+            printf '# Container-internal bind address; published host is controlled by FASTAPI_HOST\n'
             printf 'Exec=uvicorn webui:app --host %s --port %s\n' "$command_host" "$first_port"
         fi
         [ "${#volumes[@]}" -gt 0 ] && printf '# Volume mappings from *_VOLUMES in config.conf\n'

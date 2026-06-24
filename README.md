@@ -50,7 +50,7 @@ The script writes a local systemd unit, symlinks it into `~/.config/systemd/user
 
 | Variable | Default | Description |
 |---|---|---|
-| `HOST` | `127.0.0.1` | Web UI bind host |
+| `FASTAPI_HOST` | `127.0.0.1` | Web UI bind host |
 | `CITADEL_WEBUI_PORT` | `10999` | Web UI port |
 | `CITADEL_SUBNET_IP` | empty | IP used by the subnet provider |
 | `CITADEL_TAILSCALE` | `true` | Reconcile native Tailscale Serve routes when Tailscale is logged in |
