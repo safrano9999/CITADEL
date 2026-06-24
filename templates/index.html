@@ -138,6 +138,17 @@ let cloudflareEditing = false;
 let cloudflareInitialState = '';
 let cloudflareDirty = false;
 
+function splitCsv(value) {
+  return String(value || '')
+    .split(',')
+    .map(item => item.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function unique(values) {
+  return Array.from(new Set(values));
+}
+
 function addEmailRow(container, value = '') {
   const row = document.createElement('div');
   row.className = 'cloudflare-email-row';
@@ -153,6 +164,7 @@ function addEmailRow(container, value = '') {
   remove.addEventListener('click', event => {
     event.stopPropagation();
     row.remove();
+    markCloudflareDirty();
   });
   row.append(input, remove);
   container.appendChild(row);
@@ -210,7 +222,146 @@ function compactUrl(url) {
 
 function applyMode(mode) {
   const cloudflareMode = mode === 'cloudflare';
-  if (pageRefreshBtn) {
+  if (cloudflareEditBtn) {
+    cloudflareEditBtn.hidden = !cloudflareMode;
+  }
+  if (cloudflareSaveBtn) {
+    cloudflareSaveBtn.hidden = !(cloudflareMode && cloudflareEditing);
+  }
+
+  tiles.forEach(tile => {
+    const choice = chooseTileUrl(tile, mode);
+
+    tile.dataset.activeUrl = choice;
+    tile.classList.toggle('no-link', !choice);
+    tile.classList.toggle('cloudflare-editing', cloudflareMode && cloudflareEditing);
+
+    const editor = tile.querySelector('.cloudflare-editor');
+    if (editor) {
+      editor.hidden = !(cloudflareMode && cloudflareEditing);
+    }
+
+    const label = tile.querySelector('.tile-url');
+    if (!choice) {
+      label.textContent = '';
+    } else {
+      label.textContent = compactUrl(choice);
+    }
+  });
+
+  updateCloudflareSaveState();
+}
+
+function renderModeDefaultHint(mode) {
+  if (!modeDefaultHint) {
+    return;
+  }
+  const option = modeSel ? modeSel.querySelector(`option[value="${mode}"]`) : null;
+  if (!option) {
+    modeDefaultHint.textContent = 'Saved default: -';
+    return;
+  }
+  modeDefaultHint.textContent = `Saved default: ${option.textContent}`;
+}
+
+function openTile(tile) {
+  if (cloudflareEditing) {
+    return;
+  }
+  const url = tile.dataset.activeUrl || '';
+  if (!url) {
+    return;
+  }
+  window.open(url, '_blank', 'noopener');
+}
+
+function currentCloudflareState() {
+  const rules = {};
+  for (const tile of tiles) {
+    const editor = tile.querySelector('.cloudflare-editor');
+    if (!editor) continue;
+    const whitelist = editor.querySelector('.cloudflare-whitelist').checked;
+    const emails = unique(Array.from(editor.querySelectorAll('.cloudflare-email'))
+      .map(input => input.value.trim().toLowerCase())
+      .filter(Boolean));
+    const subdomains = unique(splitCsv(editor.querySelector('.cloudflare-subdomains').value));
+    rules[tile.dataset.port] = {
+      subdomains: subdomains.length ? subdomains : [tile.dataset.port],
+      whitelist,
+      emails: whitelist ? emails : [],
+    };
+  }
+  return JSON.stringify(rules);
+}
+
+function markCloudflareDirty() {
+  if (!cloudflareEditing) {
+    return;
+  }
+  try {
+    cloudflareDirty = currentCloudflareState() !== cloudflareInitialState;
+  } catch {
+    cloudflareDirty = true;
+  }
+  updateCloudflareSaveState();
+}
+
+function updateCloudflareSaveState() {
+  if (!cloudflareSaveBtn) {
+    return;
+  }
+  cloudflareSaveBtn.disabled = !cloudflareEditing || !cloudflareDirty;
+}
+
+async function saveCloudflareRules() {
+  const rules = {};
+  for (const tile of tiles) {
+    const editor = tile.querySelector('.cloudflare-editor');
+    if (!editor) continue;
+    const whitelist = editor.querySelector('.cloudflare-whitelist').checked;
+    const emails = unique(Array.from(editor.querySelectorAll('.cloudflare-email'))
+      .map(input => input.value.trim().toLowerCase())
+      .filter(Boolean));
+    const subdomains = unique(splitCsv(editor.querySelector('.cloudflare-subdomains').value));
+    if (!subdomains.length) {
+      throw new Error(`Port ${tile.dataset.port}: at least one subdomain or hostname is required.`);
+    }
+    if (whitelist && emails.length === 0) {
+      throw new Error(`Port ${tile.dataset.port}: whitelist requires at least one email.`);
+    }
+    rules[tile.dataset.port] = {
+      subdomains,
+      whitelist,
+      emails,
+    };
+  }
+  const response = await fetch('/api/cloudflare/ports', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(rules),
+  });
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch {}
+  if (!response.ok) {
+    throw new Error(payload.detail || 'Cloudflare settings could not be saved.');
+  }
+  cloudflareInitialState = currentCloudflareState();
+  cloudflareDirty = false;
+}
+
+tiles.forEach(tile => {
+  tile.addEventListener('click', () => openTile(tile));
+  tile.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openTile(tile);
+    }
+  });
+});
+
+if (pageRefreshBtn) {
   pageRefreshBtn.addEventListener('click', () => location.reload());
 }
 
@@ -250,7 +401,7 @@ if (cloudflareEditBtn) {
       }
       cloudflareDirty = false;
     }
-    applyMode(modeSel.value);
+    applyMode(modeSel ? modeSel.value : defaultMode);
   });
 }
 
@@ -262,6 +413,7 @@ if (cloudflareSaveBtn) {
     } catch (error) {
       window.alert(error.message);
     } finally {
+      cloudflareSaveBtn.disabled = false;
       updateCloudflareSaveState();
     }
   });
