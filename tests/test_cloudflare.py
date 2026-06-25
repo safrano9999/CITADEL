@@ -115,7 +115,7 @@ class CloudflareDefaultsTests(unittest.TestCase):
         old_stdin = sys.stdin
         try:
             cloudflare_defaults.cloudflare_ready = lambda _root: (True, "test")
-            cloudflare_defaults.project_get = lambda _root, key, default="": email if key == "cloudflare_email" else default
+            cloudflare_defaults.project_get = lambda _root, key, default="": email if key == "CLOUDFLARE_EMAIL" else default
             sys.argv = [
                 "cloudflare_defaults.py",
                 "--root",

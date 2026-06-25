@@ -60,9 +60,9 @@ The script writes a local systemd unit, symlinks it into `~/.config/systemd/user
 | `CITADEL_CLOUDFLARE_ZONE_ID` | empty | Cloudflare zone ID |
 | `CITADEL_CLOUDFLARE_TUNNEL_ID` | empty | Existing named Tunnel ID |
 | `CITADEL_CLOUDFLARE_ORIGIN_HOST` | `127.0.0.1` | Origin address as seen by cloudflared |
-| `cloudflare_email` | empty | Default Access email whitelist for new Cloudflare routes; Cloudflare is skipped when missing |
+| `CLOUDFLARE_EMAIL` | empty | Default Access email whitelist for new Cloudflare routes; Cloudflare is skipped when missing |
 
-These non-secret values live in `config.conf`. `CLOUDFLARE_API_TOKEN`, `cloudflare_email`, and the separately consumed `TUNNEL_TOKEN` live in `.env`.
+These non-secret values live in `config.conf`. `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_EMAIL`, and the separately consumed `TUNNEL_TOKEN` live in `.env`.
 
 ## Core Idea
 

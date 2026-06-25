@@ -39,7 +39,7 @@ Store the generated token in `.env`:
 
 ```env
 CLOUDFLARE_API_TOKEN=your_token_here
-cloudflare_email=admin@example.com
+CLOUDFLARE_EMAIL=admin@example.com
 ```
 
 ### Agent
@@ -68,7 +68,7 @@ CITADEL_CLOUDFLARE_ZONE_ID=resolved_zone_id
 CITADEL_CLOUDFLARE_TUNNEL_ID=resolved_tunnel_id
 ```
 
-Preserve the existing `CLOUDFLARE_API_TOKEN` and `cloudflare_email`. Verify that every value can be read through `python_header.py` before the first scan.
+Preserve the existing `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_EMAIL`. Verify that every value can be read through `python_header.py` before the first scan.
 
 Initialize Cloudflare Access through the API before applying any email whitelist:
 
@@ -92,15 +92,15 @@ Run the normal CITADEL scan after the agent has written and verified the Cloudfl
 ./scan.sh
 ```
 
-Set `cloudflare_email` in `.env` before the first scan, for example:
+Set `CLOUDFLARE_EMAIL` in `.env` before the first scan, for example:
 
 ```env
-cloudflare_email=admin@example.com,ops@example.com
+CLOUDFLARE_EMAIL=admin@example.com,ops@example.com
 ```
 
 New Cloudflare routes use this address list as the default Access email whitelist.
 
-If `cloudflare_email` is missing or invalid, CITADEL skips Cloudflare during scan instead of creating public routes.
+If `CLOUDFLARE_EMAIL` is missing or invalid, CITADEL skips Cloudflare during scan instead of creating public routes.
 
 ### Agent
 
@@ -109,10 +109,10 @@ During `scan.sh`, after local services have been discovered and before Cloudflar
 - Cloudflare provider is in `extensions/enabled/cloudflare`
 - `CITADEL_CLOUDFLARE=1`
 - `CLOUDFLARE_API_TOKEN` exists and is valid
-- `cloudflare_email` exists and is valid
+- `CLOUDFLARE_EMAIL` exists and is valid
 - HTTP services were discovered
 
-If the Cloudflare defaults were not configured yet, read `cloudflare_email` and store it as the default whitelist in `ports.filter.json` so the next scan does not ask again.
+If the Cloudflare defaults were not configured yet, read `CLOUDFLARE_EMAIL` and store it as the default whitelist in `ports.filter.json` so the next scan does not ask again.
 
 If whitelist emails are provided, apply them to every newly discovered Cloudflare port that does not already have an explicit rule.
 

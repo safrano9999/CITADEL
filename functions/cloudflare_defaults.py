@@ -135,9 +135,9 @@ def main() -> int:
     configured = bool(defaults.get("configured", False))
 
     if not configured:
-        raw_email = project_get(root, "cloudflare_email", "")
+        raw_email = project_get(root, "CLOUDFLARE_EMAIL", "")
         if not raw_email:
-            print("cloudflare defaults: skipped (cloudflare_email is missing)")
+            print("cloudflare defaults: skipped (CLOUDFLARE_EMAIL is missing)")
             return 0
         try:
             emails = normalize_emails_csv(raw_email)
@@ -145,7 +145,7 @@ def main() -> int:
             print(f"cloudflare defaults: skipped ({exc})")
             return 0
         if not emails:
-            print("cloudflare defaults: skipped (cloudflare_email is empty)")
+            print("cloudflare defaults: skipped (CLOUDFLARE_EMAIL is empty)")
             return 0
         defaults = {
             "configured": True,
@@ -153,7 +153,7 @@ def main() -> int:
             "emails": emails,
         }
         policy["cloudflare_defaults"] = defaults
-        print("cloudflare defaults: saved from cloudflare_email")
+        print("cloudflare defaults: saved from CLOUDFLARE_EMAIL")
 
     default_whitelist = bool(defaults.get("whitelist", False))
     default_emails = []

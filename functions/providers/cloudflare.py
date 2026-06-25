@@ -268,7 +268,7 @@ def main() -> int:
     tunnel_id = get("CITADEL_CLOUDFLARE_TUNNEL_ID", "")
     origin_host = get("CITADEL_CLOUDFLARE_ORIGIN_HOST", "127.0.0.1")
     token = get("CLOUDFLARE_API_TOKEN", "")
-    default_email = get("cloudflare_email", "")
+    default_email = get("CLOUDFLARE_EMAIL", "")
     label = str(ext_cfg.get("label") or "Cloudflare")
     errors: list[str] = []
     routes: dict[str, str] = {}
@@ -285,13 +285,13 @@ def main() -> int:
         "CITADEL_CLOUDFLARE_ZONE_ID": zone_id,
         "CITADEL_CLOUDFLARE_TUNNEL_ID": tunnel_id,
         "CLOUDFLARE_API_TOKEN": token,
-        "cloudflare_email": default_email,
+        "CLOUDFLARE_EMAIL": default_email,
     }
     missing = [key for key, value in required.items() if not value]
     api = CloudflareAPI(token) if token else None
-    if enabled and "cloudflare_email" in missing:
+    if enabled and "CLOUDFLARE_EMAIL" in missing:
         enabled = False
-        missing = [key for key in missing if key != "cloudflare_email"]
+        missing = [key for key in missing if key != "CLOUDFLARE_EMAIL"]
     try:
         if enabled and missing:
             raise CloudflareAPIError(f"Missing Cloudflare settings: {', '.join(missing)}")
