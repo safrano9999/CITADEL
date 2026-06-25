@@ -157,6 +157,17 @@ normalize_provider_value() {
     printf '%s\n' "${value,,}"
 }
 
+normalize_rule_value() {
+    local value="$1"
+    value="$(trim "$value")"
+    value="${value,,}"
+    case "$value" in
+        0|false|no|off) printf 'false\n' ;;
+        1|true|yes|on) printf 'true\n' ;;
+        *) printf '%s\n' "$value" ;;
+    esac
+}
+
 add_unique() {
     local value="$1"
     shift
@@ -352,7 +363,45 @@ configure_from_example() {
     touch "$target"
     declare -A seen_keys=()
     declare -A sqlite_db_prefixes=()
+    declare -A blank_if_targets=()
+    declare -A autofill_blank_keys=()
     local required_next=false
+    local directive condition condition_key condition_value target_key target_list
+    local rule_key
+
+    while IFS= read -r line <&4; do
+        stripped="${line#"${line%%[![:space:]]*}"}"
+        [[ "$stripped" == \#blank-if:* ]] || continue
+        directive="$(trim "${stripped#\#blank-if:}")"
+        [ -n "$directive" ] || continue
+
+        condition="${directive%%[[:space:]]*}"
+        target_list="${directive#"$condition"}"
+        target_list="$(trim "$target_list")"
+        [[ "$condition" == *=* ]] || continue
+
+        condition_key="$(trim "${condition%%=*}")"
+        condition_value="$(normalize_rule_value "${condition#*=}")"
+        [[ "$condition_key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        [ -n "$target_list" ] || continue
+
+        rule_key="${condition_key}=${condition_value}"
+        blank_if_targets[$rule_key]="${blank_if_targets[$rule_key]:-} $target_list"
+    done 4< "$example"
+
+    activate_blank_rules() {
+        local control_key="$1"
+        local control_value="$2"
+        local rule_key targets target_key
+
+        rule_key="${control_key}=$(normalize_rule_value "$control_value")"
+        targets="${blank_if_targets[$rule_key]:-}"
+        [ -n "$targets" ] || return 0
+        for target_key in $targets; do
+            [[ "$target_key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+            autofill_blank_keys[$target_key]=1
+        done
+    }
 
     while IFS= read -r line <&3; do
         stripped="${line#"${line%%[![:space:]]*}"}"
@@ -409,8 +458,15 @@ configure_from_example() {
 
         if [ -n "$db_prefix" ] && [ "$key" != "${db_prefix}_DB_BACKEND" ] && [[ -n "${sqlite_db_prefixes[$db_prefix]+x}" ]]; then
             sed -i "/^${key}=/d" "$target" 2>/dev/null || true
-            echo "$key=sqlite" >> "$target"
-            echo "    $key= sqlite"
+            echo "$key=blank" >> "$target"
+            echo "    $key= blank"
+            continue
+        fi
+
+        if [[ -n "${autofill_blank_keys[$key]+x}" ]]; then
+            sed -i "/^${key}=/d" "$target" 2>/dev/null || true
+            echo "$key=blank" >> "$target"
+            echo "    $key= blank"
             continue
         fi
 
@@ -423,6 +479,7 @@ configure_from_example() {
             if [ -n "$db_prefix" ] && [ "$key" = "${db_prefix}_DB_BACKEND" ] && [ "${env_existing,,}" = "sqlite" ]; then
                 sqlite_db_prefixes[$db_prefix]=1
             fi
+            activate_blank_rules "$key" "$env_existing"
             continue
         fi
         if [ -n "$existing_line" ] && { [ "$required" != "true" ] || [ -n "$existing" ]; }; then
@@ -430,6 +487,7 @@ configure_from_example() {
             if [ -n "$db_prefix" ] && [ "$key" = "${db_prefix}_DB_BACKEND" ] && [ "${existing,,}" = "sqlite" ]; then
                 sqlite_db_prefixes[$db_prefix]=1
             fi
+            activate_blank_rules "$key" "$existing"
             continue
         fi
         sed -i "/^${key}=$/d" "$target" 2>/dev/null || true
@@ -440,6 +498,7 @@ configure_from_example() {
             if [ -n "$db_prefix" ] && [ "$key" = "${db_prefix}_DB_BACKEND" ] && [ "${env_existing,,}" = "sqlite" ]; then
                 sqlite_db_prefixes[$db_prefix]=1
             fi
+            activate_blank_rules "$key" "$env_existing"
             continue
         fi
 
@@ -491,6 +550,7 @@ configure_from_example() {
             sqlite_db_prefixes[$db_prefix]=1
         fi
         echo "$key=$val" >> "$target"
+        activate_blank_rules "$key" "$val"
     done 3< "$example"
 
     rewrite_config_with_comments "$example" "$target"

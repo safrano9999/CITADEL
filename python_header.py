@@ -27,6 +27,13 @@ _process_env = dict(os.environ)
 _process_env_has_fastapi_host = "FASTAPI_HOST" in _process_env
 
 
+def _normalize_env_value(value: str | None) -> str:
+    value = "" if value is None else str(value)
+    if value.strip().lower() == "blank":
+        return ""
+    return value
+
+
 def _find_project_dir() -> Path:
     """Walk the call stack to find the project directory."""
     import inspect
@@ -44,7 +51,7 @@ def _apply_values(values: dict[str, str], overwrite: bool) -> None:
         if not key:
             continue
         if overwrite or key not in os.environ:
-            os.environ[key] = value
+            os.environ[key] = _normalize_env_value(value)
 
 
 def _read_env_file(path: Path) -> dict[str, str]:
@@ -52,7 +59,7 @@ def _read_env_file(path: Path) -> dict[str, str]:
     if not path.exists():
         return values
     for key, value in dotenv_values(path).items():
-        values[key] = "" if value is None else str(value)
+        values[key] = _normalize_env_value(value)
     return values
 
 
