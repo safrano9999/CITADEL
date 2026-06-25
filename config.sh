@@ -351,6 +351,7 @@ configure_from_example() {
 
     touch "$target"
     declare -A seen_keys=()
+    declare -A sqlite_db_prefixes=()
     local required_next=false
 
     while IFS= read -r line <&3; do
@@ -385,11 +386,32 @@ configure_from_example() {
         fi
         seen_keys[$key]=1
 
+        db_prefix=""
+        if [[ "$key" =~ ^(.+)_DB_BACKEND$ ]]; then
+            db_prefix="${BASH_REMATCH[1]}"
+        elif [[ "$key" =~ ^(.+)_DB_ ]]; then
+            db_prefix="${BASH_REMATCH[1]}"
+        fi
+        if [ -n "$db_prefix" ]; then
+            if [ "$key" = "${db_prefix}_DB_BACKEND" ]; then
+                required=true
+            elif [[ -z "${sqlite_db_prefixes[$db_prefix]+x}" ]]; then
+                required=true
+            fi
+        fi
+
         env_existing=""
         if [ "$(basename "$target")" = "config.conf" ]; then
             env_existing="$(read_kv_file "$DIR/.env" "$key" || true)"
         elif [ "$(basename "$target")" = "container.conf" ]; then
             env_existing="$(read_kv_file "$DIR/config.conf" "$key" || read_kv_file "$DIR/.env" "$key" || true)"
+        fi
+
+        if [ -n "$db_prefix" ] && [ "$key" != "${db_prefix}_DB_BACKEND" ] && [[ -n "${sqlite_db_prefixes[$db_prefix]+x}" ]]; then
+            sed -i "/^${key}=/d" "$target" 2>/dev/null || true
+            echo "$key=sqlite" >> "$target"
+            echo "    $key= sqlite"
+            continue
         fi
 
         existing_line="$(grep "^${key}=" "$target" 2>/dev/null | head -1 || true)"
@@ -398,10 +420,16 @@ configure_from_example() {
             sed -i "/^${key}=/d" "$target" 2>/dev/null || true
             echo "$key=$env_existing" >> "$target"
             echo "    $key= migrated from .env"
+            if [ -n "$db_prefix" ] && [ "$key" = "${db_prefix}_DB_BACKEND" ] && [ "${env_existing,,}" = "sqlite" ]; then
+                sqlite_db_prefixes[$db_prefix]=1
+            fi
             continue
         fi
         if [ -n "$existing_line" ] && { [ "$required" != "true" ] || [ -n "$existing" ]; }; then
             [ "$CONFIG_SHOW" = "--show" ] && echo "    $key=$existing" || echo "    $key= exists"
+            if [ -n "$db_prefix" ] && [ "$key" = "${db_prefix}_DB_BACKEND" ] && [ "${existing,,}" = "sqlite" ]; then
+                sqlite_db_prefixes[$db_prefix]=1
+            fi
             continue
         fi
         sed -i "/^${key}=$/d" "$target" 2>/dev/null || true
@@ -409,6 +437,9 @@ configure_from_example() {
         if [ -n "$env_existing" ]; then
             echo "$key=$env_existing" >> "$target"
             echo "    $key= migrated from .env"
+            if [ -n "$db_prefix" ] && [ "$key" = "${db_prefix}_DB_BACKEND" ] && [ "${env_existing,,}" = "sqlite" ]; then
+                sqlite_db_prefixes[$db_prefix]=1
+            fi
             continue
         fi
 
@@ -455,6 +486,9 @@ configure_from_example() {
                 echo "    $key= skipped"
                 continue
             fi
+        fi
+        if [ -n "$db_prefix" ] && [ "$key" = "${db_prefix}_DB_BACKEND" ] && [ "${val,,}" = "sqlite" ]; then
+            sqlite_db_prefixes[$db_prefix]=1
         fi
         echo "$key=$val" >> "$target"
     done 3< "$example"

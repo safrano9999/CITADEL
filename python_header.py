@@ -16,7 +16,10 @@ Requires: pip install python-dotenv
 """
 
 import os
+import re
+from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from dotenv import dotenv_values
 
@@ -109,6 +112,149 @@ def get_port(key: str, default: int = 8080) -> int:
     if not (1 <= port <= 65535):
         raise ValueError(f"{key}={port} is not a valid port (1-65535)")
     return port
+
+
+@dataclass(frozen=True)
+class OpenAIV1Provider:
+    index: int
+    suffix: str
+    env_prefix: str
+    base_url: str
+    api_key: str
+
+    @property
+    def key(self) -> str:
+        return "openai_v1" if self.index == 1 else f"openai_v1_{self.index}"
+
+    @property
+    def label(self) -> str:
+        return "OpenAI v1" if self.index == 1 else f"OpenAI v1 #{self.index}"
+
+
+def _clean_openai_v1(value: str | None) -> str:
+    return (value or "").strip().strip('"').strip("'")
+
+
+def _normalize_openai_v1_base_url(raw_url: str, raw_port: str = "") -> str:
+    url = _clean_openai_v1(raw_url).rstrip("/")
+    port = _clean_openai_v1(raw_port)
+    if not url:
+        return ""
+    if "://" not in url:
+        url = f"http://{url}"
+    if url.endswith("/v1"):
+        url = url[:-3].rstrip("/")
+
+    parsed = urlsplit(url)
+    try:
+        has_port = parsed.port is not None
+    except ValueError:
+        has_port = False
+
+    netloc = parsed.netloc
+    if port and not has_port:
+        netloc = f"{netloc}:{port}"
+
+    base = urlunsplit((parsed.scheme, netloc, parsed.path.rstrip("/"), "", "")).rstrip("/")
+    return f"{base}/v1"
+
+
+def _openai_v1_suffixes(values: dict[str, str]) -> list[tuple[int, str]]:
+    indexes = {1}
+    pattern = re.compile(r"^OPENAI_V1_(?:URL|PORT|KEY)_(\d+)$")
+    for key in values:
+        match = pattern.match(key)
+        if match:
+            indexes.add(int(match.group(1)))
+    return [(index, "" if index == 1 else f"_{index}") for index in sorted(indexes)]
+
+
+def openai_v1_providers(values: dict[str, str] | None = None) -> list[OpenAIV1Provider]:
+    source = dict(os.environ) if values is None else values
+    providers: list[OpenAIV1Provider] = []
+    for index, suffix in _openai_v1_suffixes(source):
+        base_url = _normalize_openai_v1_base_url(
+            source.get(f"OPENAI_V1_URL{suffix}", ""),
+            source.get(f"OPENAI_V1_PORT{suffix}", ""),
+        )
+        if not base_url:
+            continue
+        providers.append(
+            OpenAIV1Provider(
+                index=index,
+                suffix=suffix,
+                env_prefix=f"OPENAI_V1{suffix}",
+                base_url=base_url,
+                api_key=_clean_openai_v1(source.get(f"OPENAI_V1_KEY{suffix}", "")),
+            )
+        )
+    return providers
+
+
+def openai_v1_first_provider(values: dict[str, str] | None = None) -> OpenAIV1Provider | None:
+    providers = openai_v1_providers(values)
+    return providers[0] if providers else None
+
+
+def openai_v1_client(provider: OpenAIV1Provider | None = None, *, timeout: float = 60.0):
+    provider = provider or openai_v1_first_provider()
+    if provider is None:
+        raise RuntimeError("OPENAI_V1_URL is not configured.")
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise RuntimeError("Python package 'openai' is required for OpenAI v1 calls.") from exc
+    return OpenAI(api_key=provider.api_key or "not-needed", base_url=provider.base_url, timeout=timeout)
+
+
+def openai_v1_async_client(provider: OpenAIV1Provider | None = None, *, timeout: float = 60.0):
+    provider = provider or openai_v1_first_provider()
+    if provider is None:
+        raise RuntimeError("OPENAI_V1_URL is not configured.")
+    try:
+        from openai import AsyncOpenAI
+    except ImportError as exc:
+        raise RuntimeError("Python package 'openai' is required for OpenAI v1 calls.") from exc
+    return AsyncOpenAI(api_key=provider.api_key or "not-needed", base_url=provider.base_url, timeout=timeout)
+
+
+def openai_v1_models(provider: OpenAIV1Provider | None = None, *, timeout: float = 10.0) -> list[str]:
+    client = openai_v1_client(provider, timeout=timeout)
+    response = client.models.list()
+    return sorted({model.id for model in response.data if getattr(model, "id", "")})
+
+
+def openai_v1_provider_models(
+    values: dict[str, str] | None = None,
+    *,
+    timeout: float = 10.0,
+) -> dict[OpenAIV1Provider, list[str]]:
+    result: dict[OpenAIV1Provider, list[str]] = {}
+    for provider in openai_v1_providers(values):
+        result[provider] = openai_v1_models(provider, timeout=timeout)
+    return result
+
+
+def openai_v1_provider_for_model(
+    model: str,
+    values: dict[str, str] | None = None,
+    *,
+    timeout: float = 10.0,
+) -> OpenAIV1Provider | None:
+    providers = openai_v1_providers(values)
+    if not providers:
+        return None
+    if len(providers) == 1:
+        return providers[0]
+
+    wanted = (model or "").strip()
+    for provider in providers:
+        try:
+            if wanted in openai_v1_models(provider, timeout=timeout):
+                return provider
+        except Exception:
+            continue
+    return providers[0]
 
 
 # Snapshot for dict-style access: env["KEY"] or env.get("KEY", "default")
