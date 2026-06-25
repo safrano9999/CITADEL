@@ -10,7 +10,19 @@ fi
 
 PROJECT_NAME="$(basename "$DIR")"
 CONTAINER_NAME="${PROJECT_NAME,,}"
-CONFIG_SHOW="${1:-}"
+CONFIG_SHOW=""
+NO_CONTAINER=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --show) CONFIG_SHOW="--show" ;;
+        --no-container) NO_CONTAINER=true ;;
+        *)
+            echo "Unknown argument: $arg" >&2
+            exit 2
+            ;;
+    esac
+done
 
 trim() {
     local value="$1"
@@ -47,7 +59,16 @@ config_value() {
     local key="$1"
     local file
 
-    for file in "$DIR/container.conf" "$DIR/config.conf" "$DIR/.env" "$DIR/container.example" "$DIR/config.conf_example" "$DIR/env.example"; do
+    if [ "$NO_CONTAINER" != "true" ]; then
+        read_kv_file "$DIR/container.conf" "$key" && return 0
+    fi
+    for file in "$DIR/config.conf" "$DIR/.env"; do
+        read_kv_file "$file" "$key" && return 0
+    done
+    if [ "$NO_CONTAINER" != "true" ]; then
+        read_kv_file "$DIR/container.example" "$key" && return 0
+    fi
+    for file in "$DIR/config.conf_example" "$DIR/env.example"; do
         read_kv_file "$file" "$key" && return 0
     done
     return 1
@@ -486,10 +507,12 @@ config_source_files() {
     elif [ -f "$DIR/config.conf_example" ]; then
         printf '%s\n' "$DIR/config.conf_example"
     fi
-    if [ -f "$DIR/container.conf" ]; then
-        printf '%s\n' "$DIR/container.conf"
-    elif [ -f "$DIR/container.example" ]; then
-        printf '%s\n' "$DIR/container.example"
+    if [ "$NO_CONTAINER" != "true" ]; then
+        if [ -f "$DIR/container.conf" ]; then
+            printf '%s\n' "$DIR/container.conf"
+        elif [ -f "$DIR/container.example" ]; then
+            printf '%s\n' "$DIR/container.example"
+        fi
     fi
 }
 
@@ -701,7 +724,9 @@ echo "  Configuring $PROJECT_NAME"
 
 configure_from_example "$DIR/env.example" "$DIR/.env" ".env"
 configure_from_example "$DIR/config.conf_example" "$DIR/config.conf" "config.conf"
-configure_from_example "$DIR/container.example" "$DIR/container.conf" "container.conf"
-generate_container_files
+if [ "$NO_CONTAINER" != "true" ]; then
+    configure_from_example "$DIR/container.example" "$DIR/container.conf" "container.conf"
+    generate_container_files
+fi
 
 echo ""
