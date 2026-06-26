@@ -126,6 +126,7 @@ class OpenAIV1Provider:
     index: int
     suffix: str
     env_prefix: str
+    provider: str
     base_url: str
     api_key: str
 
@@ -168,7 +169,7 @@ def _normalize_openai_v1_base_url(raw_url: str, raw_port: str = "") -> str:
 
 def _openai_v1_suffixes(values: dict[str, str]) -> list[tuple[int, str]]:
     indexes = {1}
-    pattern = re.compile(r"^OPENAI_V1_(?:URL|PORT|KEY)_(\d+)$")
+    pattern = re.compile(r"^OPENAI_V1_(?:PROVIDER|URL|PORT|KEY)_(\d+)$")
     for key in values:
         match = pattern.match(key)
         if match:
@@ -176,13 +177,28 @@ def _openai_v1_suffixes(values: dict[str, str]) -> list[tuple[int, str]]:
     return [(index, "" if index == 1 else f"_{index}") for index in sorted(indexes)]
 
 
+def _openai_v1_value(source: dict[str, str], field: str, index: int) -> str:
+    if index == 1:
+        return source.get(f"OPENAI_V1_{field}", "")
+    for suffix in (f"_{index}", f"_{index:02d}"):
+        value = source.get(f"OPENAI_V1_{field}{suffix}", "")
+        if value:
+            return value
+    pattern = re.compile(rf"^OPENAI_V1_{re.escape(field)}_(\d+)$")
+    for key in sorted(source):
+        match = pattern.match(key)
+        if match and int(match.group(1)) == index:
+            return source.get(key, "")
+    return ""
+
+
 def openai_v1_providers(values: dict[str, str] | None = None) -> list[OpenAIV1Provider]:
     source = dict(os.environ) if values is None else values
     providers: list[OpenAIV1Provider] = []
     for index, suffix in _openai_v1_suffixes(source):
         base_url = _normalize_openai_v1_base_url(
-            source.get(f"OPENAI_V1_URL{suffix}", ""),
-            source.get(f"OPENAI_V1_PORT{suffix}", ""),
+            _openai_v1_value(source, "URL", index),
+            _openai_v1_value(source, "PORT", index),
         )
         if not base_url:
             continue
@@ -191,8 +207,9 @@ def openai_v1_providers(values: dict[str, str] | None = None) -> list[OpenAIV1Pr
                 index=index,
                 suffix=suffix,
                 env_prefix=f"OPENAI_V1{suffix}",
+                provider=_clean_openai_v1(_openai_v1_value(source, "PROVIDER", index)),
                 base_url=base_url,
-                api_key=_clean_openai_v1(source.get(f"OPENAI_V1_KEY{suffix}", "")),
+                api_key=_clean_openai_v1(_openai_v1_value(source, "KEY", index)),
             )
         )
     return providers
