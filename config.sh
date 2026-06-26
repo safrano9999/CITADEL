@@ -635,11 +635,20 @@ mount_if_source_files() {
     fi
 }
 
+mount_bind_from_value() {
+    local key="$1"
+    local rel
+
+    rel="$(config_value "$key" || true)"
+    [ -n "$rel" ] || return 0
+    add_repo_bind_mount "$rel"
+}
+
 generate_container_files() {
     local source_file host image compose_file quadlet_file line stripped entry key value
     local prefix internal_key internal_port publish_port publish_host map
     local first_port="" command_host="0.0.0.0"
-    local directive condition condition_key condition_value target_list rel
+    local directive condition condition_key condition_value target_list target_key rel
     local -a ports=()
     local -a volumes=()
     local -a devices=()
@@ -657,6 +666,15 @@ generate_container_files() {
         [ -f "$source_file" ] || continue
         while IFS= read -r line || [ -n "$line" ]; do
             stripped="$(trim "$line")"
+            if [[ "$stripped" == \#mount-bind:* ]]; then
+                directive="$(trim "${stripped#\#mount-bind:}")"
+                [ -n "$directive" ] || continue
+                for target_key in $directive; do
+                    [[ "$target_key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+                    mount_bind_from_value "$target_key"
+                done
+                continue
+            fi
             [[ "$stripped" == \#mount-if:* ]] || continue
             directive="$(trim "${stripped#\#mount-if:}")"
             [ -n "$directive" ] || continue
@@ -691,10 +709,6 @@ generate_container_files() {
 
             key="$(trim "${entry%%=*}")"
             value="$(config_value "$key" || true)"
-
-            if [[ "$key" == *_VIDEOS_DIR ]]; then
-                add_repo_bind_mount "$value"
-            fi
 
             if [[ "$key" == *_PUBLISH_PORT ]]; then
                 prefix="${key%_PUBLISH_PORT}"
