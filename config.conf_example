@@ -1,31 +1,22 @@
-# FastAPI bind address for the baremetal Web UI
 #publish-host: FASTAPI_HOST
 #required: FastAPI bind host
 FASTAPI_HOST=127.0.0.1
 
-# CITADEL FastAPI Web UI port
 #required: CITADEL internal web UI port
 CITADEL_WEBUI_PORT=10999
 
-# Host subnet IP used by CITADEL scans
 #default-preset: insert later
 CITADEL_SUBNET_IP=
 
-# Map routes from an already logged-in host Tailscale daemon.
-# CITADEL never starts or logs into Tailscale.
 #default-preset: insert later
 CITADEL_TAILSCALE=true
 
-# Reconcile Cloudflare DNS, Tunnel ingress, and optional Access email policies.
-# CITADEL never starts or authenticates cloudflared.
 #default-preset: insert later
 CITADEL_CLOUDFLARE=1
 
-# Default suffix for generated hostnames. May be the zone itself or a subdomain.
 #default-preset: insert later
 CITADEL_CLOUDFLARE_DOMAIN=
 
-# Cloudflare resources used by the deterministic API reconcile.
 #default-preset: insert later
 CITADEL_CLOUDFLARE_ACCOUNT_ID=
 #default-preset: insert later
@@ -33,6 +24,5 @@ CITADEL_CLOUDFLARE_ZONE_ID=
 #default-preset: insert later
 CITADEL_CLOUDFLARE_TUNNEL_ID=
 
-# Origin as seen by cloudflared. Keep 127.0.0.1 for baremetal or host networking.
 #default-preset: insert later
 CITADEL_CLOUDFLARE_ORIGIN_HOST=127.0.0.1

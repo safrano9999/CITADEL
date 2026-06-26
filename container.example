@@ -1,3 +1,2 @@
-# CITADEL Web UI host port when generated as container/quadlet
 #required: CITADEL published web UI port
 CITADEL_WEBUI_PUBLISH_PORT=10999
