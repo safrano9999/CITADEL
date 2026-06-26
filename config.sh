@@ -635,6 +635,25 @@ mount_if_source_files() {
     fi
 }
 
+publish_host_key() {
+    local source_file line stripped directive target_key
+
+    while IFS= read -r source_file || [ -n "$source_file" ]; do
+        [ -f "$source_file" ] || continue
+        while IFS= read -r line || [ -n "$line" ]; do
+            stripped="$(trim "$line")"
+            [[ "$stripped" == \#publish-host:* ]] || continue
+            directive="$(trim "${stripped#\#publish-host:}")"
+            for target_key in $directive; do
+                [[ "$target_key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+                printf '%s\n' "$target_key"
+                return 0
+            done
+        done < "$source_file"
+    done < <(mount_if_source_files)
+    return 1
+}
+
 mount_bind_from_value() {
     local key="$1"
     local rel
@@ -649,6 +668,7 @@ generate_container_files() {
     local prefix internal_key internal_port publish_port publish_host map
     local first_port="" command_host="0.0.0.0"
     local directive condition condition_key condition_value target_list target_key rel
+    local host_key
     local -a ports=()
     local -a volumes=()
     local -a devices=()
@@ -656,7 +676,12 @@ generate_container_files() {
     local -a named_volumes=()
     local item source
 
-    host="$(config_value FASTAPI_HOST || true)"
+    host_key="$(publish_host_key || true)"
+    if [ -n "$host_key" ]; then
+        host="$(config_value "$host_key" || true)"
+    else
+        host=""
+    fi
     [ -n "$host" ] || host="127.0.0.1"
     image="$(project_image)"
     compose_file="$DIR/docker-compose.yml"
@@ -791,7 +816,7 @@ generate_container_files() {
         printf '    container_name: %s\n' "$CONTAINER_NAME"
         printf '    hostname: %s\n' "$CONTAINER_NAME"
         if [ "${#ports[@]}" -gt 0 ]; then
-            printf '    # Port mappings: FASTAPI_HOST:PUBLISH_PORT:PORT from config.conf/container.conf\n'
+            printf '    # Port mappings: publish host:PUBLISH_PORT:PORT from config.conf/container.conf\n'
             printf '    ports:\n'
             for item in "${ports[@]}"; do printf '      - "%s"\n' "$item"; done
         fi
@@ -803,7 +828,7 @@ generate_container_files() {
             [ -f "$DIR/.env" ] && printf '      - %s\n' "$DIR/.env"
         fi
         if [ -f "$DIR/webui.py" ]; then
-            printf '    # Container-internal bind address; published host is controlled by FASTAPI_HOST\n'
+            printf '    # Container-internal bind address; published host is controlled by config\n'
             printf '    command: uvicorn webui:app --host %s --port %s\n' "$command_host" "$first_port"
         fi
         if [ "${#volumes[@]}" -gt 0 ]; then
@@ -844,10 +869,10 @@ generate_container_files() {
         [ -f "$DIR/config.conf" ] && printf 'EnvironmentFile=%s\n' "$DIR/config.conf"
         [ -f "$DIR/container.conf" ] && printf 'EnvironmentFile=%s\n' "$DIR/container.conf"
         [ -f "$DIR/.env" ] && printf 'EnvironmentFile=%s\n' "$DIR/.env"
-        [ "${#ports[@]}" -gt 0 ] && printf '# Port mappings: FASTAPI_HOST:PUBLISH_PORT:PORT from config.conf/container.conf\n'
+        [ "${#ports[@]}" -gt 0 ] && printf '# Port mappings: publish host:PUBLISH_PORT:PORT from config.conf/container.conf\n'
         for item in "${ports[@]}"; do printf 'PublishPort=%s\n' "$item"; done
         if [ -f "$DIR/webui.py" ]; then
-            printf '# Container-internal bind address; published host is controlled by FASTAPI_HOST\n'
+            printf '# Container-internal bind address; published host is controlled by config\n'
             printf 'Exec=uvicorn webui:app --host %s --port %s\n' "$command_host" "$first_port"
         fi
         [ "${#volumes[@]}" -gt 0 ] && printf '# Bind mounts and named volumes from runtime config\n'

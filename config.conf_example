@@ -1,4 +1,5 @@
 # FastAPI bind address for the baremetal Web UI
+#publish-host: FASTAPI_HOST
 #required: FastAPI bind host
 FASTAPI_HOST=127.0.0.1
 
