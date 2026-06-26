@@ -157,6 +157,11 @@ normalize_provider_value() {
     printf '%s\n' "${value,,}"
 }
 
+provider_selector_key() {
+    local key="$1"
+    [[ "$key" =~ (^|_)PROVIDER(_[0-9]+)?$ ]]
+}
+
 normalize_rule_value() {
     local value="$1"
     value="$(trim "$value")"
@@ -238,26 +243,6 @@ add_repo_sot_file_mounts() {
         [[ "$entry" == *_SOT.md ]] || continue
         add_repo_file_bind_mount "$entry"
     done < "$DIR/.gitignore"
-}
-
-sqlite_backend_enabled() {
-    local file line stripped entry key value
-
-    for file in "$DIR/config.conf" "$DIR/.env" "$DIR/config.conf_example" "$DIR/env.example"; do
-        [ -f "$file" ] || continue
-        while IFS= read -r line || [ -n "$line" ]; do
-            stripped="$(trim "$line")"
-            [[ -z "$stripped" || "$stripped" == \#* ]] && continue
-            entry="${line%%#*}"
-            entry="$(trim "$entry")"
-            [[ "$entry" == *=* ]] || continue
-            key="$(trim "${entry%%=*}")"
-            [[ "$key" == *_DB_BACKEND ]] || continue
-            value="$(config_value "$key" || true)"
-            [ "${value,,}" = "sqlite" ] && return 0
-        done < "$file"
-    done
-    return 1
 }
 
 rewrite_config_with_comments() {
@@ -362,7 +347,6 @@ configure_from_example() {
 
     touch "$target"
     declare -A seen_keys=()
-    declare -A sqlite_db_prefixes=()
     declare -A blank_if_targets=()
     declare -A autofill_blank_keys=()
     local required_next=false
@@ -435,32 +419,11 @@ configure_from_example() {
         fi
         seen_keys[$key]=1
 
-        db_prefix=""
-        if [[ "$key" =~ ^(.+)_DB_BACKEND$ ]]; then
-            db_prefix="${BASH_REMATCH[1]}"
-        elif [[ "$key" =~ ^(.+)_DB_ ]]; then
-            db_prefix="${BASH_REMATCH[1]}"
-        fi
-        if [ -n "$db_prefix" ]; then
-            if [ "$key" = "${db_prefix}_DB_BACKEND" ]; then
-                required=true
-            elif [[ -z "${sqlite_db_prefixes[$db_prefix]+x}" ]]; then
-                required=true
-            fi
-        fi
-
         env_existing=""
         if [ "$(basename "$target")" = "config.conf" ]; then
             env_existing="$(read_kv_file "$DIR/.env" "$key" || true)"
         elif [ "$(basename "$target")" = "container.conf" ]; then
             env_existing="$(read_kv_file "$DIR/config.conf" "$key" || read_kv_file "$DIR/.env" "$key" || true)"
-        fi
-
-        if [ -n "$db_prefix" ] && [ "$key" != "${db_prefix}_DB_BACKEND" ] && [[ -n "${sqlite_db_prefixes[$db_prefix]+x}" ]]; then
-            sed -i "/^${key}=/d" "$target" 2>/dev/null || true
-            echo "$key=blank" >> "$target"
-            echo "    $key= blank"
-            continue
         fi
 
         if [[ -n "${autofill_blank_keys[$key]+x}" ]]; then
@@ -476,17 +439,11 @@ configure_from_example() {
             sed -i "/^${key}=/d" "$target" 2>/dev/null || true
             echo "$key=$env_existing" >> "$target"
             echo "    $key= migrated from .env"
-            if [ -n "$db_prefix" ] && [ "$key" = "${db_prefix}_DB_BACKEND" ] && [ "${env_existing,,}" = "sqlite" ]; then
-                sqlite_db_prefixes[$db_prefix]=1
-            fi
             activate_blank_rules "$key" "$env_existing"
             continue
         fi
         if [ -n "$existing_line" ] && { [ "$required" != "true" ] || [ -n "$existing" ]; }; then
             [ "$CONFIG_SHOW" = "--show" ] && echo "    $key=$existing" || echo "    $key= exists"
-            if [ -n "$db_prefix" ] && [ "$key" = "${db_prefix}_DB_BACKEND" ] && [ "${existing,,}" = "sqlite" ]; then
-                sqlite_db_prefixes[$db_prefix]=1
-            fi
             activate_blank_rules "$key" "$existing"
             continue
         fi
@@ -495,9 +452,6 @@ configure_from_example() {
         if [ -n "$env_existing" ]; then
             echo "$key=$env_existing" >> "$target"
             echo "    $key= migrated from .env"
-            if [ -n "$db_prefix" ] && [ "$key" = "${db_prefix}_DB_BACKEND" ] && [ "${env_existing,,}" = "sqlite" ]; then
-                sqlite_db_prefixes[$db_prefix]=1
-            fi
             activate_blank_rules "$key" "$env_existing"
             continue
         fi
@@ -506,7 +460,7 @@ configure_from_example() {
             used_prefill=false
             read_status=0
             prompt_suffix=""
-            if [[ "$key" == ZEROINBOX_PROVIDER* && "$key" != ZEROINBOX_PROVIDER_*_* ]]; then
+            if provider_selector_key "$key"; then
                 prompt_suffix="$(provider_prompt "$example" "$key")"
             fi
             if [ -n "$default" ] && [ -t 0 ]; then
@@ -523,7 +477,7 @@ configure_from_example() {
             if [ "$used_prefill" != "true" ] && [ -z "$val" ]; then
                 val="$default"
             fi
-            if [[ "$key" == ZEROINBOX_PROVIDER* && "$key" != ZEROINBOX_PROVIDER_*_* ]]; then
+            if provider_selector_key "$key"; then
                 val="$(normalize_provider_value "$example" "$key" "$val")"
             fi
             if [ "$required" != "true" ] || [ -n "$val" ]; then
@@ -545,9 +499,6 @@ configure_from_example() {
                 echo "    $key= skipped"
                 continue
             fi
-        fi
-        if [ -n "$db_prefix" ] && [ "$key" = "${db_prefix}_DB_BACKEND" ] && [ "${val,,}" = "sqlite" ]; then
-            sqlite_db_prefixes[$db_prefix]=1
         fi
         echo "$key=$val" >> "$target"
         activate_blank_rules "$key" "$val"
@@ -610,11 +561,19 @@ config_source_files() {
     fi
 }
 
+mount_if_source_files() {
+    [ -f "$DIR/env.example" ] && printf '%s\n' "$DIR/env.example"
+    [ -f "$DIR/config.conf_example" ] && printf '%s\n' "$DIR/config.conf_example"
+    if [ "$NO_CONTAINER" != "true" ] && [ -f "$DIR/container.example" ]; then
+        printf '%s\n' "$DIR/container.example"
+    fi
+}
+
 generate_container_files() {
     local source_file host image compose_file quadlet_file line stripped entry key value
     local prefix internal_key internal_port publish_port publish_host map
     local first_port="" command_host="0.0.0.0"
-    local sqlite_backend_seen=0
+    local directive condition condition_key condition_value target_list rel
     local -a ports=()
     local -a volumes=()
     local -a devices=()
@@ -632,6 +591,32 @@ generate_container_files() {
         [ -f "$source_file" ] || continue
         while IFS= read -r line || [ -n "$line" ]; do
             stripped="$(trim "$line")"
+            [[ "$stripped" == \#mount-if:* ]] || continue
+            directive="$(trim "${stripped#\#mount-if:}")"
+            [ -n "$directive" ] || continue
+
+            condition="${directive%%[[:space:]]*}"
+            target_list="${directive#"$condition"}"
+            target_list="$(trim "$target_list")"
+            [[ "$condition" == *=* ]] || continue
+
+            condition_key="$(trim "${condition%%=*}")"
+            condition_value="$(normalize_rule_value "${condition#*=}")"
+            [[ "$condition_key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+            [ -n "$target_list" ] || continue
+
+            value="$(config_value "$condition_key" || true)"
+            [ "$(normalize_rule_value "$value")" = "$condition_value" ] || continue
+            for rel in $target_list; do
+                add_repo_bind_mount "$rel"
+            done
+        done < "$source_file"
+    done < <(mount_if_source_files)
+
+    while IFS= read -r source_file || [ -n "$source_file" ]; do
+        [ -f "$source_file" ] || continue
+        while IFS= read -r line || [ -n "$line" ]; do
+            stripped="$(trim "$line")"
             [[ -z "$stripped" || "$stripped" == \#* ]] && continue
 
             entry="${line%%#*}"
@@ -643,10 +628,6 @@ generate_container_files() {
 
             if [[ "$key" == *_VIDEOS_DIR ]]; then
                 add_repo_bind_mount "$value"
-            fi
-
-            if [[ "$key" == *_DB_BACKEND && "${value,,}" == "sqlite" ]]; then
-                sqlite_backend_seen=1
             fi
 
             if [[ "$key" == *_PUBLISH_PORT ]]; then
@@ -696,9 +677,6 @@ generate_container_files() {
         done < "$source_file"
     done < <(config_source_files)
 
-    if [ "$sqlite_backend_seen" -eq 1 ] || sqlite_backend_enabled; then
-        add_repo_bind_mount "STATE"
-    fi
     add_repo_sot_file_mounts
 
     if [ "${#ports[@]}" -eq 0 ] && [ -n "$first_port" ]; then
