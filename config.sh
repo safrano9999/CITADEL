@@ -173,6 +173,30 @@ normalize_rule_value() {
     esac
 }
 
+openssl_generator_default() {
+    local value="$1"
+    [[ "$value" =~ ^example:[[:space:]]+openssl[[:space:]]+rand[[:space:]]+-(hex|base64)[[:space:]]+([0-9]+)$ ]]
+}
+
+openssl_generator_label() {
+    local value="$1"
+    value="$(trim "${value#example:}")"
+    printf '%s\n' "$value"
+}
+
+run_openssl_generator() {
+    local value="$1"
+    local mode size
+
+    if [[ "$value" =~ ^example:[[:space:]]+openssl[[:space:]]+rand[[:space:]]+-(hex|base64)[[:space:]]+([0-9]+)$ ]]; then
+        mode="${BASH_REMATCH[1]}"
+        size="${BASH_REMATCH[2]}"
+        openssl rand "-$mode" "$size"
+        return 0
+    fi
+    return 1
+}
+
 add_unique() {
     local value="$1"
     shift
@@ -351,6 +375,7 @@ configure_from_example() {
     declare -A autofill_blank_keys=()
     local required_next=false
     local directive condition condition_key condition_value target_key target_list
+    local generator_label choice
     local rule_key
 
     while IFS= read -r line <&4; do
@@ -460,6 +485,47 @@ configure_from_example() {
             used_prefill=false
             read_status=0
             prompt_suffix=""
+            if [ "$required" = "true" ] && openssl_generator_default "$default"; then
+                generator_label="$(openssl_generator_label "$default")"
+                if [ -t 0 ]; then
+                    echo "    $key:"
+                    echo "      (1) enter value"
+                    echo "      (2) generate $generator_label"
+                    read -r -p "    Choose [1/2] (default: 2): " choice || read_status=$?
+                    choice="${choice:-2}"
+                    case "$choice" in
+                        1)
+                            read -r -p "    $key: " val || read_status=$?
+                            ;;
+                        2)
+                            val="$(run_openssl_generator "$default")" || {
+                                echo "    $key generator failed" >&2
+                                exit 1
+                            }
+                            echo "    $key= generated"
+                            ;;
+                        *)
+                            echo "    choose 1 or 2"
+                            val=""
+                            ;;
+                    esac
+                else
+                    val="$(run_openssl_generator "$default")" || {
+                        echo "    $key generator failed" >&2
+                        exit 1
+                    }
+                    echo "    $key= generated"
+                fi
+                if [ "$required" != "true" ] || [ -n "$val" ]; then
+                    break
+                fi
+                if [ "$read_status" -ne 0 ] && [ ! -t 0 ]; then
+                    echo "    $key required" >&2
+                    exit 1
+                fi
+                echo "    $key required"
+                continue
+            fi
             if provider_selector_key "$key"; then
                 prompt_suffix="$(provider_prompt "$example" "$key")"
             fi
