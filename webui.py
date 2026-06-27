@@ -3,6 +3,7 @@
 import json
 import subprocess
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "functions"))
@@ -16,8 +17,17 @@ from jinja2 import Environment, FileSystemLoader
 from python_header import get, get_port  # noqa: F401
 
 import core
+from cloudflared_service import ensure_cloudflared_service
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    result = ensure_cloudflared_service(get)
+    print(f"[citadel] cloudflared: {result}", flush=True)
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 _jinja = Environment(loader=FileSystemLoader(str(core.BASE_DIR / "templates")))
 _jinja.filters["tojson"] = lambda val: json.dumps(val)
 
