@@ -1,5 +1,20 @@
 # CITADEL
 
+## OpenClaw plugin
+
+The same repository can be linked as an OpenClaw plugin. It reads the existing
+`services.json`; the FastAPI dashboard remains an independent service.
+
+```text
+/citadel
+/citadel localhost
+/citadel subnet
+/citadel tailscale
+/citadel cloudflare
+/citadel other
+/citadel scan
+```
+
 ![CITADEL](CITADEL.png)
 
 Self-hosted service dashboard for local/remote routes with a modular provider system.

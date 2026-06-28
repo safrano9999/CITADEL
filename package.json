@@ -1,0 +1,16 @@
+{
+  "name": "citadel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {},
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.5.12-beta.1",
+      "minGatewayVersion": "2026.5.12-beta.1"
+    }
+  }
+}

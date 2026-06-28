@@ -199,6 +199,28 @@ body_is_html() {
     return 1
 }
 
+is_openai_v1() {
+    local url="$1" ssl="$2" body status
+    body="$(mktemp)"
+    status="$(curl -s $ssl --max-time 3 -o "$body" -w "%{http_code}" "${url}/v1/models" 2>/dev/null || echo 000)"
+    if [[ "$status" != "000" ]] && python3 - "$body" <<'PY'
+import json
+import sys
+
+try:
+    payload = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    raise SystemExit(1)
+raise SystemExit(0 if isinstance(payload, dict) and ("data" in payload or "error" in payload) else 1)
+PY
+    then
+        rm -f "$body"
+        return 0
+    fi
+    rm -f "$body"
+    return 1
+}
+
 probe_http() {
     local host="$1" port="$2"
     local ssl
@@ -207,6 +229,10 @@ probe_http() {
         echo "https://${host}:${port}|html"
     elif body_is_html "http://${host}:${port}/" "$ssl"; then
         echo "http://${host}:${port}|html"
+    elif is_openai_v1 "https://${host}:${port}" "$ssl"; then
+        echo "https://${host}:${port}|openai-v1"
+    elif is_openai_v1 "http://${host}:${port}" "$ssl"; then
+        echo "http://${host}:${port}|openai-v1"
     else
         echo ""
     fi
@@ -269,6 +295,7 @@ with open(f, 'w') as fh:
     fi
 
     LOCAL_URL="${LOCAL_PROBE%%|*}"
+    PROBE_KIND="${LOCAL_PROBE##*|}"
     SCHEME="${LOCAL_URL%%://*}"
 
     NETWORK_IP=""
@@ -279,6 +306,23 @@ with open(f, 'w') as fh:
 
     NET_LABEL=""
     [[ -n "$NETWORK_IP" ]] && NET_LABEL=" [+net ${NETWORK_IP}]"
+
+    if [[ "$PROBE_KIND" == "openai-v1" ]]; then
+        python3 -c "
+import json
+import sys
+with open(sys.argv[4], 'w') as f:
+    json.dump({
+        'title': 'OpenAI v1 API',
+        'icon': None,
+        'scheme': sys.argv[1],
+        'network_ip': sys.argv[2] or None,
+        'kind': sys.argv[3],
+    }, f)
+" "$SCHEME" "$NETWORK_IP" "$PROBE_KIND" "$CACHE_FILE"
+        printf "%s     OpenAI v1 API%s\n" "$SCHEME" "$NET_LABEL"
+        continue
+    fi
 
     if [[ -f "$CACHE_FILE" ]]; then
         IFS=$'\t' read -r EXISTING_TITLE EXISTING_ICON < <(python3 -c "

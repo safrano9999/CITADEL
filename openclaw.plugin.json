@@ -1,0 +1,22 @@
+{
+  "id": "citadel",
+  "name": "CITADEL",
+  "description": "Lists CITADEL routes and runs deterministic service scans.",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "servicesPath": {
+        "type": "string",
+        "description": "Optional path to the CITADEL services.json file."
+      },
+      "scanScript": {
+        "type": "string",
+        "description": "Optional path to the CITADEL scan.sh script."
+      }
+    }
+  }
+}
