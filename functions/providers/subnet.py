@@ -5,8 +5,9 @@ import argparse
 import importlib
 import sys
 from pathlib import Path
+from typing import Any
 
-from common import now_iso, read_json, write_json
+from common import ROUTE_SCHEMA_VERSION, now_iso, read_json, route_record, write_json
 
 
 def main() -> int:
@@ -28,7 +29,7 @@ def main() -> int:
     header = importlib.import_module("python_header")
     subnet_ip = header.get("CITADEL_SUBNET_IP", "")
 
-    routes: dict[str, str] = {}
+    routes: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
 
     http_services = services_payload.get("http_services", []) if isinstance(services_payload, dict) else []
@@ -54,7 +55,7 @@ def main() -> int:
         urls["subnet"] = url
         svc["network_ip"] = subnet_ip
 
-        routes[str(port)] = url
+        routes[str(port)] = route_record("direct", url)
 
     write_json(args.services_file, services_payload)
 
@@ -65,6 +66,7 @@ def main() -> int:
         "available": bool(routes),
         "generated_at": now_iso(),
         "default_candidate": True,
+        "route_schema": ROUTE_SCHEMA_VERSION,
         "subnet_ip": subnet_ip,
         "services": routes,
         "errors": errors,

@@ -48,8 +48,7 @@ if os.path.exists(ss_file):
     except Exception:
         pass
 
-ports = []
-seen = set()
+ports = {}
 for line in sys.stdin:
     line = line.strip()
     if not line:
@@ -64,10 +63,6 @@ for line in sys.stdin:
         continue
 
     port = int(m.group(1))
-    if port in seen:
-        continue
-    seen.add(port)
-
     addr = local[:local.rfind(':')]
     process = None
     rest = ' '.join(parts[4:])
@@ -82,14 +77,26 @@ for line in sys.stdin:
     except OSError:
         service = None
 
-    ports.append({
+    entry = ports.setdefault(port, {
         'port': port,
         'addr': addr,
+        'addrs': [],
+        'listeners': [],
         'process': process,
         'service': service,
     })
+    if addr not in entry['addrs']:
+        entry['addrs'].append(addr)
+    listener = {'addr': addr, 'process': process}
+    if listener not in entry['listeners']:
+        entry['listeners'].append(listener)
+    if entry.get('process') == 'tailscaled' and process and process != 'tailscaled':
+        entry['addr'] = addr
+        entry['process'] = process
+    if not entry.get('process') and process:
+        entry['process'] = process
 
-print(json.dumps(sorted(ports, key=lambda x: x['port']), indent=2))
+print(json.dumps([ports[port] for port in sorted(ports)], indent=2))
 " "$SS_FILE" > "${SS_FILE}.tmp" && mv -f "${SS_FILE}.tmp" "$SS_FILE"
 echo "Ports written to ss.json"
 echo
@@ -507,6 +514,8 @@ for p in ss_raw:
             'port': port,
             'publish_port': publish_port if publish_port != port else None,
             'addr': p.get('addr'),
+            'addrs': p.get('addrs') or ([p.get('addr')] if p.get('addr') else []),
+            'listeners': p.get('listeners') or [],
             'process': p.get('process'),
             'service': p.get('service'),
             'title': title,
@@ -522,6 +531,8 @@ for p in ss_raw:
         other_ports.append({
             'port': port,
             'addr': p.get('addr'),
+            'addrs': p.get('addrs') or ([p.get('addr')] if p.get('addr') else []),
+            'listeners': p.get('listeners') or [],
             'process': p.get('process'),
             'service': p.get('service'),
         })

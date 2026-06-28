@@ -10,7 +10,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 from cloudflare_api import CloudflareAPI, CloudflareAPIError
-from common import now_iso, parse_bool, read_json, write_json
+from common import (
+    ROUTE_SCHEMA_VERSION,
+    now_iso,
+    parse_bool,
+    read_json,
+    route_record,
+    write_json,
+)
 
 
 ACCESS_APP_PREFIX = "CITADEL "
@@ -303,7 +310,7 @@ def main() -> int:
     default_email = get("CLOUDFLARE_EMAIL", "")
     label = str(ext_cfg.get("label") or "Cloudflare")
     errors: list[str] = []
-    routes: dict[str, str] = {}
+    routes: dict[str, dict[str, Any]] = {}
     managed_hostnames: list[str] = []
     dns_records: dict[str, str] = {}
     access_apps: dict[str, str] = {}
@@ -395,7 +402,14 @@ def main() -> int:
                 if route["scheme"] == "https":
                     entry["originRequest"] = {"noTLSVerify": True}
                 ingress.append(entry)
-                routes.setdefault(str(route["port"]), f"https://{hostname}")
+                routes.setdefault(
+                    str(route["port"]),
+                    route_record(
+                        "proxy",
+                        f"https://{hostname}",
+                        target=f"{route['scheme']}://{origin_host}:{route['port']}",
+                    ),
+                )
 
             reconcile_access(
                 api,
@@ -441,7 +455,7 @@ def main() -> int:
             urls.pop("cloudflare", None)
             port_key = str(item.get("port") or "")
             if port_key in routes:
-                urls["cloudflare"] = routes[port_key]
+                urls["cloudflare"] = routes[port_key]["url"]
     write_json(args.services_file, services)
 
     payload = {
@@ -453,6 +467,7 @@ def main() -> int:
         "domain": domain,
         "running": running,
         "authenticated": authenticated,
+        "route_schema": ROUTE_SCHEMA_VERSION,
         "origin_host": origin_host,
         "managed_hostnames": managed_hostnames,
         "dns_records": dns_records,

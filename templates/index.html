@@ -40,7 +40,7 @@
         <button id="page-refresh-btn" class="btn-default" type="button">Refresh</button>
         <button id="scan-btn" class="btn-default" type="button" title="{{ data.scan_block_reason|default('')|e }}">{{ 'please scan in cli' if data.scan_block_reason else 'Scan' }}</button>
         <button id="cloudflare-edit-btn" class="btn-default" type="button" hidden>EDIT</button>
-        <button id="cloudflare-save-btn" class="btn-default" type="button" hidden disabled>SAVE</button>
+        <button id="cloudflare-save-btn" class="btn-default" type="button" hidden disabled>SAVE &amp; SCAN</button>
     </div>
 </header>
 
@@ -313,7 +313,7 @@ function updateCloudflareSaveState() {
   cloudflareSaveBtn.disabled = !cloudflareEditing || !cloudflareDirty;
 }
 
-async function saveCloudflareRules() {
+async function saveCloudflareRulesAndScan() {
   const rules = {};
   for (const tile of tiles) {
     const editor = tile.querySelector('.cloudflare-editor');
@@ -408,11 +408,15 @@ if (cloudflareEditBtn) {
 if (cloudflareSaveBtn) {
   cloudflareSaveBtn.addEventListener('click', async () => {
     cloudflareSaveBtn.disabled = true;
+    const original = cloudflareSaveBtn.textContent;
+    cloudflareSaveBtn.textContent = 'SAVING & SCANNING...';
     try {
-      await saveCloudflareRules();
+      await saveCloudflareRulesAndScan();
+      location.reload();
     } catch (error) {
       window.alert(error.message);
     } finally {
+      cloudflareSaveBtn.textContent = original;
       cloudflareSaveBtn.disabled = false;
       updateCloudflareSaveState();
     }

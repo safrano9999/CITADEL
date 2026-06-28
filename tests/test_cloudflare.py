@@ -131,8 +131,18 @@ class DashboardCoreTests(unittest.TestCase):
                     "considered": True,
                     "available": True,
                     "services": {
-                        "10999": "http://127.0.0.1:10999",
-                        "11000": "http://127.0.0.1:11000",
+                        "10999": {
+                            "mode": "direct",
+                            "url": "http://127.0.0.1:10999",
+                            "target": None,
+                            "owns_listener": False,
+                        },
+                        "11000": {
+                            "mode": "direct",
+                            "url": "http://127.0.0.1:11000",
+                            "target": None,
+                            "owns_listener": False,
+                        },
                     },
                 }),
                 encoding="utf-8",
@@ -456,8 +466,9 @@ class CloudflareCoreTests(unittest.TestCase):
                         },
                     }
                 )
-                self.assertEqual(list(saved), ["12001"])
+                self.assertEqual(list(saved), ["12001", "12002"])
                 self.assertEqual(saved["12001"]["subdomains"], ["12001", "citadel"])
+                self.assertFalse(saved["12002"]["whitelist"])
                 self.assertEqual(cloudflare_rules(policy), saved)
                 with self.assertRaises(ValueError):
                     core.save_all_cloudflare_rules(

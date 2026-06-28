@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import configparser
 import datetime as dt
+import ipaddress
 import json
 import os
 import subprocess
 from typing import Any
+
+
+ROUTE_SCHEMA_VERSION = 1
+WILDCARD_ADDRESSES = {"*", "0.0.0.0", "::"}
 
 
 def now_iso() -> str:
@@ -83,6 +88,59 @@ def set_ini_value(path: str, key: str, value: str) -> None:
 
 def run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
+def normalize_address(value: Any) -> str:
+    address = str(value or "").strip()
+    if address.startswith("[") and address.endswith("]"):
+        address = address[1:-1]
+    return address.split("%", 1)[0]
+
+
+def service_addresses(service: dict[str, Any]) -> list[str]:
+    listeners = service.get("listeners")
+    origin_values: list[Any] = []
+    if isinstance(listeners, list):
+        for listener in listeners:
+            if not isinstance(listener, dict):
+                continue
+            process = str(listener.get("process") or "").strip().lower()
+            if process == "tailscaled":
+                continue
+            origin_values.append(listener.get("addr"))
+
+    raw = service.get("addrs")
+    values = origin_values or (raw if isinstance(raw, list) else [service.get("addr")])
+    addresses: list[str] = []
+    for value in values:
+        address = normalize_address(value)
+        if address and address not in addresses:
+            addresses.append(address)
+    return addresses
+
+
+def is_loopback_address(address: str) -> bool:
+    if address.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(address).is_loopback
+    except ValueError:
+        return False
+
+
+def route_record(
+    mode: str,
+    url: str,
+    *,
+    target: str | None = None,
+    owns_listener: bool = False,
+) -> dict[str, Any]:
+    return {
+        "mode": mode,
+        "url": url,
+        "target": target,
+        "owns_listener": owns_listener,
+    }
 
 
 def ensure_provider_ini(

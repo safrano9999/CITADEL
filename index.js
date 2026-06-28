@@ -277,7 +277,7 @@ function cloudflareEditListReply(data) {
   };
 }
 
-function cloudflareRuleReply(data, service, saved = false) {
+function cloudflareRuleReply(data, service, status) {
   const port = service.port;
   const rule = service.cloudflare_rule ?? {
     subdomains: [String(port)],
@@ -326,7 +326,7 @@ function cloudflareRuleReply(data, service, saved = false) {
       type: "buttons",
       buttons: [
         commandButton("Back", "/citadel cloudflare edit", "secondary"),
-        commandButton("Scan", "/citadel scan cloudflare", "success"),
+        commandButton("Save & Scan", `/citadel cloudflare apply ${port}`, "success"),
       ],
     },
   );
@@ -335,9 +335,10 @@ function cloudflareRuleReply(data, service, saved = false) {
     text: [
       "CITADEL - Cloudflare Edit",
       serviceLabel(service),
-      saved ? "Saved. Scan to apply." : undefined,
+      status === "saved" ? "Changed. Select Save & Scan to apply. Wait for ✅ to confirm." : undefined,
+      status === "applied" ? "✅ Applied." : undefined,
     ].filter(Boolean).join("\n"),
-    presentation: { tone: saved ? "success" : "neutral", blocks: controls },
+    presentation: { tone: status ? "success" : "neutral", blocks: controls },
   };
 }
 
@@ -359,7 +360,18 @@ async function saveAndRenderCloudflareRule(api, port, rule) {
   if (!service) {
     throw new Error(`CITADEL service on port ${port} disappeared after saving.`);
   }
-  return cloudflareRuleReply(refreshed, service, true);
+  return cloudflareRuleReply(refreshed, service, "saved");
+}
+
+async function saveScanAndRenderCloudflareRule(api, port, rule) {
+  await saveCloudflareRule(api, port, rule);
+  await runScan(api);
+  const refreshed = await readDashboard(api);
+  const service = findCloudflareTile(refreshed, port);
+  if (!service) {
+    throw new Error(`CITADEL service on port ${port} disappeared after scanning.`);
+  }
+  return cloudflareRuleReply(refreshed, service, "applied");
 }
 
 async function handleCloudflareCommand(args, data, api) {
@@ -387,6 +399,10 @@ async function handleCloudflareCommand(args, data, api) {
     whitelist: Boolean(service.cloudflare_rule?.whitelist),
     emails: [...(service.cloudflare_rule?.emails ?? [])],
   };
+
+  if (operation === "apply") {
+    return saveScanAndRenderCloudflareRule(api, port, rule);
+  }
 
   if (operation === "whitelist") {
     const enabled = args[2]?.toLowerCase() === "on";
@@ -425,7 +441,7 @@ async function handleCloudflareCommand(args, data, api) {
     return saveAndRenderCloudflareRule(api, port, rule);
   }
 
-  return { text: "Usage: /citadel cloudflare [edit|whitelist|email|remove-email]" };
+  return { text: "Usage: /citadel cloudflare [edit|whitelist|email|remove-email|apply]" };
 }
 
 function runScanProcess(script) {

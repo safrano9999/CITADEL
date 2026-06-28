@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
-from common import now_iso, read_json, write_json
+from typing import Any
+
+from common import ROUTE_SCHEMA_VERSION, now_iso, read_json, route_record, write_json
 
 
 def main() -> int:
@@ -20,7 +22,7 @@ def main() -> int:
 
     label = str(ext_cfg.get("label") or "Localhost")
 
-    routes: dict[str, str] = {}
+    routes: dict[str, dict[str, Any]] = {}
     http_services = services_payload.get("http_services", []) if isinstance(services_payload, dict) else []
 
     for svc in http_services:
@@ -39,7 +41,7 @@ def main() -> int:
 
         url = urls.get("localhost") or f"{scheme}://127.0.0.1:{port}"
         urls["localhost"] = url
-        routes[str(port)] = url
+        routes[str(port)] = route_record("direct", url)
 
     write_json(args.services_file, services_payload)
 
@@ -50,6 +52,7 @@ def main() -> int:
         "available": bool(routes),
         "generated_at": now_iso(),
         "default_candidate": True,
+        "route_schema": ROUTE_SCHEMA_VERSION,
         "services": routes,
         "errors": [],
     }

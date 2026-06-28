@@ -44,6 +44,13 @@ def _read_json(path: Path, default: dict | list | None = None):
         return default
 
 
+def _route_url(route: object) -> str:
+    if not isinstance(route, dict):
+        return ""
+    url = route.get("url")
+    return url if isinstance(url, str) else ""
+
+
 def _cloudflare_assignment(port: str, subdomain: str) -> str:
     value = subdomain.strip().rstrip(".").lower()
     domain = os.environ.get("CITADEL_CLOUDFLARE_DOMAIN", "").strip().rstrip(".").lower()
@@ -55,13 +62,6 @@ def _cloudflare_assignment(port: str, subdomain: str) -> str:
 def _cloudflare_assignments(port: str, rule: dict) -> list[str]:
     aliases = rule.get("subdomains") or [port]
     return [_cloudflare_assignment(port, str(alias)) for alias in aliases]
-
-
-def _is_implicit_cloudflare_default(port: str, rule: dict) -> bool:
-    return (
-        not rule.get("whitelist")
-        and list(rule.get("subdomains") or []) == [port]
-    )
 
 
 def _service_port(tile: dict) -> int:
@@ -176,8 +176,9 @@ def _load_providers() -> dict:
         # Service URLs by port
         svc_routes = routes.get("services") or {}
         if isinstance(svc_routes, dict):
-            for port_str, url in svc_routes.items():
-                if isinstance(url, str) and url:
+            for port_str, route in svc_routes.items():
+                url = _route_url(route)
+                if url:
                     provider_urls_by_port.setdefault(pid, {})[str(port_str)] = url
 
         # Provider-level errors
@@ -309,10 +310,7 @@ def save_cloudflare_rule(port: int, payload: dict) -> dict:
             if assignment in _cloudflare_assignments(other_port, other_rule):
                 raise ValueError(f"Subdomain or hostname is already assigned to port {other_port}.")
 
-    if _is_implicit_cloudflare_default(str(port), rule):
-        rules.pop(str(port), None)
-    else:
-        rules[str(port)] = rule
+    rules[str(port)] = rule
     write_cloudflare_rules(PORT_FILTER_FILE, rules)
     return rule
 
@@ -354,10 +352,7 @@ def save_all_cloudflare_rules(payload: dict) -> dict[str, dict]:
                     f"Subdomain or hostname is assigned to ports {assigned[assignment]} and {port}."
                 )
             assigned[assignment] = port
-        if _is_implicit_cloudflare_default(port, rule):
-            rules.pop(port, None)
-        else:
-            rules[port] = rule
+        rules[port] = rule
 
     write_cloudflare_rules(PORT_FILTER_FILE, rules)
     return rules

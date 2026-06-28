@@ -50,7 +50,7 @@ Treat any provider error as a failed reconcile. Do not report success from parti
 
 ## Configure routes
 
-Use the Cloudflare provider in the WebUI. Select **EDIT**, configure each tile, and select **SAVE**.
+Use the Cloudflare provider in the WebUI. Select **EDIT**, configure each tile, and select **SAVE & SCAN**.
 
 - Leave Subdomain empty to use the port number.
 - Enter one DNS label to prepend it to `CITADEL_CLOUDFLARE_DOMAIN`.
@@ -58,7 +58,7 @@ Use the Cloudflare provider in the WebUI. Select **EDIT**, configure each tile, 
 - Enable Whitelist to protect that hostname with Cloudflare Access.
 - Require at least one valid email when Whitelist is enabled.
 
-The WebUI writes only `ports.filter.json`. The next `scan.sh` performs the API reconcile.
+The WebUI writes `ports.filter.json` and immediately runs `scan.sh` to perform the API reconcile.
 
 ## Preserve ownership boundaries
 

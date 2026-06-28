@@ -41,7 +41,7 @@ Example: you start a new service on port 3000. Next scan, it shows up on the das
 | tailscale | `https://citadel-bold-falcon.tailnet.ts.net:3000` |
 | cloudflare | `https://3000.services.example.net` |
 
-Start a service, scan, done. Every discovered HTTP service is mapped to every enabled provider. The Tailscale provider terminates HTTPS and proxies to the detected local HTTP/HTTPS service.
+Start a service, scan, done. Every discovered HTTP service is mapped to every enabled provider. The Tailscale provider uses HTTPS Serve for loopback-only listeners and direct Tailnet URLs for wildcard or Tailscale-bound listeners, preventing both processes from claiming the same port.
 
 ## Quick Start
 
@@ -108,7 +108,9 @@ Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled 
 ### Tailscale Provider
 
 - Checks runtime via `tailscale status`; never starts Tailscale
-- Reconciles native, persistent Tailscale Serve routes after every scan
+- Resolves `route_mode = auto` from the discovered listener addresses
+- Uses native, persistent Tailscale Serve routes for loopback-only services
+- Removes managed Serve routes and uses direct Tailnet URLs for wildcard or Tailscale-bound services
 - Stores URLs, backend targets, status, and managed ports in `tailscale.json`
 - Generates URLs like `https://<tailnet-domain>:<port>`
 - Set the scanning user as Tailscale operator once, then run scans without sudo:
@@ -128,7 +130,7 @@ Every discovered service receives `<port>.<CITADEL_CLOUDFLARE_DOMAIN>` by defaul
 - `citadel.internal.example.net` is used directly, provided it belongs to the configured zone.
 - Empty remains the port-based hostname.
 
-Enable **Whitelist** to create a Cloudflare Access email allow policy. At least one email is required, and the Cloudflare One-time PIN identity provider must be enabled. Select **SAVE**, then run `./scan.sh`; the UI only writes policy to `ports.filter.json`, while the scan performs the deterministic API changes.
+Enable **Whitelist** to create a Cloudflare Access email allow policy. At least one email is required, and the Cloudflare One-time PIN identity provider must be enabled. Select **SAVE & SCAN** to write `ports.filter.json` and immediately perform the deterministic Cloudflare API changes.
 
 The API token needs Tunnel Edit, Access Apps and Policies Edit, Access identity-provider read, and DNS Edit permissions scoped to the selected account and zone. `skills/citadel-cloudflare/SKILL.md` documents assisted ID discovery and diagnostics.
 
@@ -177,6 +179,21 @@ ca_cert = /path/to/certs/cert.pem
 ```
 
 Template: `ports.filter.json.example`
+
+### Provider route schema
+
+Each enabled provider keeps its own `routes.json`. Service routes use the same schema:
+
+```json
+{
+  "mode": "direct",
+  "url": "http://node.example.ts.net:18789",
+  "target": null,
+  "owns_listener": false
+}
+```
+
+`mode` is `direct` or `proxy`. `target` identifies a proxy origin, and `owns_listener` records whether the provider claims the service port locally.
 
 ## Frontend
 

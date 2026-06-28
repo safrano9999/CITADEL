@@ -70,7 +70,8 @@ async def update_all_cloudflare_ports(request: Request):
         rules = core.save_all_cloudflare_rules(payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"ok": True, "rules": rules, "applies_on": "next_scan"}
+    scan = execute_scan()
+    return {"ok": True, "rules": rules, "scan": scan}
 
 
 def missing_provider_state_files() -> list[str]:
@@ -90,8 +91,7 @@ def scan_block_reason() -> str:
     return ""
 
 
-@app.post("/api/scan")
-def run_scan():
+def execute_scan() -> dict:
     missing_state = missing_provider_state_files()
     if missing_state:
         raise HTTPException(
@@ -113,6 +113,11 @@ def run_scan():
         detail = (result.stderr or result.stdout or "Scan failed.").strip()
         raise HTTPException(status_code=500, detail=detail[-4000:])
     return {"ok": True, "stdout": result.stdout[-4000:]}
+
+
+@app.post("/api/scan")
+def run_scan():
+    return execute_scan()
 
 
 if __name__ == "__main__":
