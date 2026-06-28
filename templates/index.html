@@ -69,12 +69,12 @@
             {% endfor %}
         >
             {% if svc.icon %}
-                <img class="tile-icon" src="/{{ svc.icon|e }}" alt="{{ svc.name|default('Service')|e }}">
+                <img class="tile-icon" src="/{{ svc.icon|e }}" alt="{{ svc.display_name|default(svc.name|default('Service'))|e }}">
             {% else %}
                 <div class="tile-icon-placeholder">&#127968;</div>
             {% endif %}
 
-            <span class="tile-name">{{ svc.name|default('Port ' ~ port)|e }}</span>
+            <span class="tile-name">{{ svc.display_name|default(svc.name|default('Port ' ~ port))|e }}</span>
             <span class="tile-port">{{ '&#128274; ' if scheme == 'https' else '' }}:{{ port }}</span>
             <span class="tile-url">-</span>
             <div class="cloudflare-editor" hidden>

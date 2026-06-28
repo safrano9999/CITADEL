@@ -7,7 +7,13 @@ import json
 import os
 from pathlib import Path
 
-from cloudflare_policy import cloudflare_rules, normalize_rule, write_cloudflare_rules
+from cloudflare_policy import (
+    cloudflare_rules,
+    normalize_emails,
+    normalize_rule,
+    read_policy,
+    write_cloudflare_rules,
+)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -56,6 +62,32 @@ def _is_implicit_cloudflare_default(port: str, rule: dict) -> bool:
         not rule.get("whitelist")
         and list(rule.get("subdomains") or []) == [port]
     )
+
+
+def _service_port(tile: dict) -> int:
+    try:
+        return int(tile.get("port", 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _is_citadel_service(tile: dict) -> bool:
+    configured = os.environ.get("CITADEL_WEBUI_PORT", "").strip()
+    port = _service_port(tile)
+    if configured.isdigit():
+        return port == int(configured)
+    name = str(tile.get("name") or tile.get("title") or "").strip().casefold()
+    return name == "citadel"
+
+
+def _cloudflare_default_emails() -> list[str]:
+    policy = read_policy(PORT_FILTER_FILE)
+    defaults = policy.get("cloudflare_defaults", {})
+    values = defaults.get("emails", []) if isinstance(defaults, dict) else []
+    emails = normalize_emails(values)
+    if emails:
+        return emails
+    return normalize_emails(os.environ.get("CLOUDFLARE_EMAIL", "").split(","))
 
 
 # ── Server Config ─────────────────────────────────────────────────────────
@@ -186,7 +218,11 @@ def build_dashboard() -> dict:
         "http_services": [],
         "other_ports": [],
     })
-    http_tiles = services_payload.get("http_services") or []
+    http_tiles = [
+        dict(item)
+        for item in services_payload.get("http_services") or []
+        if isinstance(item, dict)
+    ]
     other_ports = services_payload.get("other_ports") or []
     cloudflare = cloudflare_rules(PORT_FILTER_FILE)
 
@@ -216,6 +252,9 @@ def build_dashboard() -> dict:
     # Build tile URL maps for template
     for tile in http_tiles:
         port = str(int(tile.get("port", 0)))
+        name = str(tile.get("name") or tile.get("title") or f"Port {port}")
+        tile["featured"] = _is_citadel_service(tile)
+        tile["display_name"] = f"⭐ {name} ⭐" if tile["featured"] else name
         tile["cloudflare_rule"] = cloudflare.get(
             port,
             {"subdomains": [port], "whitelist": False, "emails": []},
@@ -232,6 +271,8 @@ def build_dashboard() -> dict:
             tile_urls[pid] = url
         tile["provider_urls"] = tile_urls
 
+    http_tiles.sort(key=lambda tile: (not tile["featured"], _service_port(tile)))
+
     return {
         "http_tiles": http_tiles,
         "other_ports": other_ports,
@@ -242,6 +283,7 @@ def build_dashboard() -> dict:
         "default_mode": default_mode,
         "default_refresh": default_refresh,
         "last_scan": last_scan,
+        "cloudflare_default_emails": _cloudflare_default_emails(),
     }
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -102,6 +103,82 @@ class CloudflarePolicyTests(unittest.TestCase):
                 cloudflare_rules(path)["399"]["emails"],
                 ["user@example.net"],
             )
+
+
+class DashboardCoreTests(unittest.TestCase):
+    def test_citadel_service_is_featured_and_sorted_first(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            enabled = base / "extensions" / "enabled"
+            localhost = enabled / "localhost"
+            localhost.mkdir(parents=True)
+            (base / "services.json").write_text(
+                json.dumps({
+                    "http_services": [
+                        {"port": 11000, "name": "CODEANALYST"},
+                        {"port": 10999, "name": "CITADEL"},
+                    ],
+                    "other_ports": [],
+                }),
+                encoding="utf-8",
+            )
+            (localhost / "extension.json").write_text(
+                json.dumps({"label": "Localhost"}),
+                encoding="utf-8",
+            )
+            (localhost / "routes.json").write_text(
+                json.dumps({
+                    "considered": True,
+                    "available": True,
+                    "services": {
+                        "10999": "http://127.0.0.1:10999",
+                        "11000": "http://127.0.0.1:11000",
+                    },
+                }),
+                encoding="utf-8",
+            )
+            (base / "extensions" / "providers_state.json").write_text(
+                json.dumps({
+                    "considered_providers": ["localhost"],
+                    "available_providers": ["localhost"],
+                    "errors": [],
+                }),
+                encoding="utf-8",
+            )
+            (base / "ports.filter.json").write_text(
+                json.dumps({"cloudflare": {}}),
+                encoding="utf-8",
+            )
+
+            original = {
+                "SERVICES_FILE": core.SERVICES_FILE,
+                "LAST_SCAN_FILE": core.LAST_SCAN_FILE,
+                "ENABLED_EXT_DIR": core.ENABLED_EXT_DIR,
+                "PROVIDERS_STATE_FILE": core.PROVIDERS_STATE_FILE,
+                "UI_CONFIG_FILE": core.UI_CONFIG_FILE,
+                "PORT_FILTER_FILE": core.PORT_FILTER_FILE,
+            }
+            old_port = os.environ.get("CITADEL_WEBUI_PORT")
+            try:
+                core.SERVICES_FILE = base / "services.json"
+                core.LAST_SCAN_FILE = base / "last_scan.txt"
+                core.ENABLED_EXT_DIR = enabled
+                core.PROVIDERS_STATE_FILE = base / "extensions" / "providers_state.json"
+                core.UI_CONFIG_FILE = base / "extensions" / "ui.json"
+                core.PORT_FILTER_FILE = base / "ports.filter.json"
+                os.environ["CITADEL_WEBUI_PORT"] = "10999"
+                dashboard = core.build_dashboard()
+            finally:
+                for name, value in original.items():
+                    setattr(core, name, value)
+                if old_port is None:
+                    os.environ.pop("CITADEL_WEBUI_PORT", None)
+                else:
+                    os.environ["CITADEL_WEBUI_PORT"] = old_port
+
+            self.assertEqual([item["port"] for item in dashboard["http_tiles"]], [10999, 11000])
+            self.assertTrue(dashboard["http_tiles"][0]["featured"])
+            self.assertEqual(dashboard["http_tiles"][0]["display_name"], "⭐ CITADEL ⭐")
 
 
 class CloudflareDefaultsTests(unittest.TestCase):
