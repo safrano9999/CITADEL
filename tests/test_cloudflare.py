@@ -20,6 +20,7 @@ from cloudflare_policy import (  # noqa: E402
 )
 from cloudflare import (  # noqa: E402
     access_policy_payload,
+    adopt_matching_ingress,
     assert_ingress_ownership,
     one_time_pin_enabled,
     reconcile_access,
@@ -208,6 +209,23 @@ class CloudflareProviderTests(unittest.TestCase):
             {"399.example.net"},
         )
 
+    def test_adopts_only_ingress_with_exact_origin(self) -> None:
+        config = {
+            "ingress": [
+                {"hostname": "399.example.net", "service": "http://127.0.0.1:399"},
+                {"hostname": "400.example.net", "service": "http://other:400"},
+                {"service": "http_status:404"},
+            ]
+        }
+        desired = {
+            "399.example.net": {"scheme": "http", "port": 399},
+            "400.example.net": {"scheme": "http", "port": 400},
+        }
+        self.assertEqual(
+            adopt_matching_ingress(config, desired, set(), "127.0.0.1"),
+            {"399.example.net"},
+        )
+
     def test_access_policy_uses_exact_email_rules(self) -> None:
         payload = access_policy_payload(
             "399.example.net",
@@ -250,6 +268,35 @@ class CloudflareProviderTests(unittest.TestCase):
                 {},
             )
 
+    def test_access_adopts_exact_citadel_names(self) -> None:
+        class FakeAPI:
+            def access_apps(self, _account_id):
+                return [{"id": "app", "domain": "399.example.net", "name": "CITADEL 399.example.net"}]
+
+            def access_policies(self, _account_id):
+                return [{"id": "policy", "name": "CITADEL email whitelist 399.example.net"}]
+
+            def update_access_policy(self, _account_id, policy_id, _payload):
+                self.policy_id = policy_id
+
+            def update_access_app(self, _account_id, app_id, _payload):
+                self.app_id = app_id
+
+        api = FakeAPI()
+        apps, policies = reconcile_access(
+            api,
+            "account",
+            {"399.example.net": {"whitelist": True, "emails": ["user@example.net"]}},
+            {},
+            {},
+            {},
+            {},
+        )
+        self.assertEqual(apps, {"399.example.net": "app"})
+        self.assertEqual(policies, {"399.example.net": "policy"})
+        self.assertEqual(api.app_id, "app")
+        self.assertEqual(api.policy_id, "policy")
+
     def test_dns_refuses_unmanaged_record(self) -> None:
         api = CloudflareAPI("token")
 
@@ -261,6 +308,28 @@ class CloudflareProviderTests(unittest.TestCase):
         api.request = request
         with self.assertRaises(CloudflareAPIError):
             api.ensure_tunnel_dns("zone", "399.example.net", "tunnel")
+
+    def test_dns_adopts_cname_for_same_tunnel(self) -> None:
+        api = CloudflareAPI("token")
+        calls = []
+
+        def request(method, path, **kwargs):
+            calls.append((method, path, kwargs))
+            if method == "GET":
+                return [{
+                    "id": "record",
+                    "type": "CNAME",
+                    "content": "tunnel.cfargotunnel.com",
+                    "proxied": True,
+                }]
+            return {}
+
+        api.request = request
+        self.assertEqual(
+            api.ensure_tunnel_dns("zone", "399.example.net", "tunnel"),
+            "record",
+        )
+        self.assertEqual(calls[-1][0], "PUT")
 
     def test_delete_is_idempotent_for_missing_resource(self) -> None:
         api = CloudflareAPI("token")

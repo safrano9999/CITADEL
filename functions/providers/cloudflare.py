@@ -93,6 +93,28 @@ def assert_ingress_ownership(
             )
 
 
+def adopt_matching_ingress(
+    config: dict[str, Any],
+    desired: dict[str, dict[str, Any]],
+    managed_hostnames: set[str],
+    origin_host: str,
+) -> set[str]:
+    adopted = set(managed_hostnames)
+    ingress = config.get("ingress")
+    ingress = ingress if isinstance(ingress, list) else []
+    for entry in ingress:
+        if not isinstance(entry, dict):
+            continue
+        hostname = str(entry.get("hostname") or "").lower()
+        route = desired.get(hostname)
+        if not route or hostname in adopted:
+            continue
+        expected_service = f"{route['scheme']}://{origin_host}:{route['port']}"
+        if str(entry.get("service") or "") == expected_service:
+            adopted.add(hostname)
+    return adopted
+
+
 def reconcile_access(
     api: CloudflareAPI,
     account_id: str,
@@ -132,17 +154,27 @@ def reconcile_access(
             continue
         previous_policy_id = previous_policies.get(hostname, "")
         named_policy = policies_by_name.get(f"{ACCESS_POLICY_PREFIX}{hostname}")
-        if named_policy and str(named_policy.get("id") or "") != previous_policy_id:
+        if (
+            named_policy
+            and previous_policy_id
+            and str(named_policy.get("id") or "") != previous_policy_id
+        ):
             raise CloudflareAPIError(
                 f"Access policy for {hostname} exists and is not managed by CITADEL"
             )
         policy = policies_by_id.get(previous_policy_id) if previous_policy_id else named_policy
         previous_app_id = previous_apps.get(hostname, "")
         domain_app = apps_by_domain.get(hostname)
-        if domain_app and str(domain_app.get("id") or "") != previous_app_id:
-            raise CloudflareAPIError(
-                f"Access application for {hostname} exists and is not managed by CITADEL"
-            )
+        if domain_app:
+            domain_app_id = str(domain_app.get("id") or "")
+            if previous_app_id and domain_app_id != previous_app_id:
+                raise CloudflareAPIError(
+                    f"Access application for {hostname} exists and is not managed by CITADEL"
+                )
+            if not previous_app_id and str(domain_app.get("name") or "") != f"{ACCESS_APP_PREFIX}{hostname}":
+                raise CloudflareAPIError(
+                    f"Access application for {hostname} exists and is not managed by CITADEL"
+                )
         app = apps_by_id.get(previous_app_id) if previous_app_id else domain_app
         selected_policies[hostname] = policy
         selected_apps[hostname] = app
@@ -334,8 +366,6 @@ def main() -> int:
                         "whitelist": bool(rule["whitelist"]),
                         "emails": list(rule["emails"]),
                     }
-            managed_hostnames = sorted(desired)
-
             if any(route["whitelist"] for route in desired.values()):
                 providers = api.access_identity_providers(account_id)
                 if not one_time_pin_enabled(providers):
@@ -343,8 +373,14 @@ def main() -> int:
                         "Cloudflare Access One-time PIN identity provider is not enabled"
                     )
 
-            previous_hosts = set(previous_hostnames)
             tunnel_config = api.tunnel_configuration(account_id, tunnel_id)
+            previous_hosts = adopt_matching_ingress(
+                tunnel_config,
+                desired,
+                set(previous_hostnames),
+                origin_host,
+            )
+            managed_hostnames = sorted(previous_hosts)
             assert_ingress_ownership(tunnel_config, set(desired), previous_hosts)
             preserved, fallback = remove_managed_ingress(
                 tunnel_config,
@@ -379,6 +415,7 @@ def main() -> int:
             )
             tunnel_config["ingress"] = ingress + [fallback]
             api.update_tunnel_configuration(account_id, tunnel_id, tunnel_config)
+            managed_hostnames = sorted(desired)
             cleanup_dns(api, zone_id, previous_dns_records, dns_records)
             cleanup_access(
                 api,

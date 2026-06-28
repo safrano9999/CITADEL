@@ -158,7 +158,12 @@ class CloudflareAPI:
                 raise CloudflareAPIError(f"DNS record {name} exists and is not a CNAME")
             if not record_id:
                 raise CloudflareAPIError(f"DNS record {name} has no id")
-            if record_id != managed_record_id:
+            same_tunnel = (
+                str(matching.get("content") or "").rstrip(".").lower()
+                == content.lower()
+                and matching.get("proxied") is True
+            )
+            if record_id != managed_record_id and not (not managed_record_id and same_tunnel):
                 raise CloudflareAPIError(
                     f"DNS record {name} already exists and is not managed by CITADEL"
                 )
