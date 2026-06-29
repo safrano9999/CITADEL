@@ -30,7 +30,7 @@ for path in "${files[@]}"; do
     printf '%s\n' "$path"
   fi
 done | grep -Ev "$dev_only_re" > "$candidate_list"
-for optional in python_header.py env.example config.conf_example container.example; do
+for optional in config.sh python_header.py sqlite_persistence.sh env.example config.conf_example container.example; do
   [ -f "$optional" ] && printf '%s\n' "$optional" >> "$candidate_list"
 done
 git check-ignore --no-index --stdin < "$candidate_list" > "$ignored_list" || true
