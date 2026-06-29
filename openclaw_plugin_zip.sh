@@ -15,7 +15,7 @@ case "$repo" in
   DAILYNEWS) files=(README.md config.json openclaw.plugin.json package.json requirements.txt index.js generate.py scripts skills) ;;
   CALENDAR) files=(README.md CALENDAR_init.sh calendar_fetch.py config.json openclaw.plugin.json package.json requirements.txt index.js scripts) ;;
   ZEROINBOX) files=(README.md provider.conf ZEROINBOX_init.sh openclaw.plugin.json package.json requirements.txt index.js scripts skills zeroinbox) ;;
-  CITADEL) files=(README.md CITADEL_CLOUDFLARE.md CITADEL.png citadel.svg config.ini.example openclaw.plugin.json package.json requirements.txt index.js python_header.py scan.sh set_daemon.sh webui.py assets extensions functions skills templates tests) ;;
+  CITADEL) files=(README.md CITADEL_CLOUDFLARE.md CITADEL.png citadel.svg config.ini.example openclaw.plugin.json package.json requirements.txt index.js scan.sh set_daemon.sh webui.py assets extensions functions skills templates tests) ;;
   KACHELMANN) files=(README.md config.json openclaw.plugin.json package.json requirements.txt requirements-mysql.txt requirements-postgres.txt index.js scripts systemd kachelmann static templates webui.py) ;;
   SPANKER) files=(README.md assets openclaw.plugin.json package.json requirements.txt index.js scripts systemd spanker) ;;
   *) echo "Unsupported OpenClaw plugin repo: $repo" >&2; exit 2 ;;
@@ -30,7 +30,7 @@ for path in "${files[@]}"; do
     printf '%s\n' "$path"
   fi
 done | grep -Ev "$dev_only_re" > "$candidate_list"
-for optional in env.example config.conf_example; do
+for optional in python_header.py env.example config.conf_example container.example; do
   [ -f "$optional" ] && printf '%s\n' "$optional" >> "$candidate_list"
 done
 git check-ignore --no-index --stdin < "$candidate_list" > "$ignored_list" || true
