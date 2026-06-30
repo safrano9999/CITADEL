@@ -13,8 +13,8 @@ trap 'rm -f "$candidate_list" "$include_list" "$ignored_list" "$leak_list"' EXIT
 
 case "$repo" in
   DAILYNEWS) files=(README.md config.json openclaw.plugin.json package.json requirements.txt index.js generate.py scripts skills) ;;
-  CALENDAR) files=(README.md CALENDAR_init.sh calendar_fetch.py config.json openclaw.plugin.json package.json requirements.txt index.js scripts) ;;
-  ZEROINBOX) files=(README.md provider.conf ZEROINBOX_init.sh openclaw.plugin.json package.json requirements.txt index.js scripts skills zeroinbox) ;;
+  CALENDAR) files=(README.md calendar_fetch.py config.json openclaw.plugin.json package.json requirements.txt index.js scripts) ;;
+  ZEROINBOX) files=(README.md provider.conf openclaw.plugin.json package.json requirements.txt index.js scripts skills zeroinbox) ;;
   CITADEL) files=(README.md CITADEL_CLOUDFLARE.md CITADEL.png citadel.svg config.ini.example openclaw.plugin.json package.json requirements.txt index.js scan.sh set_daemon.sh webui.py assets extensions functions skills templates tests) ;;
   KACHELMANN) files=(README.md config.json openclaw.plugin.json package.json requirements.txt requirements-mysql.txt requirements-postgres.txt index.js scripts systemd kachelmann static templates webui.py) ;;
   SPANKER) files=(README.md assets openclaw.plugin.json package.json requirements.txt index.js scripts systemd spanker) ;;
