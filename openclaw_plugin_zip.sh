@@ -18,6 +18,7 @@ case "$repo" in
   CITADEL) files=(README.md CITADEL_CLOUDFLARE.md CITADEL.png citadel.svg config.ini.example openclaw.plugin.json package.json requirements.txt index.js scan.sh set_daemon.sh webui.py assets extensions functions skills templates tests) ;;
   KACHELMANN) files=(README.md config.json openclaw.plugin.json package.json requirements.txt requirements-mysql.txt requirements-postgres.txt index.js scripts systemd kachelmann static templates webui.py) ;;
   SPANKER) files=(README.md assets openclaw.plugin.json package.json requirements.txt index.js scripts systemd spanker) ;;
+  WELCOME) files=(README.md openclaw.plugin.json package.json requirements.txt index.js scripts systemd readme_welcome.py welcome_ref.py python_header.py) ;;
   *) echo "Unsupported OpenClaw plugin repo: $repo" >&2; exit 2 ;;
 esac
 
