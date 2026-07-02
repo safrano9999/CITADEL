@@ -12,6 +12,7 @@ CITADEL_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(CITADEL_ROOT / "functions" / "providers"))
 
 from cloudflare_api import CloudflareAPI, CloudflareAPIError  # noqa: E402
+from cloudflare import ensure_one_time_pin  # noqa: E402
 
 
 def select_zone(zones: list[dict], domain: str) -> dict:
@@ -72,7 +73,7 @@ def main() -> int:
             raise ValueError("Selected zone has no account id")
         tunnel = select_tunnel(api.tunnels(account_id), args.tunnel)
         tunnel_id = str(tunnel.get("id") or "")
-        providers = api.access_identity_providers(account_id)
+        providers = ensure_one_time_pin(api, account_id, args.domain)
         otp_enabled = any(
             str(provider.get("type") or "").lower() in {"onetimepin", "one_time_pin", "onetime_pin"}
             for provider in providers

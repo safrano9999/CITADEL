@@ -78,6 +78,8 @@ Initialize Cloudflare Access through the API before applying any email whitelist
 4. If `onetimepin` is missing, create the One-time PIN identity provider.
 5. Verify both resources through the API before running `scan.sh`.
 
+`discover.py` and the Cloudflare provider perform this initialization idempotently. The organization uses the deterministic authentication domain `citadel-<first-12-account-id>.cloudflareaccess.com`; existing organizations and One-time PIN providers are reused.
+
 This requires `Account -> Access: Organizations, Identity Providers, and Groups -> Edit` for the selected account. If either organization endpoint returns HTTP 403 with Cloudflare error code `10000`, stop and ask the user to edit or replace the API token with that permission. Never fall back to exposing routes without Access after an email whitelist is configured.
 
 ## 2. Conservative Cloudflare Mapping Defaults

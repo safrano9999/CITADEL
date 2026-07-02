@@ -4,12 +4,21 @@ Use a scoped API token. Never request or store a Global API Key.
 
 ## Token permissions
 
+- Account: Account Settings, Edit or Read when Edit is unavailable
 - Account: Cloudflare Tunnel, Edit
 - Account: Access Apps and Policies, Edit
-- Account: Access Organizations, Identity Providers, and Groups, Read
+- Account: Access Organizations, Identity Providers, and Groups, Edit
+- Account: Workers Scripts, Edit when available
+- Account: Workers Routes, Edit when available
+- Zone: Zone, Edit
 - Zone: DNS, Edit
+- Zone: Zone Settings, Edit
+- Zone: SSL and Certificates, Edit
+- User: User Details, Read when available
 
-Limit account permissions to the selected account and zone permissions to the selected zone.
+During deterministic setup, include all accounts and all zones. The token can be narrowed after setup and verification.
+
+Before whitelist reconciliation, create or reuse the Zero Trust organization through `POST /accounts/{account_id}/access/organizations`, then create or reuse the `onetimepin` identity provider through `POST /accounts/{account_id}/access/identity_providers`.
 
 ## Runtime ownership
 

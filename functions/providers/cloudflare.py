@@ -62,6 +62,33 @@ def one_time_pin_enabled(providers: list[dict[str, Any]]) -> bool:
     )
 
 
+def ensure_one_time_pin(
+    api: CloudflareAPI,
+    account_id: str,
+    domain: str,
+) -> list[dict[str, Any]]:
+    try:
+        api.access_organization(account_id)
+    except CloudflareAPIError:
+        auth_domain = f"citadel-{account_id[:12].lower()}.cloudflareaccess.com"
+        try:
+            api.create_access_organization(account_id, auth_domain, domain)
+        except CloudflareAPIError as exc:
+            raise CloudflareAPIError(
+                "Cloudflare Access initialization failed; the token requires "
+                "Access: Organizations, Identity Providers, and Groups -> Edit"
+            ) from exc
+
+    providers = api.access_identity_providers(account_id)
+    if one_time_pin_enabled(providers):
+        return providers
+    provider = api.create_access_identity_provider(
+        account_id,
+        {"config": {}, "name": "One-time PIN login", "type": "onetimepin"},
+    )
+    return [*providers, provider]
+
+
 def remove_managed_ingress(
     config: dict[str, Any],
     managed_hostnames: set[str],
@@ -374,11 +401,7 @@ def main() -> int:
                         "emails": list(rule["emails"]),
                     }
             if any(route["whitelist"] for route in desired.values()):
-                providers = api.access_identity_providers(account_id)
-                if not one_time_pin_enabled(providers):
-                    raise CloudflareAPIError(
-                        "Cloudflare Access One-time PIN identity provider is not enabled"
-                    )
+                ensure_one_time_pin(api, account_id, domain)
 
             tunnel_config = api.tunnel_configuration(account_id, tunnel_id)
             previous_hosts = adopt_matching_ingress(

@@ -10,8 +10,10 @@ Keep setup agent-assisted and runtime deterministic. Never replace `scan.sh` or 
 ## Discover configuration
 
 1. Read `config.conf_example`, `env.example`, and `references/api.md`.
-2. Require `CLOUDFLARE_API_TOKEN`; never ask for a Global API Key.
-3. Run discovery without printing the token:
+2. Require `CLOUDFLARE_API_TOKEN`; never ask for a Global API Key. Prefer the broad setup token documented in `CITADEL_CLOUDFLARE.md`, scoped to all accounts and all zones, so setup does not stop halfway through.
+3. Create or reuse the requested zone and print its assigned Cloudflare nameservers. Wait until the user has entered them at the domain provider and the zone reports `active`.
+4. Create or reuse the named Tunnel for this host. If multiple Tunnels exist, show them and ask which one to use; never modify an unrelated Tunnel.
+5. Run discovery without printing the token:
 
 ```bash
 CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN" \
@@ -19,9 +21,10 @@ CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN" \
   --domain services.example.net
 ```
 
-4. If multiple Tunnels exist, show their names and IDs and request one selection. Never guess.
-5. Write discovered non-secret values to `config.conf` and secrets to `.env`. Keep `.env` mode `0600`.
-6. Retrieve `TUNNEL_TOKEN` only when explicitly configuring the separate cloudflared service:
+Discovery idempotently creates the Zero Trust organization and One-time PIN provider when they are missing. Error code `10000` during this step means the token lacks `Access: Organizations, Identity Providers, and Groups -> Edit`; stop instead of exposing unprotected routes.
+
+6. Write discovered non-secret values to `config.conf` and secrets to `.env`. Keep `.env` mode `0600`.
+7. Retrieve `TUNNEL_TOKEN` when configuring the separate cloudflared service:
 
 ```bash
 python3 skills/citadel-cloudflare/scripts/discover.py \
@@ -31,6 +34,8 @@ python3 skills/citadel-cloudflare/scripts/discover.py \
 ```
 
 Do not commit either token.
+
+After the provider nameserver change, the agent owns every remaining setup action: account/zone/Tunnel discovery, Access initialization, One-time PIN, DNS records, Tunnel ingress, configuration files, connector token, and verification. Do not send the user through Cloudflare dashboard pages for resources the API token can manage.
 
 ## Activate routing
 

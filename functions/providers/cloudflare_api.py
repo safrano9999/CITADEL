@@ -100,6 +100,41 @@ class CloudflareAPI:
         )
         return result if isinstance(result, list) else []
 
+    def access_organization(self, account_id: str) -> dict[str, Any]:
+        result = self.request("GET", f"/accounts/{account_id}/access/organizations")
+        if not isinstance(result, dict):
+            raise CloudflareAPIError("Cloudflare did not return the Zero Trust organization")
+        return result
+
+    def create_access_organization(
+        self,
+        account_id: str,
+        auth_domain: str,
+        name: str,
+    ) -> dict[str, Any]:
+        result = self.request(
+            "POST",
+            f"/accounts/{account_id}/access/organizations",
+            payload={"auth_domain": auth_domain, "name": name},
+        )
+        if not isinstance(result, dict):
+            raise CloudflareAPIError("Cloudflare did not return the created Zero Trust organization")
+        return result
+
+    def create_access_identity_provider(
+        self,
+        account_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        result = self.request(
+            "POST",
+            f"/accounts/{account_id}/access/identity_providers",
+            payload=payload,
+        )
+        if not isinstance(result, dict):
+            raise CloudflareAPIError("Cloudflare did not return the created identity provider")
+        return result
+
     def tunnel_connections(self, account_id: str, tunnel_id: str) -> list[dict[str, Any]]:
         result = self.request(
             "GET",

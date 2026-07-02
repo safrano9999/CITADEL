@@ -23,6 +23,7 @@ from cloudflare import (  # noqa: E402
     access_policy_payload,
     adopt_matching_ingress,
     assert_ingress_ownership,
+    ensure_one_time_pin,
     one_time_pin_enabled,
     reconcile_access,
     remove_managed_ingress,
@@ -330,6 +331,39 @@ class CloudflareProviderTests(unittest.TestCase):
     def test_one_time_pin_detection_is_exact(self) -> None:
         self.assertTrue(one_time_pin_enabled([{"type": "onetimepin"}]))
         self.assertFalse(one_time_pin_enabled([{"type": "google"}]))
+
+    def test_access_initialization_creates_organization_and_otp(self) -> None:
+        class FakeAPI:
+            def access_organization(self, _account_id):
+                raise CloudflareAPIError("not initialized")
+
+            def create_access_organization(self, account_id, auth_domain, name):
+                self.organization = (account_id, auth_domain, name)
+                return {"auth_domain": auth_domain, "name": name}
+
+            def access_identity_providers(self, _account_id):
+                return []
+
+            def create_access_identity_provider(self, account_id, payload):
+                self.provider = (account_id, payload)
+                return {"id": "otp", **payload}
+
+        api = FakeAPI()
+        providers = ensure_one_time_pin(api, "a" * 32, "example.net")
+        self.assertEqual(api.organization[1], "citadel-aaaaaaaaaaaa.cloudflareaccess.com")
+        self.assertEqual(api.organization[2], "example.net")
+        self.assertEqual(api.provider[1]["type"], "onetimepin")
+        self.assertTrue(one_time_pin_enabled(providers))
+
+    def test_access_initialization_reuses_existing_otp(self) -> None:
+        class FakeAPI:
+            def access_organization(self, _account_id):
+                return {"auth_domain": "existing.cloudflareaccess.com"}
+
+            def access_identity_providers(self, _account_id):
+                return [{"id": "otp", "type": "onetimepin"}]
+
+        self.assertTrue(one_time_pin_enabled(ensure_one_time_pin(FakeAPI(), "account", "example.net")))
 
     def test_access_refuses_unmanaged_application(self) -> None:
         class FakeAPI:
