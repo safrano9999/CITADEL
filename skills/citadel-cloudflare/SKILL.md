@@ -21,10 +21,10 @@ CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN" \
   --domain services.example.net
 ```
 
-Discovery idempotently creates the Zero Trust organization and One-time PIN provider when they are missing. Error code `10000` during this step means the token lacks `Access: Organizations, Identity Providers, and Groups -> Edit`; stop instead of exposing unprotected routes.
+Discovery idempotently creates the Zero Trust organization and One-time PIN provider when they are missing. Error code `9999` from the organization lookup means Access has not been initialized yet and discovery must create the organization. Error code `10000` while creating or updating Access means the token lacks `Access: Organizations, Identity Providers, and Groups -> Edit`; stop instead of exposing unprotected routes.
 
 6. Write discovered non-secret values to `config.conf` and secrets to `.env`. Keep `.env` mode `0600`.
-7. Retrieve `TUNNEL_TOKEN` when configuring the separate cloudflared service:
+7. Retrieve `TUNNEL_TOKEN` for the systemd-managed cloudflared service:
 
 ```bash
 python3 skills/citadel-cloudflare/scripts/discover.py \
@@ -34,6 +34,8 @@ python3 skills/citadel-cloudflare/scripts/discover.py \
 ```
 
 Do not commit either token.
+
+When `CITADEL_CLOUDFLARE=1`, the Tunnel configuration is complete, and `TUNNEL_TOKEN` exists, CITADEL checks the existing `cloudflared.service` and starts it when inactive. CITADEL does not install cloudflared or create an ad-hoc connector process.
 
 After the provider nameserver change, the agent owns every remaining setup action: account/zone/Tunnel discovery, Access initialization, One-time PIN, DNS records, Tunnel ingress, configuration files, connector token, and verification. Do not send the user through Cloudflare dashboard pages for resources the API token can manage.
 

@@ -30,7 +30,7 @@ CITADEL is built for the real-world homelab/dev workflow:
 
 ## How it works
 
-CITADEL scans listening ports, probes HTTP services, and maps every discovered service to the active providers. Tailscale and Cloudflare integration is reconciliation only: CITADEL never starts or authenticates either daemon.
+CITADEL scans listening ports, probes HTTP services, and maps every discovered service to the active providers. Tailscale integration is reconciliation only. For Cloudflare, CITADEL can start an installed `cloudflared.service` when Cloudflare is enabled and the Tunnel token is present; it never installs or authenticates Tailscale and never launches an ad-hoc connector.
 
 Example: you start a new service on port 3000. Next scan, it shows up on the dashboard with working links for every provider:
 

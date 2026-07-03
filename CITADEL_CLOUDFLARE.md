@@ -80,7 +80,9 @@ Initialize Cloudflare Access through the API before applying any email whitelist
 
 `discover.py` and the Cloudflare provider perform this initialization idempotently. The organization uses the deterministic authentication domain `citadel-<first-12-account-id>.cloudflareaccess.com`; existing organizations and One-time PIN providers are reused.
 
-This requires `Account -> Access: Organizations, Identity Providers, and Groups -> Edit` for the selected account. If either organization endpoint returns HTTP 403 with Cloudflare error code `10000`, stop and ask the user to edit or replace the API token with that permission. Never fall back to exposing routes without Access after an email whitelist is configured.
+This requires `Account -> Access: Organizations, Identity Providers, and Groups -> Edit` for the selected account. Cloudflare error code `9999` from the organization lookup means Access has not been initialized and the agent should create the organization. If creation or reconciliation returns HTTP 403 with error code `10000`, stop and ask the user to edit or replace the API token with that permission. Never fall back to exposing routes without Access after an email whitelist is configured.
+
+When `CITADEL_CLOUDFLARE=1`, the Tunnel identifiers and `TUNNEL_TOKEN` are present, and `cloudflared.service` is installed, CITADEL starts that service if it is inactive. It does not install cloudflared or create a separate connector process.
 
 ## 2. Conservative Cloudflare Mapping Defaults
 

@@ -18,7 +18,7 @@ Use a scoped API token. Never request or store a Global API Key.
 
 During deterministic setup, include all accounts and all zones. The token can be narrowed after setup and verification.
 
-Before whitelist reconciliation, create or reuse the Zero Trust organization through `POST /accounts/{account_id}/access/organizations`, then create or reuse the `onetimepin` identity provider through `POST /accounts/{account_id}/access/identity_providers`.
+Before whitelist reconciliation, create or reuse the Zero Trust organization through `POST /accounts/{account_id}/access/organizations`, then create or reuse the `onetimepin` identity provider through `POST /accounts/{account_id}/access/identity_providers`. Error `9999` from the organization lookup means Access is not initialized and creation should continue; error `10000` during creation or reconciliation means the token lacks the required Access permission.
 
 ## Runtime ownership
 
@@ -51,4 +51,4 @@ CLOUDFLARE_API_TOKEN=
 TUNNEL_TOKEN=
 ```
 
-`TUNNEL_TOKEN` belongs to the separately managed cloudflared service. CITADEL does not start or authenticate cloudflared.
+`TUNNEL_TOKEN` belongs to the systemd-managed cloudflared service. When Cloudflare is enabled and the Tunnel values and token are present, CITADEL starts an installed but inactive `cloudflared.service`; it does not install cloudflared or launch an ad-hoc connector.
