@@ -16,7 +16,7 @@ case "$repo" in
   CALENDAR) files=(README.md calendar_fetch.py config.json openclaw.plugin.json package.json requirements.txt index.js scripts) ;;
   ZEROINBOX) files=(README.md provider.conf openclaw.plugin.json package.json requirements.txt index.js scripts skills zeroinbox) ;;
   CITADEL) files=(README.md CITADEL_CLOUDFLARE.md CITADEL.png citadel.svg config.ini.example openclaw.plugin.json package.json requirements.txt index.js scan.sh set_daemon.sh webui.py assets extensions functions skills templates tests) ;;
-  KACHELMANN) files=(README.md KACHELMANN_SOT.md OPENCLAW.md prompt.md mcp_server.py config.json openclaw.plugin.json package.json requirements.txt requirements-mysql.txt requirements-postgres.txt index.js scripts systemd kachelmann static templates webui.py) ;;
+  KACHELMANN) files=(README.md KACHELMANN_SOT.md OPENCLAW.md COACHING_ADVISES prompt.md mcp_server.py config.json openclaw.plugin.json package.json requirements.txt requirements-mysql.txt requirements-postgres.txt index.js scripts systemd kachelmann static templates webui.py) ;;
   SPANKER) files=(README.md assets openclaw.plugin.json package.json requirements.txt index.js scripts systemd spanker) ;;
   WELCOME) files=(README.md openclaw.plugin.json package.json requirements.txt index.js scripts systemd readme_welcome.py welcome_ref.py python_header.py) ;;
   NOTE) files=(README.md openclaw.plugin.json package.json requirements.txt index.js prompt_default.md scripts note functions) ;;
