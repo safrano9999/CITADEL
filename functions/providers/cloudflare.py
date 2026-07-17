@@ -110,23 +110,6 @@ def remove_managed_ingress(
     return preserved, fallback
 
 
-def assert_ingress_ownership(
-    config: dict[str, Any],
-    desired_hostnames: set[str],
-    managed_hostnames: set[str],
-) -> None:
-    ingress = config.get("ingress")
-    ingress = ingress if isinstance(ingress, list) else []
-    for entry in ingress:
-        if not isinstance(entry, dict):
-            continue
-        hostname = str(entry.get("hostname") or "").lower()
-        if hostname in desired_hostnames and hostname not in managed_hostnames:
-            raise CloudflareAPIError(
-                f"Tunnel ingress for {hostname} exists and is not managed by CITADEL"
-            )
-
-
 def adopt_matching_ingress(
     config: dict[str, Any],
     desired: dict[str, dict[str, Any]],
@@ -411,7 +394,6 @@ def main() -> int:
                 origin_host,
             )
             managed_hostnames = sorted(previous_hosts)
-            assert_ingress_ownership(tunnel_config, set(desired), previous_hosts)
             preserved, fallback = remove_managed_ingress(
                 tunnel_config,
                 previous_hosts | set(desired),

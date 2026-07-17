@@ -22,7 +22,6 @@ from cloudflare_policy import (  # noqa: E402
 from cloudflare import (  # noqa: E402
     access_policy_payload,
     adopt_matching_ingress,
-    assert_ingress_ownership,
     ensure_one_time_pin,
     one_time_pin_enabled,
     reconcile_access,
@@ -282,20 +281,20 @@ class CloudflareProviderTests(unittest.TestCase):
         self.assertEqual([item.get("hostname") for item in preserved], ["foreign.example.net"])
         self.assertEqual(fallback, {"service": "http_status:404"})
 
-    def test_refuses_unmanaged_ingress_for_desired_hostname(self) -> None:
+    def test_replaces_unmanaged_ingress_for_desired_hostname(self) -> None:
         config = {
             "ingress": [
                 {"hostname": "399.example.net", "service": "http://other:399"},
+                {"hostname": "foreign.example.net", "service": "http://other:400"},
                 {"service": "http_status:404"},
             ]
         }
-        with self.assertRaises(CloudflareAPIError):
-            assert_ingress_ownership(config, {"399.example.net"}, set())
-        assert_ingress_ownership(
-            config,
-            {"399.example.net"},
-            {"399.example.net"},
+        preserved, fallback = remove_managed_ingress(config, {"399.example.net"})
+        self.assertEqual(
+            preserved,
+            [{"hostname": "foreign.example.net", "service": "http://other:400"}],
         )
+        self.assertEqual(fallback, {"service": "http_status:404"})
 
     def test_adopts_only_ingress_with_exact_origin(self) -> None:
         config = {
