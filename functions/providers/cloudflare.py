@@ -315,7 +315,7 @@ def main() -> int:
     account_id = get("CITADEL_CLOUDFLARE_ACCOUNT_ID", "")
     zone_id = get("CITADEL_CLOUDFLARE_ZONE_ID", "")
     tunnel_id = get("CITADEL_CLOUDFLARE_TUNNEL_ID", "")
-    origin_host = get("CITADEL_CLOUDFLARE_ORIGIN_HOST", "127.0.0.1")
+    origin_host = get("CITADEL_SUBNET_IP", "").strip() or "127.0.0.1"
     token = get("CLOUDFLARE_API_TOKEN", "")
     default_email = get("CLOUDFLARE_EMAIL", "")
     label = str(ext_cfg.get("label") or "Cloudflare")
@@ -345,7 +345,7 @@ def main() -> int:
         if enabled and missing:
             raise CloudflareAPIError(f"Missing Cloudflare settings: {', '.join(missing)}")
         if enabled and not re.fullmatch(r"[A-Za-z0-9._-]+", origin_host):
-            raise CloudflareAPIError("CITADEL_CLOUDFLARE_ORIGIN_HOST is invalid")
+            raise CloudflareAPIError("CITADEL_SUBNET_IP is invalid for Cloudflare origin")
         if enabled and api:
             api.verify_token()
             connections = api.tunnel_connections(account_id, tunnel_id)

@@ -67,14 +67,13 @@ The script writes a local systemd unit, symlinks it into `~/.config/systemd/user
 |---|---|---|
 | `FASTAPI_HOST` | `127.0.0.1` | Web UI bind host |
 | `CITADEL_WEBUI_PORT` | `10999` | Web UI port |
-| `CITADEL_SUBNET_IP` | empty | IP used by the subnet provider |
+| `CITADEL_SUBNET_IP` | empty | IP used by the subnet provider and as the Cloudflare origin; blank uses `127.0.0.1` |
 | `CITADEL_TAILSCALE` | `true` | Reconcile native Tailscale Serve routes when Tailscale is logged in |
 | `CITADEL_CLOUDFLARE` | `false` | Reconcile Cloudflare resources when enabled and required values exist |
 | `CITADEL_CLOUDFLARE_DOMAIN` | empty | Hostname suffix, including a subdomain such as `services.example.net` |
 | `CITADEL_CLOUDFLARE_ACCOUNT_ID` | empty | Cloudflare account ID |
 | `CITADEL_CLOUDFLARE_ZONE_ID` | empty | Cloudflare zone ID |
 | `CITADEL_CLOUDFLARE_TUNNEL_ID` | empty | Existing named Tunnel ID |
-| `CITADEL_CLOUDFLARE_ORIGIN_HOST` | `127.0.0.1` | Origin address as seen by cloudflared |
 | `CLOUDFLARE_EMAIL` | empty | Default Access email whitelist for new Cloudflare routes; Cloudflare is skipped when missing |
 
 These non-secret values live in `config.conf`. `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_EMAIL`, and the separately consumed `TUNNEL_TOKEN` live in `.env`.
@@ -104,6 +103,7 @@ Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled 
 - `localhost` and `tailscale` work out of the box (no config required).
 - `subnet` reads `CITADEL_SUBNET_IP` from `config.conf`.
 - `cloudflare` reads non-secrets from `config.conf` and its scoped API token from `.env`.
+- `cloudflare` forwards to `CITADEL_SUBNET_IP:<port>` when set, otherwise to `127.0.0.1:<port>`.
 
 ### Tailscale Provider
 

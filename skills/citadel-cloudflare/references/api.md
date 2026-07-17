@@ -41,8 +41,10 @@ CITADEL_CLOUDFLARE_DOMAIN=services.example.net
 CITADEL_CLOUDFLARE_ACCOUNT_ID=
 CITADEL_CLOUDFLARE_ZONE_ID=
 CITADEL_CLOUDFLARE_TUNNEL_ID=
-CITADEL_CLOUDFLARE_ORIGIN_HOST=127.0.0.1
+CITADEL_SUBNET_IP=
 ```
+
+When `CITADEL_SUBNET_IP` is set, Cloudflare uses it as the origin host. When it is blank, the origin defaults to `127.0.0.1`.
 
 Store secrets in `.env`:
 
