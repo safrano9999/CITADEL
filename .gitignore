@@ -10,6 +10,7 @@ config.ini
 config.conf
 .env
 .systemd/
+/citadel.service
 
 # Extensions runtime
 extensions/providers_state.json
