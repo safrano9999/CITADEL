@@ -125,7 +125,11 @@ class UnrouteTests(unittest.TestCase):
                                     "tailscale": "https://node.ts.net:18789",
                                 },
                             },
-                        ]
+                        ],
+                        "other_ports": [
+                            {"port": 11000, "service": "stale"},
+                            {"port": 5432, "service": "postgresql"},
+                        ],
                     }
                 ),
                 encoding="utf-8",
@@ -139,6 +143,14 @@ class UnrouteTests(unittest.TestCase):
                         "tailscale_path": None,
                     }
                 ),
+                encoding="utf-8",
+            )
+            icons_dir = base / "icons"
+            icons_dir.mkdir()
+            (icons_dir / "11000.png").write_bytes(b"stale png")
+            (icons_dir / "11000.ico").write_bytes(b"stale ico")
+            (icons_dir / "18789.svg").write_text(
+                "<svg></svg>",
                 encoding="utf-8",
             )
 
@@ -157,18 +169,18 @@ class UnrouteTests(unittest.TestCase):
             services = json.loads(
                 (base / "services.json").read_text(encoding="utf-8")
             )
-            self.assertNotIn(
-                "tailscale",
-                services["http_services"][0]["urls"],
+            self.assertEqual(
+                [entry["port"] for entry in services["http_services"]],
+                [18789],
             )
-            self.assertIn(
-                "tailscale",
-                services["http_services"][1]["urls"],
+            self.assertEqual(
+                [entry["port"] for entry in services["other_ports"]],
+                [5432],
             )
-            cache = json.loads(
-                (base / "cache" / "11000.json").read_text(encoding="utf-8")
-            )
-            self.assertEqual(cache, {"title": "CITADEL"})
+            self.assertFalse((base / "cache" / "11000.json").exists())
+            self.assertFalse((icons_dir / "11000.png").exists())
+            self.assertFalse((icons_dir / "11000.ico").exists())
+            self.assertTrue((icons_dir / "18789.svg").exists())
 
     def test_invalid_config_never_calls_tailscale(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

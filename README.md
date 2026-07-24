@@ -131,7 +131,9 @@ Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled 
 
   The script reads `CITADEL_WEBUI_PORT` from `config.conf`, disables only the
   HTTP/HTTPS Serve listener on that port, and removes only that port from
-  CITADEL's persisted Tailscale route state. It never runs a global Serve reset.
+  CITADEL's persisted route state. It also deletes that port's cached metadata
+  and every matching icon, so the next `./scan.sh` fetches the title and icon
+  again. It never runs a global Serve reset.
 
 ### Cloudflare Provider
 

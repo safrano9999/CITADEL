@@ -129,29 +129,38 @@ def prune_route_state(payload: dict[str, Any], port_key: str) -> bool:
     return changed
 
 
-def prune_services(payload: dict[str, Any], port: int) -> bool:
-    services = payload.get("http_services")
-    if not isinstance(services, list):
-        return False
-
+def prune_service_entries(payload: dict[str, Any], port: int) -> bool:
     changed = False
-    for service in services:
-        if not isinstance(service, dict) or str(service.get("port")) != str(port):
+    for key in ("http_services", "other_ports"):
+        entries = payload.get(key)
+        if not isinstance(entries, list):
             continue
-        urls = service.get("urls")
-        if isinstance(urls, dict) and "tailscale" in urls:
-            urls.pop("tailscale")
+        retained = [
+            entry
+            for entry in entries
+            if not isinstance(entry, dict) or str(entry.get("port")) != str(port)
+        ]
+        if retained != entries:
+            payload[key] = retained
             changed = True
     return changed
 
 
-def prune_cache(payload: dict[str, Any]) -> bool:
-    changed = False
-    for key in ("tailscale_url", "tailscale_path"):
-        if key in payload:
-            payload.pop(key)
-            changed = True
-    return changed
+def remove_file(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        raise UnrouteError(f"cannot remove {path}: {exc}") from exc
+
+
+def clear_cached_metadata(project_dir: Path, port: int) -> None:
+    remove_file(project_dir / "cache" / f"{port}.json")
+    icons_dir = project_dir / "icons"
+    if not icons_dir.is_dir():
+        return
+    for icon_path in icons_dir.glob(f"{port}.*"):
+        if icon_path.is_file() or icon_path.is_symlink():
+            remove_file(icon_path)
 
 
 def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
@@ -198,16 +207,12 @@ def clear_persisted_port(project_dir: Path, port: int) -> None:
 
     services_path = project_dir / "services.json"
     services = read_json_object(services_path)
-    if services is not None and prune_services(services, port):
+    if services is not None and prune_service_entries(services, port):
         updates[services_path] = services
-
-    cache_path = project_dir / "cache" / f"{port}.json"
-    cache = read_json_object(cache_path)
-    if cache is not None and prune_cache(cache):
-        updates[cache_path] = cache
 
     for path, payload in updates.items():
         write_json_atomic(path, payload)
+    clear_cached_metadata(project_dir, port)
 
 
 def unroute(project_dir: Path) -> int:
@@ -221,6 +226,8 @@ def unroute(project_dir: Path) -> int:
     release_serve_port(tailscale_bin, port)
     clear_persisted_port(project_dir, port)
     print(f"[unroute] released only Tailscale Serve port {port}")
+    print(f"[unroute] cleared cached metadata and icons for port {port}")
+    print("[unroute] the next ./scan.sh run will fetch them again")
     return 0
 
 
