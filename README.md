@@ -108,10 +108,11 @@ Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled 
 ### Tailscale Provider
 
 - Checks runtime via `tailscale status`; never starts Tailscale
-- Resolves `route_mode = auto` from the discovered listener addresses
-- Uses native, persistent Tailscale Serve routes for loopback-only services
-- Removes managed Serve routes and uses direct Tailnet URLs for wildcard or Tailscale-bound services
-- Stores URLs, backend targets, status, and managed ports in `tailscale.json`
+- With `route_mode = auto`, tries native Tailscale Serve over HTTPS once for every new or changed web service, then tries HTTP as fallback
+- Reuses the persisted decision for unchanged services without repeating `tailscale serve` calls on every scan
+- Falls back to a direct Tailnet URL only when both Serve attempts fail and the service is already bound to a wildcard or Tailscale address
+- Removes only stale Serve listeners recorded as CITADEL-managed
+- Stores URLs, backend targets, route decisions, fallback reasons, and managed listener schemes in `tailscale.json`
 - Generates URLs like `https://<tailnet-domain>:<port>`
 - Set the scanning user as Tailscale operator once, then run scans without sudo:
 
@@ -193,7 +194,7 @@ Each enabled provider keeps its own `routes.json`. Service routes use the same s
 }
 ```
 
-`mode` is `direct` or `proxy`. `target` identifies a proxy origin, and `owns_listener` records whether the provider claims the service port locally.
+`mode` is `direct` or `proxy`. `target` identifies a proxy origin, and `owns_listener` records whether the provider claims the service port locally. A proxy URL can be HTTPS or the persisted HTTP fallback. To deliberately reevaluate a route, both its CITADEL-managed Serve listener and its persisted decision in `tailscale.json` must be cleared; a global Tailscale Serve reset may remove unrelated routes.
 
 ## Frontend
 
