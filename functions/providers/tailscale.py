@@ -208,10 +208,14 @@ def previous_managed_routes(previous_payload: dict[str, Any]) -> dict[str, str]:
             if port_key.isdigit() and public_scheme in {"http", "https"}:
                 result[port_key] = public_scheme
 
-    previous_services = previous_payload.get("services")
+    previous_services = previous_payload.get("remembered_services")
+    if not isinstance(previous_services, dict):
+        previous_services = previous_payload.get("services")
     if not isinstance(previous_services, dict):
         previous_services = {}
-    previous_serve_routes = previous_payload.get("serve_routes")
+    previous_serve_routes = previous_payload.get("remembered_serve_routes")
+    if not isinstance(previous_serve_routes, dict):
+        previous_serve_routes = previous_payload.get("serve_routes")
     if not isinstance(previous_serve_routes, dict):
         previous_serve_routes = {}
 
@@ -399,6 +403,8 @@ def main() -> int:
     service_signatures: dict[str, dict[str, Any]] = {}
     route_failures: dict[str, str] = {}
     fallbacks: dict[str, dict[str, str]] = {}
+    retained_services: dict[str, Any] = {}
+    retained_serve_routes: dict[str, Any] = {}
     reconciliation_completed = False
     live_routes_loaded = False
     live_routes: dict[str, dict[str, Any]] = {}
@@ -475,18 +481,95 @@ def main() -> int:
             return str(previous_route["target"])
         return None
 
+    def retain_previous_route_state(port_key: str) -> None:
+        if port_key in previous_services:
+            retained_services[port_key] = previous_services[port_key]
+        if port_key in previous_serve_routes:
+            retained_serve_routes[port_key] = previous_serve_routes[port_key]
+        previous_signature = previous_signatures.get(port_key)
+        if isinstance(previous_signature, dict):
+            service_signatures.setdefault(port_key, previous_signature)
+        previous_failure = previous_failures.get(port_key)
+        if previous_failure:
+            route_failures.setdefault(port_key, str(previous_failure))
+        previous_fallback = previous_fallbacks.get(port_key)
+        if isinstance(previous_fallback, dict):
+            fallbacks.setdefault(
+                port_key,
+                {
+                    str(key): str(value)
+                    for key, value in previous_fallback.items()
+                },
+            )
+        previous_public_scheme = previous_managed_routes_state.get(port_key)
+        if previous_public_scheme is not None:
+            managed_routes[port_key] = previous_public_scheme
+            desired_managed_ports.add(port_key)
+
+    def mark_pending(
+        port: str | int,
+        signature: dict[str, Any],
+        message: str,
+        *,
+        retain_previous: bool = False,
+    ) -> None:
+        port_key = str(port)
+        service_signatures[port_key] = {
+            **signature,
+            "pending_reconciliation": True,
+        }
+        route_failures[port_key] = message
+        if retain_previous:
+            retain_previous_route_state(port_key)
+        errors.append(f"port {port_key}: {message}")
+
     if not enabled:
-        if shutil.which("tailscale"):
+        if managed_routes and not shutil.which("tailscale"):
+            for port in sorted(managed_routes, key=int):
+                retain_previous_route_state(port)
+                errors.append(
+                    f"port {port}: cannot remove managed listener: "
+                    "tailscale CLI is unavailable"
+                )
+        elif managed_routes:
             sorted_routes = sorted(
                 managed_routes.items(),
                 key=lambda item: int(item[0]),
             )
+            current_live_routes, status_error = get_live_routes()
             for port, public_scheme in sorted_routes:
+                if status_error is not None:
+                    retain_previous_route_state(port)
+                    errors.append(
+                        f"port {port}: cannot verify managed listener: {status_error}"
+                    )
+                    continue
+
+                live_route = current_live_routes.get(port)
+                target = recorded_target(port)
+                if live_route is None:
+                    managed_routes.pop(port, None)
+                    continue
+                if target is None or not live_route_matches(
+                    live_route,
+                    public_scheme=public_scheme,
+                    target=target,
+                ):
+                    managed_routes.pop(port, None)
+                    errors.append(
+                        f"port {port}: live listener no longer matches CITADEL state; "
+                        "left untouched and released from CITADEL management"
+                    )
+                    continue
+
                 removal_error = remove_serve_route(port, public_scheme)
                 if removal_error is None:
                     managed_routes.pop(port, None)
-                else:
-                    errors.append(f"port {port}: {removal_error}")
+                    current_live_routes.pop(port, None)
+                    continue
+
+                retain_previous_route_state(port)
+                errors.append(f"port {port}: {removal_error}")
         write_json(args.services_file, services_payload)
         reconciliation_completed = True
     elif fetch_enabled and shutil.which("tailscale"):
@@ -576,16 +659,69 @@ def main() -> int:
                             continue
 
                     previous_public_scheme = previous_managed_routes_state.get(port_key)
+                    if (
+                        route_mode == "direct"
+                        and not direct_capable
+                        and previous_public_scheme is None
+                    ):
+                        message = "direct route requested, but the service is loopback-only"
+                        service_signatures[port_key] = signature
+                        route_failures[port_key] = message
+                        errors.append(f"port {port}: {message}")
+                        continue
+
+                    current_live_routes, status_error = get_live_routes()
+                    if status_error is not None:
+                        mark_pending(
+                            port,
+                            signature,
+                            f"cannot verify Tailscale listeners: {status_error}",
+                            retain_previous=previous_public_scheme is not None,
+                        )
+                        continue
+
+                    live_route = current_live_routes.get(port_key)
                     if previous_public_scheme is not None:
-                        removal_error = remove_serve_route(port, previous_public_scheme)
-                        if removal_error is not None:
-                            message = f"could not replace existing route: {removal_error}"
-                            service_signatures[port_key] = signature
-                            route_failures[port_key] = message
-                            desired_managed_ports.add(port_key)
-                            errors.append(f"port {port}: {message}")
+                        previous_target = recorded_target(port_key)
+                        if live_route is None:
+                            managed_routes.pop(port_key, None)
+                        elif previous_target is None or not live_route_matches(
+                            live_route,
+                            public_scheme=previous_public_scheme,
+                            target=previous_target,
+                        ):
+                            managed_routes.pop(port_key, None)
+                            mark_pending(
+                                port,
+                                signature,
+                                "live listener no longer matches CITADEL state; "
+                                "left untouched and released from CITADEL management",
+                            )
                             continue
-                        managed_routes.pop(port_key, None)
+                        else:
+                            removal_error = remove_serve_route(
+                                port,
+                                previous_public_scheme,
+                            )
+                            if removal_error is not None:
+                                mark_pending(
+                                    port,
+                                    signature,
+                                    "could not replace existing route: "
+                                    f"{removal_error}",
+                                    retain_previous=True,
+                                )
+                                continue
+                            managed_routes.pop(port_key, None)
+                            current_live_routes.pop(port_key, None)
+                    elif live_route is not None:
+                        mark_pending(
+                            port,
+                            signature,
+                            "port already has a Tailscale Serve listener not managed "
+                            "by CITADEL; left untouched",
+                        )
+                        continue
 
                     if route_mode == "direct":
                         if not direct_capable:
@@ -691,11 +827,41 @@ def main() -> int:
                 stale_ports = set(managed_routes) - desired_managed_ports
                 for stale_port in sorted(stale_ports, key=int):
                     public_scheme = managed_routes[stale_port]
+                    current_live_routes, status_error = get_live_routes()
+                    if status_error is not None:
+                        retain_previous_route_state(stale_port)
+                        errors.append(
+                            f"port {stale_port}: cannot verify stale listener: "
+                            f"{status_error}"
+                        )
+                        continue
+
+                    live_route = current_live_routes.get(stale_port)
+                    previous_target = recorded_target(stale_port)
+                    if live_route is None:
+                        managed_routes.pop(stale_port, None)
+                        continue
+                    if previous_target is None or not live_route_matches(
+                        live_route,
+                        public_scheme=public_scheme,
+                        target=previous_target,
+                    ):
+                        managed_routes.pop(stale_port, None)
+                        errors.append(
+                            f"port {stale_port}: stale live listener no longer "
+                            "matches CITADEL state; left untouched and released "
+                            "from CITADEL management"
+                        )
+                        continue
+
                     removal_error = remove_serve_route(stale_port, public_scheme)
                     if removal_error is None:
                         managed_routes.pop(stale_port, None)
-                    else:
-                        errors.append(f"port {stale_port}: {removal_error}")
+                        current_live_routes.pop(stale_port, None)
+                        continue
+
+                    retain_previous_route_state(stale_port)
+                    errors.append(f"port {stale_port}: {removal_error}")
 
     if enabled and not reconciliation_completed:
         service_signatures = {
@@ -719,8 +885,8 @@ def main() -> int:
         remembered_services = previous_services
         remembered_serve_routes = previous_serve_routes
     else:
-        remembered_services = routes
-        remembered_serve_routes = serve_routes
+        remembered_services = {**retained_services, **routes}
+        remembered_serve_routes = {**retained_serve_routes, **serve_routes}
 
     set_ini_value(args.config_ini, "tailscale", "true" if running else "false")
     write_json(args.services_file, services_payload)
