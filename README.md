@@ -122,6 +122,17 @@ Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled 
   ./scan.sh
   ```
 
+- To deliberately release only CITADEL's configured web UI port from Tailscale
+  Serve, run:
+
+  ```sh
+  sudo ./unroute.sh
+  ```
+
+  The script reads `CITADEL_WEBUI_PORT` from `config.conf`, disables only the
+  HTTP/HTTPS Serve listener on that port, and removes only that port from
+  CITADEL's persisted Tailscale route state. It never runs a global Serve reset.
+
 ### Cloudflare Provider
 
 Cloudflare reconciliation runs when `CITADEL_CLOUDFLARE=1`, the API token is valid, and the configured account, zone, and Tunnel identifiers are present. Mapping is performed through the API and does not depend on where or how `cloudflared` runs. CITADEL preserves unrelated DNS records, Access resources, and Tunnel ingress rules.
