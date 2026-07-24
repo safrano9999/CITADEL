@@ -41,7 +41,7 @@ Example: you start a new service on port 3000. Next scan, it shows up on the das
 | tailscale | `https://citadel-bold-falcon.tailnet.ts.net:3000` |
 | cloudflare | `https://3000.services.example.net` |
 
-Start a service, scan, done. Every discovered HTTP service is mapped to every enabled provider. The Tailscale provider uses HTTPS Serve for loopback-only listeners and direct Tailnet URLs for wildcard or Tailscale-bound listeners, preventing both processes from claiming the same port.
+Start a service, scan, done. Every discovered HTTP service is mapped to every enabled provider. For each new or changed service, the Tailscale provider tries HTTPS Serve first and HTTP Serve second. If neither listener can be created, `auto` mode can still use a direct Tailnet URL when the service already listens on a wildcard or Tailscale address.
 
 ## Quick Start
 
@@ -110,8 +110,9 @@ Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled 
 - Checks runtime via `tailscale status`; never starts Tailscale
 - With `route_mode = auto`, tries native Tailscale Serve over HTTPS once for every new or changed web service, then tries HTTP as fallback
 - Reuses the persisted decision for unchanged services without repeating `tailscale serve` calls on every scan
+- Reads `tailscale serve status --json` only before a listener would be created, replaced, or removed
 - Falls back to a direct Tailnet URL only when both Serve attempts fail and the service is already bound to a wildcard or Tailscale address
-- Removes only stale Serve listeners recorded as CITADEL-managed
+- Replaces or removes a CITADEL-managed listener only when its live scheme and backend still match the persisted state; foreign or manually changed listeners remain untouched
 - Stores URLs, backend targets, route decisions, fallback reasons, and managed listener schemes in `tailscale.json`
 - Generates URLs like `https://<tailnet-domain>:<port>`
 - Set the scanning user as Tailscale operator once, then run scans without sudo:
