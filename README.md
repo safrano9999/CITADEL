@@ -93,7 +93,7 @@ These non-secret values live in `config.conf`. `CLOUDFLARE_API_TOKEN`, `CLOUDFLA
 Enabled by default:
 - `localhost` — routes to `127.0.0.1:<port>`
 - `subnet` — routes to `CITADEL_SUBNET_IP:<port>`
-- `tailscale` — HTTPS routes to `<tailnet-domain>:<port>`
+- `tailscale` — HTTPS-preferred routes to `<tailnet-domain>:<port>`, with persisted HTTP/direct fallback
 - `cloudflare` — DNS, named Tunnel ingress, and optional Access policies; inactive until `CITADEL_CLOUDFLARE=true`
 
 Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled providers and aggregates state.
@@ -110,7 +110,7 @@ Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled 
 - Checks runtime via `tailscale status`; never starts Tailscale
 - With `route_mode = auto`, tries native Tailscale Serve over HTTPS once for every new or changed web service, then tries HTTP as fallback
 - Reuses the persisted decision for unchanged services without repeating `tailscale serve` calls on every scan
-- Reads `tailscale serve status --json` only before a listener would be created, replaced, or removed
+- Reads `tailscale serve status --json` only when a new or changed route needs reconciliation or a stale listener needs removal
 - Falls back to a direct Tailnet URL only when both Serve attempts fail and the service is already bound to a wildcard or Tailscale address
 - Replaces or removes a CITADEL-managed listener only when its live scheme and backend still match the persisted state; foreign or manually changed listeners remain untouched
 - Stores URLs, backend targets, route decisions, fallback reasons, and managed listener schemes in `tailscale.json`

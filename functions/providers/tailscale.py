@@ -115,57 +115,137 @@ def route_public_scheme(route: dict[str, Any]) -> str | None:
     return None
 
 
+def normalize_authority(value: Any) -> str:
+    authority = str(value or "").strip().lower()
+    host, separator, port = authority.rpartition(":")
+    if separator and port.isdigit():
+        return f"{host.rstrip('.')}:{int(port)}"
+    return authority.rstrip(".")
+
+
+def route_authority(route: dict[str, Any]) -> str | None:
+    url = str(route.get("url") or "").strip()
+    authority = normalize_authority(urlparse(url).netloc)
+    return authority or None
+
+
 def parse_live_serve_routes(payload: Any) -> dict[str, dict[str, Any]]:
     if not isinstance(payload, dict):
         return {}
 
+    def empty_route() -> dict[str, Any]:
+        return {
+            "public_scheme": None,
+            "target": None,
+            "authority": None,
+            "exact_tcp_handler": False,
+            "exclusive_root_proxy": False,
+            "foreground": False,
+            "funnel": False,
+        }
+
     result: dict[str, dict[str, Any]] = {}
     tcp = payload.get("TCP")
+    if tcp is not None and not isinstance(tcp, dict):
+        raise ValueError("unexpected TCP ServeConfig")
     if isinstance(tcp, dict):
         for port, listener in tcp.items():
             port_key = str(port)
             if not port_key.isdigit() or not isinstance(listener, dict):
-                continue
+                raise ValueError("unexpected TCP listener")
             if listener.get("HTTPS") is True:
                 public_scheme = "https"
-            elif listener.get("HTTP") is True or listener.get("HTTPS") is False:
+                exact_tcp_handler = set(listener) == {"HTTPS"}
+            elif listener.get("HTTP") is True:
                 public_scheme = "http"
+                exact_tcp_handler = set(listener) == {"HTTP"}
             else:
                 public_scheme = None
-            result[port_key] = {
-                "public_scheme": public_scheme,
-                "target": None,
-                "exclusive_root_proxy": False,
-            }
+                exact_tcp_handler = False
+            entry = empty_route()
+            entry["public_scheme"] = public_scheme
+            entry["exact_tcp_handler"] = exact_tcp_handler
+            result[port_key] = entry
 
     web = payload.get("Web")
-    if not isinstance(web, dict):
-        return result
+    if web is not None and not isinstance(web, dict):
+        raise ValueError("unexpected Web ServeConfig")
+    if isinstance(web, dict):
+        seen_web_ports: set[str] = set()
+        for authority, web_config in web.items():
+            if not isinstance(web_config, dict):
+                raise ValueError("unexpected web listener")
+            authority_text = normalize_authority(authority)
+            if ":" not in authority_text:
+                raise ValueError("unexpected web listener authority")
+            port_key = authority_text.rsplit(":", 1)[-1]
+            if not port_key.isdigit():
+                raise ValueError("unexpected web listener port")
+            entry = result.setdefault(port_key, empty_route())
+            if port_key in seen_web_ports:
+                entry["target"] = None
+                entry["authority"] = None
+                entry["exclusive_root_proxy"] = False
+                continue
+            seen_web_ports.add(port_key)
 
-    for authority, web_config in web.items():
-        if not isinstance(web_config, dict):
-            continue
-        authority_text = str(authority)
-        if ":" not in authority_text:
-            continue
-        port_key = authority_text.rsplit(":", 1)[-1]
-        if not port_key.isdigit():
-            continue
-        handlers = web_config.get("Handlers")
-        if not isinstance(handlers, dict):
-            continue
-        root_handler = handlers.get("/")
-        target = root_handler.get("Proxy") if isinstance(root_handler, dict) else None
-        entry = result.setdefault(
-            port_key,
-            {
-                "public_scheme": None,
-                "target": None,
-                "exclusive_root_proxy": False,
-            },
-        )
-        entry["target"] = str(target) if target else None
-        entry["exclusive_root_proxy"] = bool(target) and set(handlers) == {"/"}
+            entry["authority"] = authority_text
+            handlers = web_config.get("Handlers")
+            if not isinstance(handlers, dict):
+                continue
+            root_handler = handlers.get("/")
+            target = (
+                root_handler.get("Proxy")
+                if isinstance(root_handler, dict)
+                else None
+            )
+            entry["target"] = str(target) if target else None
+            entry["exclusive_root_proxy"] = (
+                bool(target)
+                and set(web_config) == {"Handlers"}
+                and set(handlers) == {"/"}
+                and isinstance(root_handler, dict)
+                and set(root_handler) == {"Proxy"}
+            )
+
+    allow_funnel = payload.get("AllowFunnel")
+    if allow_funnel is not None and not isinstance(allow_funnel, dict):
+        raise ValueError("unexpected AllowFunnel payload")
+    if isinstance(allow_funnel, dict):
+        for authority, allowed in allow_funnel.items():
+            if not allowed:
+                continue
+            authority_text = normalize_authority(authority)
+            port_key = authority_text.rsplit(":", 1)[-1]
+            if not port_key.isdigit():
+                continue
+            entry = result.setdefault(port_key, empty_route())
+            entry["funnel"] = True
+            entry["exclusive_root_proxy"] = False
+
+    foreground = payload.get("Foreground")
+    if foreground is not None and not isinstance(foreground, dict):
+        raise ValueError("unexpected Foreground payload")
+    if isinstance(foreground, dict):
+        for foreground_config in foreground.values():
+            if not isinstance(foreground_config, dict):
+                raise ValueError("unexpected foreground ServeConfig")
+            foreground_routes = parse_live_serve_routes(foreground_config)
+            for port_key, foreground_route in foreground_routes.items():
+                entry = result.setdefault(port_key, empty_route())
+                foreground_scheme = foreground_route.get("public_scheme")
+                if entry["public_scheme"] is None:
+                    entry["public_scheme"] = foreground_scheme
+                elif (
+                    foreground_scheme is not None
+                    and entry["public_scheme"] != foreground_scheme
+                ):
+                    entry["public_scheme"] = None
+                entry["target"] = None
+                entry["authority"] = None
+                entry["exact_tcp_handler"] = False
+                entry["exclusive_root_proxy"] = False
+                entry["foreground"] = True
     return result
 
 
@@ -174,13 +254,18 @@ def live_route_matches(
     *,
     public_scheme: str,
     target: str,
+    authority: str,
 ) -> bool:
     if not isinstance(live_route, dict):
         return False
     return (
         live_route.get("public_scheme") == public_scheme
         and live_route.get("target") == target
+        and live_route.get("authority") == normalize_authority(authority)
+        and live_route.get("exact_tcp_handler") is True
         and live_route.get("exclusive_root_proxy") is True
+        and live_route.get("foreground") is False
+        and live_route.get("funnel") is False
     )
 
 
@@ -462,7 +547,10 @@ def main() -> int:
             )
             return live_routes, live_routes_error
         try:
-            live_routes = parse_live_serve_routes(json.loads(result.stdout))
+            status_payload = json.loads(result.stdout)
+            if not isinstance(status_payload, dict):
+                raise ValueError("unexpected Tailscale Serve status payload")
+            live_routes = parse_live_serve_routes(status_payload)
         except Exception:
             live_routes_error = "could not parse tailscale serve status"
         return live_routes, live_routes_error
@@ -479,6 +567,22 @@ def main() -> int:
         )
         if previous_route is not None and previous_route.get("target") is not None:
             return str(previous_route["target"])
+        return None
+
+    def recorded_authority(port_key: str) -> str | None:
+        serve_route = previous_serve_routes.get(port_key)
+        if isinstance(serve_route, dict):
+            authority = route_authority(serve_route)
+            if authority is not None:
+                return authority
+        previous_route = normalize_previous_route(
+            previous_services.get(port_key),
+            port_key,
+            previous_serve_routes,
+            previous_managed_routes_state,
+        )
+        if previous_route is not None:
+            return route_authority(previous_route)
         return None
 
     def retain_previous_route_state(port_key: str) -> None:
@@ -547,14 +651,23 @@ def main() -> int:
 
                 live_route = current_live_routes.get(port)
                 target = recorded_target(port)
+                authority = recorded_authority(port)
                 if live_route is None:
                     managed_routes.pop(port, None)
                     continue
-                if target is None or not live_route_matches(
+                if target is None or authority is None or not live_route_matches(
                     live_route,
                     public_scheme=public_scheme,
                     target=target,
+                    authority=authority,
                 ):
+                    if live_route.get("foreground") is True:
+                        retain_previous_route_state(port)
+                        errors.append(
+                            f"port {port}: foreground Tailscale Serve listener "
+                            "is active; managed-listener removal deferred"
+                        )
+                        continue
                     managed_routes.pop(port, None)
                     errors.append(
                         f"port {port}: live listener no longer matches CITADEL state; "
@@ -683,13 +796,28 @@ def main() -> int:
                     live_route = current_live_routes.get(port_key)
                     if previous_public_scheme is not None:
                         previous_target = recorded_target(port_key)
+                        previous_authority = recorded_authority(port_key)
                         if live_route is None:
                             managed_routes.pop(port_key, None)
-                        elif previous_target is None or not live_route_matches(
-                            live_route,
-                            public_scheme=previous_public_scheme,
-                            target=previous_target,
+                        elif (
+                            previous_target is None
+                            or previous_authority is None
+                            or not live_route_matches(
+                                live_route,
+                                public_scheme=previous_public_scheme,
+                                target=previous_target,
+                                authority=previous_authority,
+                            )
                         ):
+                            if live_route.get("foreground") is True:
+                                mark_pending(
+                                    port,
+                                    signature,
+                                    "foreground Tailscale Serve listener is active; "
+                                    "route replacement deferred",
+                                    retain_previous=True,
+                                )
+                                continue
                             managed_routes.pop(port_key, None)
                             mark_pending(
                                 port,
@@ -838,14 +966,27 @@ def main() -> int:
 
                     live_route = current_live_routes.get(stale_port)
                     previous_target = recorded_target(stale_port)
+                    previous_authority = recorded_authority(stale_port)
                     if live_route is None:
                         managed_routes.pop(stale_port, None)
                         continue
-                    if previous_target is None or not live_route_matches(
-                        live_route,
-                        public_scheme=public_scheme,
-                        target=previous_target,
+                    if (
+                        previous_target is None
+                        or previous_authority is None
+                        or not live_route_matches(
+                            live_route,
+                            public_scheme=public_scheme,
+                            target=previous_target,
+                            authority=previous_authority,
+                        )
                     ):
+                        if live_route.get("foreground") is True:
+                            retain_previous_route_state(stale_port)
+                            errors.append(
+                                f"port {stale_port}: foreground Tailscale Serve "
+                                "listener is active; stale-listener removal deferred"
+                            )
+                            continue
                         managed_routes.pop(stale_port, None)
                         errors.append(
                             f"port {stale_port}: stale live listener no longer "

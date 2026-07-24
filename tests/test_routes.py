@@ -83,6 +83,7 @@ class RouteSchemaTests(unittest.TestCase):
         live_serve_status: dict | None = None,
         serve_status_error: str | None = None,
         tailscale_running: bool = True,
+        enabled: bool = True,
     ) -> tuple[dict, list[list[str]]]:
         commands: list[list[str]] = []
         configured_results = serve_results or {}
@@ -153,7 +154,7 @@ class RouteSchemaTests(unittest.TestCase):
         ]
         with (
             patch.object(tailscale, "run", side_effect=fake_run),
-            patch.object(tailscale, "citadel_bool", return_value=True),
+            patch.object(tailscale, "citadel_bool", return_value=enabled),
             patch.object(tailscale.shutil, "which", return_value="/usr/bin/tailscale"),
             patch.object(sys, "argv", argv),
         ):
@@ -169,12 +170,13 @@ class RouteSchemaTests(unittest.TestCase):
         target: str,
         *,
         handlers: dict | None = None,
+        authority: str = "node.example.ts.net",
     ) -> dict:
         listener = {"HTTPS": True} if public_scheme == "https" else {"HTTP": True}
         return {
             "TCP": {str(port): listener},
             "Web": {
-                f"node.example.ts.net:{port}": {
+                f"{authority}:{port}": {
                     "Handlers": handlers or {"/": {"Proxy": target}},
                 },
             },
@@ -232,6 +234,78 @@ class RouteSchemaTests(unittest.TestCase):
             ),
             "proxy",
         )
+
+    def test_live_status_with_multiple_hosts_is_not_treated_as_exclusively_owned(
+        self,
+    ) -> None:
+        parsed = tailscale.parse_live_serve_routes({
+            "TCP": {"443": {"HTTPS": True}},
+            "Web": {
+                "node.example.ts.net:443": {
+                    "Handlers": {
+                        "/": {"Proxy": "http://127.0.0.1:8077"},
+                    },
+                },
+                "other.example.ts.net:443": {
+                    "Handlers": {
+                        "/": {"Proxy": "http://127.0.0.1:8077"},
+                    },
+                },
+            },
+        })
+
+        self.assertEqual(parsed["443"]["public_scheme"], "https")
+        self.assertIsNone(parsed["443"]["target"])
+        self.assertFalse(parsed["443"]["exclusive_root_proxy"])
+
+    def test_live_status_with_extra_handler_metadata_is_not_exact(self) -> None:
+        parsed = tailscale.parse_live_serve_routes({
+            "TCP": {"443": {"HTTPS": True}},
+            "Web": {
+                "node.example.ts.net:443": {
+                    "Handlers": {
+                        "/": {
+                            "Proxy": "http://127.0.0.1:8077",
+                            "AcceptAppCaps": ["example.com/cap/admin"],
+                        },
+                    },
+                },
+            },
+        })
+
+        self.assertEqual(parsed["443"]["target"], "http://127.0.0.1:8077")
+        self.assertFalse(parsed["443"]["exclusive_root_proxy"])
+
+    def test_foreground_listener_is_never_overwritten(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            paths = self.make_fixture(
+                base,
+                [{
+                    "port": 40010,
+                    "addr": "127.0.0.1",
+                    "addrs": ["127.0.0.1"],
+                    "scheme": "http",
+                    "urls": {"localhost": "http://127.0.0.1:40010"},
+                }],
+            )
+            payload, commands = self.run_provider(
+                paths,
+                live_serve_status={
+                    "Foreground": {
+                        "session-1": self.live_route(
+                            40010,
+                            "https",
+                            "http://127.0.0.1:9999",
+                        ),
+                    },
+                },
+            )
+
+            self.assertEqual(self.serve_mutations(commands), [])
+            self.assertNotIn("40010", payload["services"])
+            self.assertEqual(payload["managed_routes"], {})
+            self.assertIn("not managed by CITADEL", payload["route_failures"]["40010"])
 
     def test_new_wildcard_service_prefers_https_proxy(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -941,6 +1015,211 @@ class RouteSchemaTests(unittest.TestCase):
                     "released from CITADEL management" in error
                     for error in payload["errors"]
                 )
+            )
+
+    def test_total_serve_failure_uses_sticky_direct_fallback_when_safe(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            paths = self.make_fixture(
+                base,
+                [{
+                    "port": 18789,
+                    "addr": "0.0.0.0",
+                    "addrs": ["0.0.0.0"],
+                    "scheme": "http",
+                    "urls": {"localhost": "http://127.0.0.1:18789"},
+                }],
+            )
+            failures = {
+                ("https", "18789", "apply"): (1, "https unavailable"),
+                ("http", "18789", "apply"): (1, "http unavailable"),
+            }
+            first_payload, _ = self.run_provider(paths, failures)
+            self.assertEqual(
+                first_payload["services"]["18789"],
+                {
+                    "mode": "direct",
+                    "url": "http://node.example.ts.net:18789",
+                    "target": None,
+                    "owns_listener": False,
+                },
+            )
+            self.assertEqual(
+                first_payload["fallbacks"]["18789"]["to"],
+                "direct-http",
+            )
+
+            second_payload, second_commands = self.run_provider(paths, failures)
+            self.assertEqual(
+                second_payload["services"]["18789"]["mode"],
+                "direct",
+            )
+            self.assertEqual(
+                [
+                    command
+                    for command in second_commands
+                    if command[:2] == ["tailscale", "serve"]
+                ],
+                [],
+            )
+
+    def test_disabled_provider_removes_only_exact_owned_listener(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            previous_state = {
+                "services": {
+                    "11000": {
+                        "mode": "proxy",
+                        "url": "https://node.example.ts.net:11000",
+                        "target": "http://127.0.0.1:11000",
+                        "owns_listener": True,
+                    },
+                },
+                "serve_routes": {
+                    "11000": {
+                        "url": "https://node.example.ts.net:11000",
+                        "target": "http://127.0.0.1:11000",
+                        "active": True,
+                    },
+                },
+                "managed_routes": {"11000": "https"},
+                "managed_ports": ["11000"],
+            }
+            paths = self.make_fixture(base, [], previous_state)
+            payload, commands = self.run_provider(
+                paths,
+                live_serve_status=self.live_route(
+                    11000,
+                    "https",
+                    "http://127.0.0.1:11000",
+                ),
+                enabled=False,
+            )
+
+            self.assertEqual(
+                self.serve_mutations(commands),
+                [["tailscale", "serve", "--yes", "--https=11000", "off"]],
+            )
+            self.assertEqual(payload["managed_routes"], {})
+
+    def test_disabled_provider_releases_foreign_listener_without_removing_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            previous_state = {
+                "services": {
+                    "11000": {
+                        "mode": "proxy",
+                        "url": "https://node.example.ts.net:11000",
+                        "target": "http://127.0.0.1:11000",
+                        "owns_listener": True,
+                    },
+                },
+                "serve_routes": {
+                    "11000": {
+                        "url": "https://node.example.ts.net:11000",
+                        "target": "http://127.0.0.1:11000",
+                        "active": True,
+                    },
+                },
+                "managed_routes": {"11000": "https"},
+                "managed_ports": ["11000"],
+            }
+            paths = self.make_fixture(base, [], previous_state)
+            payload, commands = self.run_provider(
+                paths,
+                live_serve_status=self.live_route(
+                    11000,
+                    "https",
+                    "http://127.0.0.1:11000",
+                    authority="manual.example.ts.net",
+                ),
+                enabled=False,
+            )
+
+            self.assertEqual(self.serve_mutations(commands), [])
+            self.assertEqual(payload["managed_routes"], {})
+            self.assertTrue(
+                any(
+                    "released from CITADEL management" in error
+                    for error in payload["errors"]
+                )
+            )
+
+    def test_status_error_retains_changed_managed_route_until_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            previous_state = {
+                "services": {
+                    "8077": {
+                        "mode": "proxy",
+                        "url": "https://node.example.ts.net:8077",
+                        "target": "http://127.0.0.1:8077",
+                        "owns_listener": True,
+                    },
+                },
+                "serve_routes": {
+                    "8077": {
+                        "url": "https://node.example.ts.net:8077",
+                        "target": "http://127.0.0.1:8077",
+                        "active": True,
+                    },
+                },
+                "managed_routes": {"8077": "https"},
+                "managed_ports": ["8077"],
+                "service_signatures": {
+                    "8077": {
+                        "origin_scheme": "http",
+                        "direct_capable": False,
+                        "route_mode": "auto",
+                    },
+                },
+            }
+            paths = self.make_fixture(
+                base,
+                [{
+                    "port": 8077,
+                    "addr": "127.0.0.1",
+                    "addrs": ["127.0.0.1"],
+                    "scheme": "https",
+                    "urls": {"localhost": "https://127.0.0.1:8077"},
+                }],
+                previous_state,
+            )
+            first_payload, first_commands = self.run_provider(
+                paths,
+                serve_status_error="local API unavailable",
+            )
+            self.assertEqual(self.serve_mutations(first_commands), [])
+            self.assertEqual(first_payload["managed_routes"], {"8077": "https"})
+            self.assertIn("8077", first_payload["remembered_services"])
+            self.assertTrue(
+                first_payload["service_signatures"]["8077"][
+                    "pending_reconciliation"
+                ]
+            )
+
+            second_payload, second_commands = self.run_provider(
+                paths,
+                live_serve_status=self.live_route(
+                    8077,
+                    "https",
+                    "http://127.0.0.1:8077",
+                ),
+            )
+            self.assertIn(
+                ["tailscale", "serve", "--yes", "--https=8077", "off"],
+                second_commands,
+            )
+            self.assertIn(
+                [
+                    "tailscale", "serve", "--bg", "--yes", "--https=8077",
+                    "https+insecure://127.0.0.1:8077",
+                ],
+                second_commands,
+            )
+            self.assertEqual(
+                second_payload["services"]["8077"]["target"],
+                "https+insecure://127.0.0.1:8077",
             )
 
 
