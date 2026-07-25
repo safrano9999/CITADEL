@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Release only CITADEL's configured web UI port from Tailscale Serve."""
+"""Release selected ports from Tailscale Serve."""
 
 from __future__ import annotations
 
@@ -215,18 +215,27 @@ def clear_persisted_port(project_dir: Path, port: int) -> None:
     clear_cached_metadata(project_dir, port)
 
 
-def unroute(project_dir: Path) -> int:
+def unroute(project_dir: Path, requested_ports: list[int] | None = None) -> int:
     project_dir = project_dir.resolve()
-    port = read_configured_port(project_dir)
+    ports = requested_ports or [read_configured_port(project_dir)]
+    if any(port < 1 or port > 65535 for port in ports):
+        raise UnrouteError("ports must be between 1 and 65535")
+    ports = list(dict.fromkeys(ports))
+
     tailscale_bin = shutil.which("tailscale")
     if tailscale_bin is None:
         raise UnrouteError("tailscale CLI is unavailable")
 
-    print(f"[unroute] configured CITADEL port: {port}")
-    release_serve_port(tailscale_bin, port)
-    clear_persisted_port(project_dir, port)
-    print(f"[unroute] released only Tailscale Serve port {port}")
-    print(f"[unroute] cleared cached metadata and icons for port {port}")
+    if requested_ports:
+        print(f"[unroute] requested ports: {', '.join(map(str, ports))}")
+    else:
+        print(f"[unroute] configured CITADEL port: {ports[0]}")
+
+    for port in ports:
+        release_serve_port(tailscale_bin, port)
+        clear_persisted_port(project_dir, port)
+        print(f"[unroute] released only Tailscale Serve port {port}")
+        print(f"[unroute] cleared cached metadata and icons for port {port}")
     print("[unroute] the next ./scan.sh run will fetch them again")
     return 0
 
@@ -234,9 +243,10 @@ def unroute(project_dir: Path) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("ports", nargs="*", type=int, metavar="PORT")
     args = parser.parse_args()
     try:
-        return unroute(args.root)
+        return unroute(args.root, args.ports)
     except UnrouteError as exc:
         print(f"[unroute] failed: {exc}", file=sys.stderr)
         return 1

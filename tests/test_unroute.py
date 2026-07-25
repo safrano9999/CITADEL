@@ -196,6 +196,24 @@ class UnrouteTests(unittest.TestCase):
                 unroute.unroute(base)
             which.assert_not_called()
 
+    def test_explicit_ports_do_not_require_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            with (
+                patch.object(unroute.shutil, "which", return_value="/usr/bin/tailscale"),
+                patch.object(unroute, "release_serve_port") as release,
+                patch.object(unroute, "clear_persisted_port") as clear,
+            ):
+                self.assertEqual(unroute.unroute(base, [790, 11000]), 0)
+            self.assertEqual(
+                [call.args[1] for call in release.call_args_list],
+                [790, 11000],
+            )
+            self.assertEqual(
+                [call.args[1] for call in clear.call_args_list],
+                [790, 11000],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
