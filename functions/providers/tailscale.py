@@ -292,35 +292,6 @@ def previous_managed_routes(previous_payload: dict[str, Any]) -> dict[str, str]:
             public_scheme = str(scheme).strip().lower()
             if port_key.isdigit() and public_scheme in {"http", "https"}:
                 result[port_key] = public_scheme
-
-    previous_services = previous_payload.get("remembered_services")
-    if not isinstance(previous_services, dict):
-        previous_services = previous_payload.get("services")
-    if not isinstance(previous_services, dict):
-        previous_services = {}
-    previous_serve_routes = previous_payload.get("remembered_serve_routes")
-    if not isinstance(previous_serve_routes, dict):
-        previous_serve_routes = previous_payload.get("serve_routes")
-    if not isinstance(previous_serve_routes, dict):
-        previous_serve_routes = {}
-
-    for port in previous_payload.get("managed_ports", []):
-        port_key = str(port)
-        if not port_key.isdigit() or port_key in result:
-            continue
-        route = previous_services.get(port_key)
-        if isinstance(route, dict):
-            result[port_key] = route_public_scheme(route) or "https"
-            continue
-        serve_route = previous_serve_routes.get(port_key)
-        if isinstance(serve_route, dict):
-            url = str(serve_route.get("url") or "")
-            parsed_scheme = urlparse(url).scheme
-            result[port_key] = (
-                parsed_scheme if parsed_scheme in {"http", "https"} else "https"
-            )
-            continue
-        result[port_key] = "https"
     return result
 
 
@@ -362,18 +333,7 @@ def normalize_previous_route(
             owns_listener=owns_listener,
         )
 
-    if not isinstance(value, str) or route_public_scheme({"url": value}) is None:
-        return None
-
-    serve_route = previous_serve_routes.get(port_key)
-    target = serve_route.get("target") if isinstance(serve_route, dict) else None
-    owns_listener = port_key in managed_routes
-    return route_record(
-        "proxy" if owns_listener else "direct",
-        value,
-        target=str(target) if target is not None else None,
-        owns_listener=owns_listener,
-    )
+    return None
 
 
 def reusable_route(
@@ -396,6 +356,8 @@ def reusable_route(
 
     if owns_listener:
         if mode != "proxy" or port_key not in managed_routes:
+            return None
+        if signature.get("route_mode") == "auto" and direct_capable:
             return None
         if managed_routes.get(port_key) != public_scheme:
             return None
@@ -735,13 +697,7 @@ def main() -> int:
                         isinstance(previous_signature, dict)
                         and previous_signature == signature
                     )
-                    legacy_route = (
-                        route_mode == "auto"
-                        and previous_signature is None
-                        and previous_route is not None
-                    )
-
-                    if signature_matches or legacy_route:
+                    if signature_matches:
                         if previous_route is not None:
                             reused = reusable_route(
                                 previous_route,
@@ -753,7 +709,10 @@ def main() -> int:
                             if reused is not None:
                                 store_route(svc, port, reused, signature)
                                 previous_fallback = previous_fallbacks.get(port_key)
-                                if isinstance(previous_fallback, dict):
+                                if (
+                                    reused.get("mode") == "proxy"
+                                    and isinstance(previous_fallback, dict)
+                                ):
                                     fallbacks[port_key] = {
                                         str(key): str(value)
                                         for key, value in previous_fallback.items()
@@ -762,14 +721,6 @@ def main() -> int:
                                     if reason:
                                         errors.append(f"port {port}: {reason}")
                                 continue
-
-                        previous_failure = previous_failures.get(port_key)
-                        if signature_matches and previous_failure:
-                            message = str(previous_failure)
-                            service_signatures[port_key] = signature
-                            route_failures[port_key] = message
-                            errors.append(f"port {port}: {message}")
-                            continue
 
                     previous_public_scheme = previous_managed_routes_state.get(port_key)
                     if (
@@ -843,6 +794,67 @@ def main() -> int:
                             managed_routes.pop(port_key, None)
                             current_live_routes.pop(port_key, None)
                     elif live_route is not None:
+                        target = serve_target(port, origin_scheme)
+                        adopted_scheme = next(
+                            (
+                                public_scheme
+                                for public_scheme in ("https", "http")
+                                if live_route_matches(
+                                    live_route,
+                                    public_scheme=public_scheme,
+                                    target=target,
+                                    authority=f"{domain}:{port}",
+                                )
+                            ),
+                            None,
+                        )
+                        if adopted_scheme is not None:
+                            if route_mode == "auto" and direct_capable:
+                                removal_error = remove_serve_route(
+                                    port,
+                                    adopted_scheme,
+                                )
+                                if removal_error is not None:
+                                    mark_pending(
+                                        port,
+                                        signature,
+                                        "could not release redundant Serve route: "
+                                        f"{removal_error}",
+                                    )
+                                    continue
+                                current_live_routes.pop(port_key, None)
+                                store_route(
+                                    svc,
+                                    port,
+                                    route_record(
+                                        "direct",
+                                        build_tailscale_url(
+                                            domain,
+                                            port,
+                                            origin_scheme,
+                                        ),
+                                        target=None,
+                                        owns_listener=False,
+                                    ),
+                                    signature,
+                                )
+                                continue
+                            store_route(
+                                svc,
+                                port,
+                                route_record(
+                                    "proxy",
+                                    build_tailscale_url(
+                                        domain,
+                                        port,
+                                        adopted_scheme,
+                                    ),
+                                    target=target,
+                                    owns_listener=True,
+                                ),
+                                signature,
+                            )
+                            continue
                         mark_pending(
                             port,
                             signature,
@@ -851,7 +863,9 @@ def main() -> int:
                         )
                         continue
 
-                    if route_mode == "direct":
+                    if route_mode == "direct" or (
+                        route_mode == "auto" and direct_capable
+                    ):
                         if not direct_capable:
                             message = "direct route requested, but the service is loopback-only"
                             service_signatures[port_key] = signature

@@ -307,7 +307,7 @@ class RouteSchemaTests(unittest.TestCase):
             self.assertEqual(payload["managed_routes"], {})
             self.assertIn("not managed by CITADEL", payload["route_failures"]["40010"])
 
-    def test_new_wildcard_service_prefers_https_proxy(self) -> None:
+    def test_new_wildcard_service_uses_direct_route_without_serve(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
             paths = self.make_fixture(
@@ -326,14 +326,107 @@ class RouteSchemaTests(unittest.TestCase):
             self.assertEqual(
                 payload["services"]["18789"],
                 {
-                    "mode": "proxy",
-                    "url": "https://node.example.ts.net:18789",
-                    "target": "http://127.0.0.1:18789",
-                    "owns_listener": True,
+                    "mode": "direct",
+                    "url": "http://node.example.ts.net:18789",
+                    "target": None,
+                    "owns_listener": False,
                 },
             )
-            self.assertEqual(payload["managed_ports"], ["18789"])
-            self.assertEqual(payload["managed_routes"], {"18789": "https"})
+            self.assertEqual(payload["managed_ports"], [])
+            self.assertEqual(payload["managed_routes"], {})
+            self.assertEqual(self.serve_mutations(commands), [])
+
+    def test_loopback_to_wildcard_releases_serve_before_using_direct(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            previous_state = {
+                "services": {
+                    "18789": {
+                        "mode": "proxy",
+                        "url": "https://node.example.ts.net:18789",
+                        "target": "http://127.0.0.1:18789",
+                        "owns_listener": True,
+                    },
+                },
+                "serve_routes": {
+                    "18789": {
+                        "url": "https://node.example.ts.net:18789",
+                        "target": "http://127.0.0.1:18789",
+                        "active": True,
+                    },
+                },
+                "managed_routes": {"18789": "https"},
+                "managed_ports": ["18789"],
+                "service_signatures": {
+                    "18789": {
+                        "origin_scheme": "http",
+                        "direct_capable": False,
+                        "route_mode": "auto",
+                    },
+                },
+            }
+            paths = self.make_fixture(
+                base,
+                [{
+                    "port": 18789,
+                    "addr": "0.0.0.0",
+                    "addrs": ["0.0.0.0"],
+                    "scheme": "http",
+                    "urls": {"localhost": "http://127.0.0.1:18789"},
+                }],
+                previous_state,
+            )
+            payload, commands = self.run_provider(
+                paths,
+                live_serve_status=self.live_route(
+                    18789,
+                    "https",
+                    "http://127.0.0.1:18789",
+                ),
+            )
+
+            self.assertEqual(
+                self.serve_mutations(commands),
+                [["tailscale", "serve", "--yes", "--https=18789", "off"]],
+            )
+            self.assertEqual(payload["services"]["18789"]["mode"], "direct")
+            self.assertEqual(payload["managed_routes"], {})
+
+    def test_wildcard_to_loopback_creates_serve_route(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            previous_state = {
+                "services": {
+                    "18789": {
+                        "mode": "direct",
+                        "url": "http://node.example.ts.net:18789",
+                        "target": None,
+                        "owns_listener": False,
+                    },
+                },
+                "managed_routes": {},
+                "managed_ports": [],
+                "service_signatures": {
+                    "18789": {
+                        "origin_scheme": "http",
+                        "direct_capable": True,
+                        "route_mode": "auto",
+                    },
+                },
+            }
+            paths = self.make_fixture(
+                base,
+                [{
+                    "port": 18789,
+                    "addr": "127.0.0.1",
+                    "addrs": ["127.0.0.1"],
+                    "scheme": "http",
+                    "urls": {"localhost": "http://127.0.0.1:18789"},
+                }],
+                previous_state,
+            )
+            payload, commands = self.run_provider(paths)
+
             self.assertIn(
                 [
                     "tailscale", "serve", "--bg", "--yes", "--https=18789",
@@ -341,13 +434,8 @@ class RouteSchemaTests(unittest.TestCase):
                 ],
                 commands,
             )
-            self.assertNotIn(
-                [
-                    "tailscale", "serve", "--bg", "--yes", "--http=18789",
-                    "http://127.0.0.1:18789",
-                ],
-                commands,
-            )
+            self.assertEqual(payload["services"]["18789"]["mode"], "proxy")
+            self.assertEqual(payload["managed_routes"], {"18789": "https"})
 
     def test_https_failure_uses_sticky_http_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -356,8 +444,8 @@ class RouteSchemaTests(unittest.TestCase):
                 base,
                 [{
                     "port": 11000,
-                    "addr": "0.0.0.0",
-                    "addrs": ["0.0.0.0"],
+                    "addr": "127.0.0.1",
+                    "addrs": ["127.0.0.1"],
                     "scheme": "http",
                     "urls": {"localhost": "http://127.0.0.1:11000"},
                 }],
@@ -495,7 +583,7 @@ class RouteSchemaTests(unittest.TestCase):
             )
             self.assertEqual(payload["managed_ports"], [])
 
-    def test_total_failure_for_loopback_service_is_not_retried(self) -> None:
+    def test_total_failure_for_loopback_service_is_retried(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
             paths = self.make_fixture(
@@ -516,48 +604,99 @@ class RouteSchemaTests(unittest.TestCase):
             self.assertNotIn("8077", first_payload["services"])
             self.assertIn("8077", first_payload["route_failures"])
 
-            second_payload, second_commands = self.run_provider(paths, failures)
-            self.assertNotIn("8077", second_payload["services"])
-            self.assertIn("8077", second_payload["route_failures"])
-            self.assertEqual(
-                [command for command in second_commands if command[:2] == ["tailscale", "serve"]],
-                [],
+            second_payload, second_commands = self.run_provider(paths)
+            self.assertIn("8077", second_payload["services"])
+            self.assertNotIn("8077", second_payload["route_failures"])
+            self.assertIn(
+                [
+                    "tailscale", "serve", "--bg", "--yes", "--https=8077",
+                    "http://127.0.0.1:8077",
+                ],
+                second_commands,
             )
 
-    def test_legacy_direct_route_is_reused_without_upgrade_attempt(self) -> None:
+    def test_exact_existing_live_listener_is_adopted(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
             paths = self.make_fixture(
                 base,
                 [{
-                    "port": 18789,
-                    "addr": "0.0.0.0",
-                    "addrs": ["0.0.0.0"],
+                    "port": 40010,
+                    "addr": "127.0.0.1",
+                    "addrs": ["127.0.0.1"],
                     "scheme": "http",
-                    "urls": {"localhost": "http://127.0.0.1:18789"},
+                    "urls": {"localhost": "http://127.0.0.1:40010"},
                 }],
-                {
-                    "services": {
-                        "18789": "http://node.example.ts.net:18789",
-                    },
-                    "managed_ports": [],
-                },
             )
-            payload, commands = self.run_provider(paths)
+            payload, commands = self.run_provider(
+                paths,
+                live_serve_status=self.live_route(
+                    40010,
+                    "https",
+                    "http://127.0.0.1:40010",
+                ),
+            )
 
+            self.assertEqual(self.serve_mutations(commands), [])
             self.assertEqual(
-                payload["services"]["18789"],
+                payload["services"]["40010"],
                 {
-                    "mode": "direct",
-                    "url": "http://node.example.ts.net:18789",
-                    "target": None,
-                    "owns_listener": False,
+                    "mode": "proxy",
+                    "url": "https://node.example.ts.net:40010",
+                    "target": "http://127.0.0.1:40010",
+                    "owns_listener": True,
                 },
             )
-            self.assertEqual(
-                [command for command in commands if command[:2] == ["tailscale", "serve"]],
-                [],
+            self.assertEqual(payload["managed_routes"], {"40010": "https"})
+            self.assertNotIn("40010", payload["route_failures"])
+
+    def test_service_that_disappears_and_returns_is_routed_again(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            service = {
+                "port": 40010,
+                "addr": "127.0.0.1",
+                "addrs": ["127.0.0.1"],
+                "scheme": "http",
+                "urls": {"localhost": "http://127.0.0.1:40010"},
+            }
+            paths = self.make_fixture(base, [service])
+
+            first_payload, _ = self.run_provider(paths)
+            self.assertIn("40010", first_payload["services"])
+
+            paths["services_file"].write_text(
+                json.dumps({"http_services": []}),
+                encoding="utf-8",
             )
+            second_payload, second_commands = self.run_provider(
+                paths,
+                live_serve_status=self.live_route(
+                    40010,
+                    "https",
+                    "http://127.0.0.1:40010",
+                ),
+            )
+            self.assertIn(
+                ["tailscale", "serve", "--yes", "--https=40010", "off"],
+                second_commands,
+            )
+            self.assertEqual(second_payload["managed_routes"], {})
+
+            paths["services_file"].write_text(
+                json.dumps({"http_services": [service]}),
+                encoding="utf-8",
+            )
+            third_payload, third_commands = self.run_provider(paths)
+            self.assertIn(
+                [
+                    "tailscale", "serve", "--bg", "--yes", "--https=40010",
+                    "http://127.0.0.1:40010",
+                ],
+                third_commands,
+            )
+            self.assertIn("40010", third_payload["services"])
+            self.assertNotIn("40010", third_payload["route_failures"])
 
     def test_foreign_live_listener_is_never_overwritten(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -717,8 +856,8 @@ class RouteSchemaTests(unittest.TestCase):
                 base,
                 [{
                     "port": 11000,
-                    "addr": "0.0.0.0",
-                    "addrs": ["0.0.0.0"],
+                    "addr": "127.0.0.1",
+                    "addrs": ["127.0.0.1"],
                     "scheme": "http",
                     "urls": {"localhost": "http://127.0.0.1:11000"},
                 }],
@@ -800,7 +939,7 @@ class RouteSchemaTests(unittest.TestCase):
             )
             self.assertTrue(payload["serve_routes"]["8077"]["active"])
 
-    def test_explicit_direct_mode_does_not_reuse_legacy_proxy(self) -> None:
+    def test_explicit_direct_mode_replaces_managed_proxy(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
             previous_state = {
@@ -1017,7 +1156,7 @@ class RouteSchemaTests(unittest.TestCase):
                 )
             )
 
-    def test_total_serve_failure_uses_sticky_direct_fallback_when_safe(self) -> None:
+    def test_direct_capable_service_never_attempts_serve(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
             paths = self.make_fixture(
@@ -1034,7 +1173,7 @@ class RouteSchemaTests(unittest.TestCase):
                 ("https", "18789", "apply"): (1, "https unavailable"),
                 ("http", "18789", "apply"): (1, "http unavailable"),
             }
-            first_payload, _ = self.run_provider(paths, failures)
+            first_payload, first_commands = self.run_provider(paths, failures)
             self.assertEqual(
                 first_payload["services"]["18789"],
                 {
@@ -1044,10 +1183,8 @@ class RouteSchemaTests(unittest.TestCase):
                     "owns_listener": False,
                 },
             )
-            self.assertEqual(
-                first_payload["fallbacks"]["18789"]["to"],
-                "direct-http",
-            )
+            self.assertEqual(first_payload["fallbacks"], {})
+            self.assertEqual(self.serve_mutations(first_commands), [])
 
             second_payload, second_commands = self.run_provider(paths, failures)
             self.assertEqual(
