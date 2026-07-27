@@ -153,6 +153,7 @@ class OpenAIV1Provider:
     provider: str
     base_url: str
     api_key: str
+    stream: bool
 
     @property
     def key(self) -> str:
@@ -165,6 +166,17 @@ class OpenAIV1Provider:
 
 def _clean_openai_v1(value: str | None) -> str:
     return (value or "").strip().strip('"').strip("'")
+
+
+def _openai_v1_bool(value: str | None, default: bool = False) -> bool:
+    cleaned = _clean_openai_v1(value).lower()
+    if not cleaned:
+        return default
+    if cleaned in {"1", "true", "yes", "on"}:
+        return True
+    if cleaned in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"Invalid OpenAI v1 boolean value: {value!r}")
 
 
 def _normalize_openai_v1_base_url(raw_url: str, raw_port: str = "") -> str:
@@ -192,7 +204,7 @@ def _normalize_openai_v1_base_url(raw_url: str, raw_port: str = "") -> str:
 
 def _openai_v1_suffixes(values: dict[str, str]) -> list[tuple[int, str]]:
     indexes = {1}
-    pattern = re.compile(r"^OPENAI_V1_(?:PROVIDER|URL|PORT|KEY)_(\d+)$")
+    pattern = re.compile(r"^OPENAI_V1_(?:PROVIDER|URL|PORT|KEY|STREAM)_(\d+)$")
     for key in values:
         match = pattern.match(key)
         if match:
@@ -233,6 +245,7 @@ def openai_v1_providers(values: dict[str, str] | None = None) -> list[OpenAIV1Pr
                 provider=_clean_openai_v1(_openai_v1_value(source, "PROVIDER", index)),
                 base_url=base_url,
                 api_key=_clean_openai_v1(_openai_v1_value(source, "KEY", index)),
+                stream=_openai_v1_bool(_openai_v1_value(source, "STREAM", index)),
             )
         )
     return providers
