@@ -228,6 +228,12 @@ PY
     return 1
 }
 
+is_http_service() {
+    local url="$1" ssl="$2" status
+    status="$(curl -s $ssl --max-time 3 -o /dev/null -w "%{http_code}" "$url/" 2>/dev/null || true)"
+    [[ "$status" =~ ^[1-5][0-9][0-9]$ ]]
+}
+
 probe_http() {
     local host="$1" port="$2"
     local ssl
@@ -240,6 +246,10 @@ probe_http() {
         echo "https://${host}:${port}|openai-v1"
     elif is_openai_v1 "http://${host}:${port}" "$ssl"; then
         echo "http://${host}:${port}|openai-v1"
+    elif is_http_service "https://${host}:${port}" "$ssl"; then
+        echo "https://${host}:${port}|http-service"
+    elif is_http_service "http://${host}:${port}" "$ssl"; then
+        echo "http://${host}:${port}|http-service"
     else
         echo ""
     fi
@@ -297,7 +307,7 @@ with open(f, 'w') as fh:
     json.dump(d, fh)
 " "$CACHE_FILE"
         fi
-        echo "→ no HTML (other)"
+        echo "→ no HTTP service (other)"
         continue
     fi
 
@@ -328,6 +338,23 @@ with open(sys.argv[4], 'w') as f:
     }, f)
 " "$SCHEME" "$NETWORK_IP" "$PROBE_KIND" "$CACHE_FILE"
         printf "%s     OpenAI v1 API%s\n" "$SCHEME" "$NET_LABEL"
+        continue
+    fi
+
+    if [[ "$PROBE_KIND" == "http-service" ]]; then
+        python3 -c "
+import json
+import sys
+with open(sys.argv[5], 'w') as f:
+    json.dump({
+        'title': sys.argv[1],
+        'icon': None,
+        'scheme': sys.argv[2],
+        'network_ip': sys.argv[3] or None,
+        'kind': sys.argv[4],
+    }, f)
+" "HTTP Service" "$SCHEME" "$NETWORK_IP" "$PROBE_KIND" "$CACHE_FILE"
+        printf "%s     HTTP service%s\n" "$SCHEME" "$NET_LABEL"
         continue
     fi
 
