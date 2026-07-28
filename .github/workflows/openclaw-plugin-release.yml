@@ -18,7 +18,7 @@ env:
   ZIP_NAME: citadel-latest.zip
 
 concurrency:
-  group: ${{ startsWith(github.ref, 'refs/tags/20') && format('actual-head-{0}', github.repository) || github.run_id }}
+  group: ${{ startsWith(github.ref, 'refs/tags/20') && format('release-{0}', github.repository) || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -28,10 +28,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Start actual-head history
-        if: startsWith(github.ref, 'refs/tags/20')
-        run: bash .github/scripts/actual-head.sh start
 
       - name: Purge old Actions artifacts
         continue-on-error: true
@@ -100,26 +96,3 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/purge-github-actions-artifacts.sh
-
-      - name: Finish actual-head history
-        if: startsWith(github.ref, 'refs/tags/20')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/actual-head.sh finish
-
-      - name: Publish build log
-        id: actual_head_upload
-        if: startsWith(github.ref, 'refs/tags/20')
-        uses: actions/upload-artifact@v4
-        with:
-          name: actual-head
-          path: actual-head.txt
-          if-no-files-found: error
-          retention-days: 90
-          compression-level: 0
-
-      - name: Prune previous build logs
-        if: startsWith(github.ref, 'refs/tags/20')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/actual-head.sh cleanup "${{ steps.actual_head_upload.outputs.artifact-id }}"

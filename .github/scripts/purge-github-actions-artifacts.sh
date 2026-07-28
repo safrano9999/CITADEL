@@ -11,7 +11,7 @@ command -v gh >/dev/null 2>&1 || {
 
 ids="$(
   gh api --paginate "/repos/${repo}/actions/artifacts?per_page=100" \
-    --jq '.artifacts[] | select(.name != "actual-head") | .id'
+    --jq '.artifacts[].id'
 )"
 
 while IFS= read -r artifact_id; do
