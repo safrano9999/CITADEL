@@ -1,9 +1,132 @@
 # CITADEL
 
-## OpenClaw plugin
+> **Type:** standalone service dashboard with an optional OpenClaw plugin.
+>
+> The FastAPI dashboard and scanner run on bare metal. The release ZIP is an
+> OpenClaw plugin package, not a generic bare-metal installer.
 
-The same repository can be linked as an OpenClaw plugin. It reads the existing
-`services.json`; the FastAPI dashboard remains an independent service.
+[![OpenClaw plugin](https://github.com/safrano9999/CITADEL/actions/workflows/openclaw-plugin-release.yml/badge.svg)](https://github.com/safrano9999/CITADEL/actions/workflows/openclaw-plugin-release.yml)
+
+![CITADEL dashboard](CITADEL.png)
+
+CITADEL discovers listening TCP services, identifies HTTP endpoints, and builds
+one dashboard for local, subnet, Tailscale, and Cloudflare routes. Providers are
+reconciled independently, so local discovery remains useful even when a remote
+provider is disabled or unavailable.
+
+## Features
+
+- Discovers listeners with `ss` and probes HTTPS before HTTP.
+- Recognizes HTML services, generic HTTP services, and OpenAI-compatible
+  `/v1/models` endpoints.
+- Produces deterministic service metadata in `services.json`.
+- Presents discovered services in a FastAPI dashboard.
+- Supports localhost, subnet, Tailscale Serve, and Cloudflare providers.
+- Preserves unrelated Tailscale listeners and unrelated Cloudflare resources.
+- Supports port allowlists, blocklists, Cloudflare hostnames, and Access email
+  policies.
+- Exposes the same route data through the `/citadel` OpenClaw command.
+
+## Supported deployment modes
+
+| Mode | Status | What is provided |
+|---|---|---|
+| Bare metal | **Supported** | Scanner, FastAPI dashboard, configuration scripts, and a user-systemd installer |
+| OpenClaw | **Supported** | Optional release ZIP with the `/citadel` command and scan integration |
+| Hermes | **Not provided** | This repository contains no Hermes plugin, hook, or manifest |
+
+CITADEL can discover a running Hermes service like any other listener. That is
+service discovery, not a native Hermes integration.
+
+## Releases
+
+The [latest release](https://github.com/safrano9999/CITADEL/releases/latest)
+contains:
+
+- [`citadel-latest.zip`](https://github.com/safrano9999/CITADEL/releases/download/latest/citadel-latest.zip)
+  · [SHA-256](https://github.com/safrano9999/CITADEL/releases/download/latest/citadel-latest.zip.sha256)
+
+This ZIP is assembled and validated as an **OpenClaw plugin package**. For a
+bare-metal installation, clone the source repository instead.
+
+## Bare-metal installation
+
+Requirements:
+
+- Python 3 with `venv`
+- `curl`
+- `ss` from `iproute2`
+- Tailscale CLI only when the Tailscale provider is enabled
+
+Clone the source and create an isolated Python environment:
+
+```bash
+git clone https://github.com/safrano9999/CITADEL.git
+cd CITADEL
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+./config.sh --no-container
+```
+
+Run one scan, then start the dashboard:
+
+```bash
+./scan.sh
+.venv/bin/python webui.py
+```
+
+The default example binds the dashboard to `127.0.0.1:11000`.
+
+### User systemd service
+
+`set_daemon.sh` writes, links, enables, and starts `citadel.service`. Point it
+at the virtual-environment interpreter:
+
+```bash
+PYTHON_BIN="$PWD/.venv/bin/python" ./set_daemon.sh
+systemctl --user status citadel.service
+```
+
+The installer also attempts to enable user lingering when it is available.
+
+## OpenClaw installation
+
+Download and verify the public release package:
+
+```bash
+curl -fL \
+  -o citadel-latest.zip \
+  https://github.com/safrano9999/CITADEL/releases/download/latest/citadel-latest.zip
+curl -fL \
+  -o citadel-latest.zip.sha256 \
+  https://github.com/safrano9999/CITADEL/releases/download/latest/citadel-latest.zip.sha256
+sha256sum -c citadel-latest.zip.sha256
+openclaw plugins install ./citadel-latest.zip \
+  --force \
+  --dangerously-force-unsafe-install
+openclaw gateway restart
+```
+
+The plugin can use its packaged scanner and state, or it can point to an
+existing bare-metal CITADEL checkout:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "citadel": {
+        "enabled": true,
+        "config": {
+          "servicesPath": "/opt/citadel/services.json",
+          "scanScript": "/opt/citadel/scan.sh"
+        }
+      }
+    }
+  }
+}
+```
+
+Available commands:
 
 ```text
 /citadel
@@ -15,213 +138,175 @@ The same repository can be linked as an OpenClaw plugin. It reads the existing
 /citadel scan
 ```
 
-![CITADEL](CITADEL.png)
+The plugin does not launch the FastAPI dashboard. It reads CITADEL state,
+renders provider buttons, and can run the configured scanner.
 
-Self-hosted service dashboard for local/remote routes with a modular provider system.
+## Configuration
 
-## Why CITADEL?
+`config.sh --no-container` renders local configuration from
+`config.conf_example` and `env.example`.
 
-CITADEL is built for the real-world homelab/dev workflow:
-
-- You run multiple services, each on a different port.
-- You want one clean dashboard to discover and open them.
-- You want flexible routing targets (localhost, subnet, Tailscale, Cloudflare).
-- You want Tailscale links when Tailscale is already running and logged in.
-
-## How it works
-
-CITADEL scans listening ports, probes HTTP services, and maps every discovered service to the active providers. Tailscale integration is reconciliation only. For Cloudflare, CITADEL can start an installed `cloudflared.service` when Cloudflare is enabled and the Tunnel token is present; it never installs or authenticates Tailscale and never launches an ad-hoc connector.
-
-Example: you start a new service on port 3000. Next scan, it shows up on the dashboard with working links for every provider:
-
-| Provider | Generated URL |
-|---|---|
-| localhost | `http://127.0.0.1:3000` |
-| subnet | `http://192.168.1.50:3000` |
-| tailscale | `https://citadel-bold-falcon.tailnet.ts.net:3000` |
-| cloudflare | `https://3000.services.example.net` |
-
-Start a service, scan, done. Every discovered HTTP service is mapped to every enabled provider. For each new or changed service, the Tailscale provider tries HTTPS Serve first and HTTP Serve second. If neither listener can be created, `auto` mode can still use a direct Tailnet URL when the service already listens on a wildcard or Tailscale address.
-
-## Quick Start
-
-```bash
-cp config.conf_example config.conf
-python3 -m pip install -r requirements.txt
-python3 webui.py
-```
-
-Cloudflare secrets are optional. When Cloudflare is used, create `.env` from `env.example`; `.env` is ignored by Git.
-
-### Baremetal Systemd
-
-```bash
-./set_daemon.sh
-```
-
-The script writes a local systemd unit, symlinks it into `~/.config/systemd/user/`, reloads user systemd, and enables `citadel.service`.
-
-### Runtime Config
-
-| Variable | Default | Description |
-|---|---|---|
-| `FASTAPI_HOST` | `127.0.0.1` | Web UI bind host |
-| `CITADEL_WEBUI_PORT` | `10999` | Web UI port |
-| `CITADEL_SUBNET_IP` | empty | IP used by the subnet provider and as the Cloudflare origin; blank uses `127.0.0.1` |
-| `CITADEL_TAILSCALE` | `true` | Reconcile native Tailscale Serve routes when Tailscale is logged in |
-| `CITADEL_CLOUDFLARE` | `false` | Reconcile Cloudflare resources when enabled and required values exist |
-| `CITADEL_CLOUDFLARE_DOMAIN` | empty | Hostname suffix, including a subdomain such as `services.example.net` |
-| `CITADEL_CLOUDFLARE_ACCOUNT_ID` | empty | Cloudflare account ID |
-| `CITADEL_CLOUDFLARE_ZONE_ID` | empty | Cloudflare zone ID |
+| Setting | Example default | Purpose |
+|---|---:|---|
+| `FASTAPI_HOST` | `127.0.0.1` | Dashboard bind address |
+| `CITADEL_WEBUI_PORT` | `11000` | Dashboard port |
+| `CITADEL_SUBNET_IP` | empty | Address used for subnet routes and the Cloudflare origin |
+| `CITADEL_TAILSCALE` | `true` | Enable Tailscale route reconciliation |
+| `CITADEL_CLOUDFLARE` | `1` | Enable Cloudflare reconciliation when all required values exist |
+| `CITADEL_CLOUDFLARE_DOMAIN` | empty | DNS suffix used for generated hostnames |
+| `CITADEL_CLOUDFLARE_ACCOUNT_ID` | empty | Existing Cloudflare account ID |
+| `CITADEL_CLOUDFLARE_ZONE_ID` | empty | Existing Cloudflare zone ID |
 | `CITADEL_CLOUDFLARE_TUNNEL_ID` | empty | Existing named Tunnel ID |
-| `CLOUDFLARE_EMAIL` | empty | Default Access email whitelist for new Cloudflare routes; Cloudflare is skipped when missing |
+| `CLOUDFLARE_API_TOKEN` | empty | Scoped Cloudflare API token |
+| `CLOUDFLARE_EMAIL` | empty | Default Access email allowlist |
+| `TUNNEL_TOKEN` | empty | Token consumed by the separately managed connector |
 
-These non-secret values live in `config.conf`. `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_EMAIL`, and the separately consumed `TUNNEL_TOKEN` live in `.env`.
+Non-secret service settings belong in `config.conf`. Secrets belong in `.env`,
+which is ignored by Git.
 
-## Core Idea
-
-- Port discovery and metadata stay generic.
-- Route generation is delegated to providers.
-- Provider activation is controlled by folder placement:
-  - `extensions/enabled/<provider>/`
-  - `extensions/disabled/<provider>/`
-
-`extension.json` is metadata only (id/label/version), not an activation switch.
-
-## Providers
-
-Enabled by default:
-- `localhost` — routes to `127.0.0.1:<port>`
-- `subnet` — routes to `CITADEL_SUBNET_IP:<port>`
-- `tailscale` — HTTPS-preferred routes to `<tailnet-domain>:<port>`, with persisted HTTP/direct fallback
-- `cloudflare` — DNS, named Tunnel ingress, and optional Access policies; inactive until `CITADEL_CLOUDFLARE=true`
-
-Provider scripts live in `functions/providers/`. `dispatch.py` runs all enabled providers and aggregates state.
-
-### Provider Config
-
-- `localhost` and `tailscale` work out of the box (no config required).
-- `subnet` reads `CITADEL_SUBNET_IP` from `config.conf`.
-- `cloudflare` reads non-secrets from `config.conf` and its scoped API token from `.env`.
-- `cloudflare` forwards to `CITADEL_SUBNET_IP:<port>` when set, otherwise to `127.0.0.1:<port>`.
-
-### Tailscale Provider
-
-- Checks runtime via `tailscale status`; never starts Tailscale
-- With `route_mode = auto`, tries native Tailscale Serve over HTTPS once for every new or changed web service, then tries HTTP as fallback
-- Reuses the persisted decision for unchanged services without repeating `tailscale serve` calls on every scan
-- Reads `tailscale serve status --json` only when a new or changed route needs reconciliation or a stale listener needs removal
-- Falls back to a direct Tailnet URL only when both Serve attempts fail and the service is already bound to a wildcard or Tailscale address
-- Replaces or removes a CITADEL-managed listener only when its live scheme and backend still match the persisted state; foreign or manually changed listeners remain untouched
-- Stores URLs, backend targets, route decisions, fallback reasons, and managed listener schemes in `tailscale.json`
-- Generates URLs like `https://<tailnet-domain>:<port>`
-- Set the scanning user as Tailscale operator once, then run scans without sudo:
-
-  ```sh
-  sudo tailscale set --operator="$USER"
-  ./scan.sh
-  ```
-
-- To deliberately release one or more ports from Tailscale Serve, run:
-
-  ```sh
-  sudo ./unroute.sh
-  sudo ./unroute.sh 790 11000
-  ```
-
-  Without arguments, the script reads `CITADEL_WEBUI_PORT` from `config.conf`.
-  With arguments, it processes exactly the listed ports. It disables only their
-  HTTP/HTTPS Serve listeners and removes only those ports from CITADEL's
-  persisted route state, cached metadata, and icons. It never runs a global
-  Serve reset.
-
-### Cloudflare Provider
-
-Cloudflare reconciliation runs when `CITADEL_CLOUDFLARE=1`, the API token is valid, and the configured account, zone, and Tunnel identifiers are present. Mapping is performed through the API and does not depend on where or how `cloudflared` runs. CITADEL preserves unrelated DNS records, Access resources, and Tunnel ingress rules.
-
-Every discovered service receives `<port>.<CITADEL_CLOUDFLARE_DOMAIN>` by default. In the Cloudflare WebUI tab, select **EDIT** to assign either a short label or a complete hostname:
-
-- `citadel` becomes `citadel.services.example.net`.
-- `citadel.internal.example.net` is used directly, provided it belongs to the configured zone.
-- Empty remains the port-based hostname.
-
-Enable **Whitelist** to create a Cloudflare Access email allow policy. At least one email is required, and the Cloudflare One-time PIN identity provider must be enabled. Select **SAVE & SCAN** to write `ports.filter.json` and immediately perform the deterministic Cloudflare API changes.
-
-The API token needs Tunnel Edit, Access Apps and Policies Edit, Access identity-provider read, and DNS Edit permissions scoped to the selected account and zone. `skills/citadel-cloudflare/SKILL.md` documents assisted ID discovery and diagnostics.
-
-## Scan Flow (`scan.sh`)
-
-1. Build `ss.json` from `ss -tlnHp`
-2. Apply port policy (`ports.filter.json`)
-3. Probe ports for HTTP/HTTPS + HTML detection
-4. Update per-port cache (`cache/<port>.json`)
-5. Build `services.json`
-6. Run provider dispatcher and reconcile active Tailscale and Cloudflare routes
-7. Write `last_scan.txt`
-
-## Config Examples
-
-### Main `config.ini` (optional)
+An optional `config.ini` selects a custom CA:
 
 ```ini
 [CITADEL]
-ca_cert = /path/to/certs/cert.pem
+ca_cert = /path/to/certs/ca.pem
 ```
 
-### UI defaults (`extensions/ui.json`)
+### Port policy
 
-```json
-{
-  "default_provider": "tailscale",
-  "default_refresh_seconds": 0
-}
-```
-
-### Port policy (`ports.filter.json`)
+`ports.filter.json` is created during the first scan. Start from
+`ports.filter.json.example` when a policy should be prepared in advance:
 
 ```json
 {
   "whitelist": [],
   "blacklist": [4000, "5000-5010"],
   "cloudflare": {
-    "399": {
-      "subdomain": "citadel.internal.example.net",
+    "11000": {
+      "subdomains": ["citadel"],
       "whitelist": true,
-      "emails": ["engineer@example.net"]
+      "emails": ["operator@example.net"]
     }
   }
 }
 ```
 
-Template: `ports.filter.json.example`
+A non-empty whitelist takes precedence. Otherwise the blacklist is applied.
 
-### Provider route schema
+## Providers
 
-Each enabled provider keeps its own `routes.json`. Service routes use the same schema:
+Provider activation is directory based:
 
-```json
-{
-  "mode": "direct",
-  "url": "http://node.example.ts.net:18789",
-  "target": null,
-  "owns_listener": false
-}
+```text
+extensions/enabled/<provider>/
+extensions/disabled/<provider>/
 ```
 
-`mode` is `direct` or `proxy`. `target` identifies a proxy origin, and `owns_listener` records whether the provider claims the service port locally. A proxy URL can be HTTPS or the persisted HTTP fallback. To deliberately reevaluate a route, both its CITADEL-managed Serve listener and its persisted decision in `tailscale.json` must be cleared; a global Tailscale Serve reset may remove unrelated routes.
+`extension.json` describes a provider; directory placement controls whether it
+is active.
 
-## Frontend
+### Localhost and subnet
 
-`webui.py` serves the FastAPI dashboard. It reads `services.json`, provider state, and per-provider routes. Features:
+- `localhost` maps services to `127.0.0.1:<port>`.
+- `subnet` maps services to `CITADEL_SUBNET_IP:<port>`.
 
-- Provider dropdown
-- Save default provider (browser storage)
-- Cloudflare hostname and Access whitelist editor
-- Optional auto-refresh
+### Tailscale
 
-## Cron Example
+CITADEL never installs, authenticates, or starts Tailscale. For every new or
+changed web service, automatic mode:
 
-```cron
-* * * * * /home/user/CITADEL/scan.sh
-* * * * * sleep 30 && /home/user/CITADEL/scan.sh
+1. tries an HTTPS Tailscale Serve listener;
+2. falls back to HTTP Serve;
+3. uses a direct Tailnet URL only when the service already listens on a
+   wildcard or Tailscale address.
+
+Route decisions are persisted in `tailscale.json`, so unchanged services are
+not reconfigured on every scan. Foreign or manually changed listeners are not
+claimed.
+
+Allow the scanning user to manage Tailscale without running every scan as root:
+
+```bash
+sudo tailscale set --operator="$USER"
+./scan.sh
 ```
+
+Release selected CITADEL-managed ports with:
+
+```bash
+sudo ./unroute.sh 11000
+```
+
+With no port arguments, `unroute.sh` uses `CITADEL_WEBUI_PORT`. It never runs a
+global Tailscale Serve reset.
+
+### Cloudflare
+
+Cloudflare reconciliation runs only when it is enabled and its API token,
+account, zone, Tunnel, and domain settings are complete. It manages:
+
+- DNS records for discovered services;
+- ingress entries on an existing named Tunnel;
+- optional Cloudflare Access email policies.
+
+It preserves unrelated DNS records, Access resources, and Tunnel ingress
+rules. See [CITADEL_CLOUDFLARE.md](CITADEL_CLOUDFLARE.md) for the required API
+permissions and provider-specific setup.
+
+## Operations
+
+Run or repeat discovery:
+
+```bash
+./scan.sh
+```
+
+The scan updates:
+
+```text
+ss.json
+services.json
+cache/<port>.json
+extensions/providers_state.json
+extensions/enabled/<provider>/routes.json
+tailscale.json
+last_scan.txt
+```
+
+The dashboard's **Scan** action is enabled after an initial successful CLI
+scan has created provider state.
+
+Inspect the user service:
+
+```bash
+systemctl --user status citadel.service
+journalctl --user -u citadel.service
+```
+
+## Security and storage
+
+- Keep the dashboard bound to `127.0.0.1` unless remote exposure is deliberate.
+- Treat `.env`, Cloudflare tokens, Tunnel tokens, and private CA material as
+  secrets.
+- Give the Cloudflare token only the account- and zone-scoped permissions
+  described in `CITADEL_CLOUDFLARE.md`.
+- The scanner records listener metadata and service titles. Protect the
+  repository directory if that inventory is sensitive.
+- Runtime state, caches, generated routes, local configuration, and release
+  archives are excluded by `.gitignore`.
+- Back up `ports.filter.json` and provider state when custom routes must survive
+  a fresh checkout.
+
+## Development and checks
+
+Install dependencies, then run the same source checks used by the release
+workflow:
+
+```bash
+.venv/bin/python -m unittest discover -s tests
+node --check index.js
+bash -n scan.sh
+bash -n unroute.sh
+```
+
+The release workflow builds `citadel-latest.zip`, writes its SHA-256 file, and
+publishes both only for a version tag.
