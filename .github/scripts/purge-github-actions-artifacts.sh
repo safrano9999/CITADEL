@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Source of truth: SCRIPTS/githubactions. Generated copies are overwritten.
 set -euo pipefail
 
 repo="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
