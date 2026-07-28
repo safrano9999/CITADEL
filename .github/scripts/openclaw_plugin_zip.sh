@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
+# Source of truth: SCRIPTS/githubactions. Generated copies are overwritten.
 set -euo pipefail
 
-repo="$(basename "$PWD")"
-zip_name="${ZIP_NAME:-$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')-latest.zip}"
+repo_name="$(basename "$PWD")"
+repo="${repo_name^^}"
+zip_name="${ZIP_NAME:-$(printf '%s' "$repo_name" | tr '[:upper:]' '[:lower:]')-latest.zip}"
 archive_list="${ARCHIVE_LIST:-/tmp/openclaw-plugin-archive-files.txt}"
 dev_only_re='(^|/)tag\.sh$'
 candidate_list="$(mktemp)"
@@ -14,7 +16,7 @@ trap 'rm -f "$candidate_list" "$include_list" "$ignored_list" "$leak_list"' EXIT
 case "$repo" in
   DAILYNEWS) files=(README.md config.json openclaw.plugin.json package.json requirements.txt index.js generate.py scripts skills) ;;
   CALENDAR) files=(README.md calendar_fetch.py config.json openclaw.plugin.json package.json requirements.txt index.js scripts) ;;
-  ZEROINBOX) files=(README.md provider.conf openclaw.plugin.json package.json requirements.txt index.js scripts skills zeroinbox) ;;
+  ZEROINBOX) files=(README.md provider.conf openclaw.plugin.json package.json requirements.txt index.js python_header.py openai_v1.py scripts skills zeroinbox) ;;
   CITADEL) files=(README.md CITADEL_CLOUDFLARE.md CITADEL.png citadel.svg config.ini.example openclaw.plugin.json package.json requirements.txt index.js scan.sh set_daemon.sh unroute.sh webui.py assets extensions functions skills templates tests) ;;
   KACHELMANN) files=(README.md KACHELMANN_SOT.md OPENCLAW.md COACHING_ADVISES prompt.md mcp_server.py config.json openclaw.plugin.json package.json requirements.txt requirements-mysql.txt requirements-postgres.txt index.js scripts systemd kachelmann static templates webui.py) ;;
   SPANKER) files=(README.md assets openclaw.plugin.json package.json requirements.txt index.js scripts systemd spanker) ;;
@@ -41,6 +43,14 @@ grep -vxF -f "$ignored_list" "$candidate_list" > "$include_list"
 zip -q "$zip_name" -@ < "$include_list"
 sha256sum "$zip_name" > "$zip_name.sha256"
 zipinfo -1 "$zip_name" | tee "$archive_list"
+if [ "$repo" = ZEROINBOX ]; then
+  for required in python_header.py openai_v1.py; do
+    if ! grep -Fxq "$required" "$archive_list"; then
+      echo "Refusing to publish ZEROINBOX without $required." >&2
+      exit 1
+    fi
+  done
+fi
 if grep -E "$dev_only_re" "$archive_list" > "$leak_list"; then
   cat "$leak_list"
   echo "Refusing to publish archive with dev-only files." >&2

@@ -51,7 +51,7 @@ jobs:
           python -m unittest discover -s tests
 
       - name: Build plugin archive
-        run: bash ./openclaw_plugin_zip.sh
+        run: bash .github/scripts/openclaw_plugin_zip.sh
 
       - name: Publish GitHub release asset
         if: startsWith(github.ref, 'refs/tags/')

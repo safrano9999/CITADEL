@@ -32,3 +32,5 @@ PERSONAL/
 # Build artifacts
 certs/
 .claude/
+/citadel-latest.zip
+/citadel-latest.zip.sha256
