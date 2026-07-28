@@ -44,6 +44,78 @@ trim() {
     printf '%s' "$value"
 }
 
+valid_ipv4() {
+    python3 - "$1" <<'PY' >/dev/null 2>&1
+import ipaddress
+import sys
+
+ipaddress.IPv4Address(sys.argv[1])
+PY
+}
+
+podman_hosts_file_ip() {
+    local hosts_file="$1"
+
+    [ -r "$hosts_file" ] || return 1
+    awk '
+        {
+            for (field = 2; field <= NF; field++) {
+                if ($field == "host.containers.internal") {
+                    print $1
+                    exit
+                }
+            }
+        }
+    ' "$hosts_file"
+}
+
+discover_podman_host_internal_ip() {
+    local configured="${PODMAN_HOST_INTERNAL_IP:-}"
+    local image="${PODMAN_HOST_INTERNAL_IMAGE:-}"
+    local container_id hosts_file candidate
+
+    if [ -n "$configured" ]; then
+        valid_ipv4 "$configured" || {
+            echo "Invalid PODMAN_HOST_INTERNAL_IP: $configured" >&2
+            return 2
+        }
+        printf '%s\n' "$configured"
+        return 0
+    fi
+
+    if command -v podman >/dev/null 2>&1; then
+        while IFS= read -r container_id; do
+            [ -n "$container_id" ] || continue
+            hosts_file="$(podman inspect --format '{{.HostsPath}}' "$container_id" 2>/dev/null || true)"
+            candidate="$(podman_hosts_file_ip "$hosts_file" 2>/dev/null || true)"
+            if [ -n "$candidate" ] && valid_ipv4 "$candidate"; then
+                printf '%s\n' "$candidate"
+                return 0
+            fi
+        done < <(podman ps --quiet 2>/dev/null || true)
+
+        if [ -n "$image" ] && podman image exists "$image" >/dev/null 2>&1; then
+            candidate="$(
+                {
+                    podman run --rm \
+                        --network=pasta \
+                        --entrypoint /usr/bin/getent \
+                        "$image" ahostsv4 host.containers.internal 2>/dev/null ||
+                        true
+                } |
+                    awk 'NR == 1 { print $1 }'
+            )"
+            if [ -n "$candidate" ] && valid_ipv4 "$candidate"; then
+                printf '%s\n' "$candidate"
+                return 0
+            fi
+        fi
+    fi
+
+    # Podman 5.x uses this address for Pasta if no explicit override exists.
+    printf '%s\n' '169.254.1.2'
+}
+
 configure_container_name() {
     local example default_name="" value="${CONFIG_CONTAINER_NAME:-}"
 
@@ -679,15 +751,21 @@ configure_from_example() {
     declare -A db_seen_keys=()
     local -a db_config_keys=()
     local -a db_backend_keys=()
+    local -a field_choice_values=()
     local required_next=false
     local secret_next=false
     local directive condition condition_key condition_value target_key target_list secret
     local repeat_group repeat_style repeat_fields base_key repeat_choice repeat_index repeat_suffix
     local pending_value_dupe="" pending_reverse_varname="" value_dupe_target value_dupe_existing value_dupe_choice
     local pending_choices="" pending_when="" pending_when_not="" pending_default_rules="" pending_telegram_token=""
+    local pending_podman_host_internal=false
     local field_choices="" field_when="" field_when_not="" field_default_rules="" field_telegram_token=""
+    local field_podman_host_internal=false podman_host_internal_ip=""
     local telegram_token_key="" telegram_existing=""
     local generator_label choice
+    local field_choice_count=0 field_choice_index=0 field_choice_total=0
+    local field_choice_default="" field_choice_numbers=""
+    local field_choice_freeform=false field_choice_selected_freeform=false
     local rule_key db_bulk_eligible=false db_bulk_decided=false
     local container_nr="" publish_port_count=0 publish_port_choice="" publish_port_autofill=false
 
@@ -1265,6 +1343,10 @@ configure_from_example() {
             fi
             continue
         fi
+        if [[ "$stripped" == "#discover-podman-host-internal" ]]; then
+            pending_podman_host_internal=true
+            continue
+        fi
         if [[ "$stripped" == \#required:* ]]; then
             required_next=true
             continue
@@ -1281,6 +1363,7 @@ configure_from_example() {
             pending_when_not=""
             pending_default_rules=""
             pending_telegram_token=""
+            pending_podman_host_internal=false
             continue
         fi
         if [[ "$stripped" == \#* ]]; then
@@ -1293,6 +1376,7 @@ configure_from_example() {
         field_when_not="$pending_when_not"
         field_default_rules="$pending_default_rules"
         field_telegram_token="$pending_telegram_token"
+        field_podman_host_internal="$pending_podman_host_internal"
         required_next=false
         secret_next=false
         pending_choices=""
@@ -1300,6 +1384,7 @@ configure_from_example() {
         pending_when_not=""
         pending_default_rules=""
         pending_telegram_token=""
+        pending_podman_host_internal=false
 
         entry="${line%%#*}"
         entry="${entry#"${entry%%[![:space:]]*}"}"
@@ -1346,6 +1431,13 @@ configure_from_example() {
             if [ -n "$telegram_token_key" ] && [ "${repeat_key_groups[$telegram_token_key]:-}" = "$repeat_group" ]; then
                 telegram_token_key="$(repeat_group_key "$repeat_group" "$repeat_style" "$telegram_token_key" "$repeat_index")"
             fi
+        fi
+        if [ "$field_podman_host_internal" = "true" ]; then
+            if [ -z "$podman_host_internal_ip" ]; then
+                podman_host_internal_ip="$(discover_podman_host_internal_ip)"
+            fi
+            default="${default//@PODMAN_HOST_INTERNAL_IP@/$podman_host_internal_ip}"
+            field_choices="${field_choices//@PODMAN_HOST_INTERNAL_IP@/$podman_host_internal_ip}"
         fi
         if [[ -n "${seen_keys[$key]+x}" ]]; then
             echo "    duplicate $key in $(basename "$example")" >&2
@@ -1397,6 +1489,11 @@ configure_from_example() {
 
         existing_line="$(grep "^${key}=" "$target" 2>/dev/null | head -1 || true)"
         existing="${existing_line#*=}"
+        if [ "$field_podman_host_internal" = "true" ] && [[ "$existing" == *"@PODMAN_HOST_INTERNAL_IP@"* ]]; then
+            existing="${existing//@PODMAN_HOST_INTERNAL_IP@/$podman_host_internal_ip}"
+            write_config_value "$target" "$key" "$existing"
+            existing_line="$key=$existing"
+        fi
         other_existing=false
         if find_configured_value_elsewhere "$target" "$key" && [ -n "$OTHER_VALUE" ]; then
             other_existing=true
@@ -1456,6 +1553,13 @@ configure_from_example() {
             used_prefill=false
             read_status=0
             prompt_suffix=""
+            field_choice_values=()
+            field_choice_count=0
+            field_choice_total=0
+            field_choice_default=""
+            field_choice_numbers=""
+            field_choice_freeform=false
+            field_choice_selected_freeform=false
             if [ "$required" = "true" ] && openssl_generator_default "$default"; then
                 generator_label="$(openssl_generator_label "$default")"
                 if [ -t 0 ]; then
@@ -1505,11 +1609,42 @@ configure_from_example() {
             if provider_selector_key "$key"; then
                 prompt_suffix="$(provider_prompt "$example" "$key")"
             elif [ -n "$field_choices" ]; then
-                prompt_suffix="[$(printf '%s' "$field_choices" | tr ' ' '/')]"
+                read -r -a field_choice_values <<< "$field_choices"
+                field_choice_count="${#field_choice_values[@]}"
+                field_choice_total="$field_choice_count"
+                [[ -z "${repeat_freeform[$base_key]+x}" ]] || {
+                    field_choice_freeform=true
+                    field_choice_total=$((field_choice_total + 1))
+                }
+                for ((field_choice_index = 0; field_choice_index < field_choice_count; field_choice_index++)); do
+                    if [ -t 0 ]; then
+                        printf '      (%d) %s\n' \
+                            "$((field_choice_index + 1))" \
+                            "${field_choice_values[$field_choice_index]}"
+                    fi
+                    if [ "$default" = "${field_choice_values[$field_choice_index]}" ]; then
+                        field_choice_default="$((field_choice_index + 1))"
+                    fi
+                done
+                if [ "$field_choice_freeform" = "true" ] && [ -t 0 ]; then
+                    printf '      (%d) enter custom value\n' "$field_choice_total"
+                fi
+                for ((field_choice_index = 1; field_choice_index <= field_choice_total; field_choice_index++)); do
+                    [ -z "$field_choice_numbers" ] \
+                        && field_choice_numbers="$field_choice_index" \
+                        || field_choice_numbers="$field_choice_numbers/$field_choice_index"
+                done
+                prompt_suffix="[$field_choice_numbers]"
             fi
             if [ "$secret" = "true" ] && [ -t 0 ]; then
                 read -r -s -p "    $key ${prompt_suffix}: " val || read_status=$?
                 echo "" >&2
+            elif [ -n "$field_choices" ] && [ -t 0 ]; then
+                if [ -n "$field_choice_default" ]; then
+                    read -r -p "    Choose ${prompt_suffix} (default: $field_choice_default): " val || read_status=$?
+                else
+                    read -r -p "    Choose ${prompt_suffix}: " val || read_status=$?
+                fi
             elif [ -n "$default" ] && [ -t 0 ]; then
                 read -e -i "$default" -r -p "    $key ${prompt_suffix}: " val || read_status=$?
                 used_prefill=true
@@ -1527,12 +1662,33 @@ configure_from_example() {
             if provider_selector_key "$key"; then
                 val="$(normalize_provider_value "$example" "$key" "$val")"
             fi
+            # Optional choice fields must accept an empty answer. Otherwise an
+            # empty default (for example a repeatable ADDITIONAL_LINE) can
+            # never leave this prompt and loops forever on Enter or EOF.
+            if [ -z "$val" ] && [ "$required" != "true" ]; then
+                break
+            fi
             if [ -n "$field_choices" ]; then
                 if [[ "$val" =~ ^[0-9]+$ ]]; then
-                    val="$(printf '%s\n' $field_choices | sed -n "${val}p")"
+                    if [ "$val" -ge 1 ] && [ "$val" -le "$field_choice_count" ]; then
+                        val="${field_choice_values[$((val - 1))]}"
+                    elif [ "$field_choice_freeform" = "true" ] && [ "$val" -eq "$field_choice_total" ]; then
+                        field_choice_selected_freeform=true
+                        if [ -t 0 ]; then
+                            read -r -p "    $key custom value: " val || read_status=$?
+                        else
+                            read -r val || read_status=$?
+                        fi
+                        val="$(trim "$val")"
+                        if [ -z "$val" ]; then
+                            echo "    custom value required"
+                            continue
+                        fi
+                    fi
                 fi
-                if ! printf '%s\n' $field_choices | grep -Fxq "$val"; then
-                    echo "    choose one of: $field_choices"
+                if [ "$field_choice_selected_freeform" != "true" ] \
+                    && ! printf '%s\n' "${field_choice_values[@]}" | grep -Fxq "$val"; then
+                    echo "    choose ${field_choice_numbers//\//, }"
                     val=""
                     continue
                 fi
