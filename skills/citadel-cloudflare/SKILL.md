@@ -23,15 +23,21 @@ CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN" \
 
 Discovery idempotently creates the Zero Trust organization and One-time PIN provider when they are missing. Error code `9999` from the organization lookup means Access has not been initialized yet and discovery must create the organization. Error code `10000` while creating or updating Access means the token lacks `Access: Organizations, Identity Providers, and Groups -> Edit`; stop instead of exposing unprotected routes.
 
-6. Write discovered non-secret values to `config.conf` and secrets to `.env`. Keep `.env` mode `0600`.
-7. Retrieve `TUNNEL_TOKEN` for the systemd-managed cloudflared service:
+6. Write discovered non-secret values to `config.conf` and secrets to `.env`.
+   Keep `.env` mode `0600`. The discovery helper can update both files without
+   printing either token:
 
 ```bash
 python3 skills/citadel-cloudflare/scripts/discover.py \
   --domain services.example.net \
   --tunnel TUNNEL_NAME \
-  --include-tunnel-token
+  --token-file .env \
+  --write-config config.conf \
+  --write-env .env
 ```
+
+7. Use `--include-tunnel-token` only when machine-readable stdout is explicitly
+   required and is being consumed by a secure process.
 
 Do not commit either token.
 

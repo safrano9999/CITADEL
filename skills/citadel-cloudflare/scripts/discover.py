@@ -4,7 +4,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -13,6 +15,69 @@ sys.path.insert(0, str(CITADEL_ROOT / "functions" / "providers"))
 
 from cloudflare_api import CloudflareAPI, CloudflareAPIError  # noqa: E402
 from cloudflare import ensure_one_time_pin  # noqa: E402
+
+
+KEY_VALUE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+
+
+def read_key_values(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.is_file():
+        return values
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        match = KEY_VALUE.fullmatch(raw_line.strip())
+        if match is None:
+            continue
+        value = match.group(2).strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        values[match.group(1)] = value
+    return values
+
+
+def update_key_values(
+    path: Path,
+    updates: dict[str, str],
+    *,
+    secret: bool = False,
+) -> None:
+    for key, value in updates.items():
+        if "\n" in value or "\r" in value:
+            raise ValueError(f"Invalid newline in {key}")
+
+    original = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    output: list[str] = []
+    remaining = dict(updates)
+    for line in original:
+        match = KEY_VALUE.fullmatch(line.strip())
+        if match is not None and match.group(1) in remaining:
+            key = match.group(1)
+            output.append(f"{key}={remaining.pop(key)}")
+        else:
+            output.append(line)
+    if output and output[-1]:
+        output.append("")
+    output.extend(f"{key}={value}" for key, value in remaining.items())
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    previous = path.stat() if path.exists() else None
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(output))
+            handle.write("\n")
+        if previous is not None:
+            current = temporary.stat()
+            if (current.st_uid, current.st_gid) != (previous.st_uid, previous.st_gid):
+                os.chown(temporary, previous.st_uid, previous.st_gid)
+        temporary.chmod(0o600 if secret else ((previous.st_mode & 0o777) if previous else 0o600))
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def select_zone(zones: list[dict], domain: str) -> dict:
@@ -56,9 +121,26 @@ def main() -> int:
         action="store_true",
         help="Include the connector token in output",
     )
+    parser.add_argument(
+        "--token-file",
+        type=Path,
+        help="Read CLOUDFLARE_API_TOKEN from this key-value file when it is not exported",
+    )
+    parser.add_argument(
+        "--write-config",
+        type=Path,
+        help="Write discovered non-secret CITADEL values to this key-value file",
+    )
+    parser.add_argument(
+        "--write-env",
+        type=Path,
+        help="Write the connector token to this mode-0600 key-value file",
+    )
     args = parser.parse_args()
 
     token = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
+    if not token and args.token_file is not None:
+        token = read_key_values(args.token_file).get("CLOUDFLARE_API_TOKEN", "").strip()
     if not token:
         print("CLOUDFLARE_API_TOKEN is required", file=sys.stderr)
         return 2
@@ -88,9 +170,35 @@ def main() -> int:
             "tunnel_name": str(tunnel.get("name") or ""),
             "tunnel_connections": len(api.tunnel_connections(account_id, tunnel_id)),
         }
-        if args.include_tunnel_token:
+        if args.include_tunnel_token or args.write_env is not None:
             result["TUNNEL_TOKEN"] = api.tunnel_token(account_id, tunnel_id)
-        print(json.dumps(result, indent=2))
+
+        if args.write_config is not None:
+            update_key_values(
+                args.write_config,
+                {
+                    "CITADEL_CLOUDFLARE": "1",
+                    "CITADEL_CLOUDFLARE_DOMAIN": result["CITADEL_CLOUDFLARE_DOMAIN"],
+                    "CITADEL_CLOUDFLARE_ACCOUNT_ID": result[
+                        "CITADEL_CLOUDFLARE_ACCOUNT_ID"
+                    ],
+                    "CITADEL_CLOUDFLARE_ZONE_ID": result["CITADEL_CLOUDFLARE_ZONE_ID"],
+                    "CITADEL_CLOUDFLARE_TUNNEL_ID": result[
+                        "CITADEL_CLOUDFLARE_TUNNEL_ID"
+                    ],
+                },
+            )
+        if args.write_env is not None:
+            update_key_values(
+                args.write_env,
+                {"TUNNEL_TOKEN": result["TUNNEL_TOKEN"]},
+                secret=True,
+            )
+
+        public_result = dict(result)
+        if "TUNNEL_TOKEN" in public_result and args.write_env is not None:
+            public_result["TUNNEL_TOKEN"] = "<written>"
+        print(json.dumps(public_result, indent=2))
         return 0
     except (CloudflareAPIError, ValueError) as exc:
         print(str(exc), file=sys.stderr)

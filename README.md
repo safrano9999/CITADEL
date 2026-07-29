@@ -56,6 +56,7 @@ Requirements:
 - Python 3 with `venv`
 - `curl`
 - `ss` from `iproute2`
+- `flock` from `util-linux`
 - Tailscale CLI only when the Tailscale provider is enabled
 
 Clone the source and create an isolated Python environment:
@@ -218,6 +219,17 @@ changed web service, automatic mode:
 2. falls back to HTTP Serve;
 3. uses a direct Tailnet URL only when the service already listens on a
    wildcard or Tailscale address.
+
+`scan.sh --provider tailscale` performs the same listener discovery and
+HTTPS-before-HTTP probing while reconciling only the enabled Tailscale
+provider. It does not call the Cloudflare or subnet providers.
+
+The Fedora container contribution installs
+`citadel-tailscale-rescan.timer`. Every 15 seconds the timer compares a cheap
+fingerprint of listening TCP endpoints and Tailscale Serve state. A full
+Tailscale-only scan runs when that state changes and at least every five
+minutes for eventual reconciliation. Failed routes are retried on the next
+timer tick. No service-specific port list is maintained.
 
 Route decisions are persisted in `tailscale.json`, so unchanged services are
 not reconfigured on every scan. Foreign or manually changed listeners are not

@@ -4,6 +4,41 @@
 set -euo pipefail
 umask 022
 
+usage() {
+    cat >&2 <<'EOF'
+Usage: ./scan.sh [--provider PROVIDER_ID]
+
+Without --provider, scan listeners and reconcile every enabled provider.
+With --provider, scan listeners and reconcile only that provider.
+EOF
+}
+
+PROVIDER_FILTER=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --provider)
+            [[ $# -ge 2 && -n "$2" ]] || {
+                usage
+                exit 2
+            }
+            PROVIDER_FILTER="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            usage
+            exit 2
+            ;;
+    esac
+done
+[[ -z "$PROVIDER_FILTER" || "$PROVIDER_FILTER" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+    echo "Invalid provider ID: $PROVIDER_FILTER" >&2
+    exit 2
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CACHE_DIR="$SCRIPT_DIR/cache"
 ICONS_DIR="$SCRIPT_DIR/icons"
@@ -18,6 +53,25 @@ TAILSCALE_FILE="$SCRIPT_DIR/tailscale.json"
 PORT_FILTER_FILE="$SCRIPT_DIR/ports.filter.json"
 PROVIDERS_STATE_FILE="$EXTENSIONS_DIR/providers_state.json"
 TIMESTAMP_FILE="$SCRIPT_DIR/last_scan.txt"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
+SCAN_LOCK_FILE="${CITADEL_SCAN_LOCK_FILE:-$RUNTIME_DIR/citadel-scan-${UID}.lock}"
+SCAN_LOCK_TIMEOUT="${CITADEL_SCAN_LOCK_TIMEOUT:-300}"
+
+if [[ "${CITADEL_SCAN_LOCK_HELD:-0}" != "1" ]]; then
+    [[ "$SCAN_LOCK_TIMEOUT" =~ ^[0-9]+$ ]] || {
+        echo "CITADEL_SCAN_LOCK_TIMEOUT must be a non-negative integer" >&2
+        exit 2
+    }
+    mkdir -p "$(dirname "$SCAN_LOCK_FILE")"
+    scan_arguments=()
+    [[ -z "$PROVIDER_FILTER" ]] ||
+        scan_arguments=(--provider "$PROVIDER_FILTER")
+    exec flock \
+        --wait "$SCAN_LOCK_TIMEOUT" \
+        "$SCAN_LOCK_FILE" \
+        env CITADEL_SCAN_LOCK_HELD=1 "$0" \
+        "${scan_arguments[@]}"
+fi
 
 mkdir -p "$CACHE_DIR" "$ICONS_DIR" "$FUNCTIONS_DIR" "$PROVIDERS_DIR" "$ENABLED_EXT_DIR"
 
@@ -575,31 +629,52 @@ with open(out_file, 'w') as fh:
 echo "services.json written"
 echo
 
-echo "=== Applying Cloudflare Defaults ==="
-if [[ -f "$FUNCTIONS_DIR/cloudflare_defaults.py" ]]; then
-    python3 "$FUNCTIONS_DIR/cloudflare_defaults.py" \
-        --root "$SCRIPT_DIR" \
-        --services-file "$SERVICES_FILE" \
-        --policy-file "$PORT_FILTER_FILE" || true
+if [[ -z "$PROVIDER_FILTER" ]]; then
+    echo "=== Applying Cloudflare Defaults ==="
+    if [[ -f "$FUNCTIONS_DIR/cloudflare_defaults.py" ]]; then
+        python3 "$FUNCTIONS_DIR/cloudflare_defaults.py" \
+            --root "$SCRIPT_DIR" \
+            --services-file "$SERVICES_FILE" \
+            --policy-file "$PORT_FILTER_FILE" || true
+    else
+        echo "cloudflare_defaults.py missing: $FUNCTIONS_DIR/cloudflare_defaults.py"
+    fi
+    echo
 else
-    echo "cloudflare_defaults.py missing: $FUNCTIONS_DIR/cloudflare_defaults.py"
+    echo "=== Cloudflare Defaults Skipped (provider=$PROVIDER_FILTER) ==="
+    echo
 fi
-echo
 
 echo "=== Applying Enabled Extensions ==="
 if [[ -f "$PROVIDERS_DIR/dispatch.py" ]]; then
-    python3 "$PROVIDERS_DIR/dispatch.py" \
-        --enabled-dir "$ENABLED_EXT_DIR" \
-        --services-file "$SERVICES_FILE" \
-        --cache-dir "$CACHE_DIR" \
-        --config-ini "$CONFIG" \
-        --state-file "$PROVIDERS_STATE_FILE" \
-        --tailscale-file "$TAILSCALE_FILE" || true
+    if [[ -n "$PROVIDER_FILTER" ]]; then
+        FILTERED_STATE_FILE="$RUNTIME_DIR/citadel-${PROVIDER_FILTER}-provider-state.json"
+        python3 "$PROVIDERS_DIR/dispatch.py" \
+            --enabled-dir "$ENABLED_EXT_DIR" \
+            --services-file "$SERVICES_FILE" \
+            --cache-dir "$CACHE_DIR" \
+            --config-ini "$CONFIG" \
+            --state-file "$FILTERED_STATE_FILE" \
+            --tailscale-file "$TAILSCALE_FILE" \
+            --provider "$PROVIDER_FILTER" \
+            --strict
+    else
+        python3 "$PROVIDERS_DIR/dispatch.py" \
+            --enabled-dir "$ENABLED_EXT_DIR" \
+            --services-file "$SERVICES_FILE" \
+            --cache-dir "$CACHE_DIR" \
+            --config-ini "$CONFIG" \
+            --state-file "$PROVIDERS_STATE_FILE" \
+            --tailscale-file "$TAILSCALE_FILE" || true
+    fi
 else
     echo "dispatch.py missing: $PROVIDERS_DIR/dispatch.py"
+    [[ -z "$PROVIDER_FILTER" ]] || exit 1
 fi
 echo
 
 date '+%Y-%m-%d %H:%M:%S' > "$TIMESTAMP_FILE"
-chmod -R a+rX "$SCRIPT_DIR"
+if [[ -z "$PROVIDER_FILTER" ]]; then
+    chmod -R a+rX "$SCRIPT_DIR"
+fi
 echo "=== Done: $(cat "$TIMESTAMP_FILE") ==="

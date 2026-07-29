@@ -3,9 +3,13 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from common import now_iso, read_json, write_json
+
+
+PROVIDER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def discover_enabled_provider_dirs(enabled_dir: str) -> list[str]:
@@ -31,9 +35,36 @@ def main() -> int:
     parser.add_argument("--config-ini", required=True)
     parser.add_argument("--state-file", required=True)
     parser.add_argument("--tailscale-file", required=True)
+    parser.add_argument(
+        "--provider",
+        action="append",
+        default=[],
+        help="Reconcile only this enabled provider ID (repeatable).",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Return non-zero when a requested provider is missing or fails.",
+    )
     args = parser.parse_args()
 
     provider_dirs = discover_enabled_provider_dirs(args.enabled_dir)
+    requested = []
+    for provider_id in args.provider:
+        if not PROVIDER_ID.fullmatch(provider_id):
+            parser.error(f"invalid provider ID: {provider_id!r}")
+        if provider_id not in requested:
+            requested.append(provider_id)
+    if requested:
+        by_id = {
+            os.path.basename(provider_dir): provider_dir
+            for provider_dir in provider_dirs
+        }
+        provider_dirs = [
+            by_id[provider_id]
+            for provider_id in requested
+            if provider_id in by_id
+        ]
 
     state = {
         "generated_at": now_iso(),
@@ -43,12 +74,28 @@ def main() -> int:
         "providers": {},
         "errors": [],
     }
+    missing = [
+        provider_id
+        for provider_id in requested
+        if not any(
+            os.path.basename(provider_dir) == provider_id
+            for provider_dir in provider_dirs
+        )
+    ]
+    for provider_id in missing:
+        state["errors"].append(
+            f"Requested provider is not enabled: {provider_id}"
+        )
 
     if not provider_dirs:
-        state["errors"].append("No extensions in extensions/enabled")
+        if not requested:
+            state["errors"].append("No extensions in extensions/enabled")
         write_json(args.state_file, state)
-        print("  no enabled extensions found")
-        return 0
+        if requested:
+            print("  no requested enabled providers found")
+        else:
+            print("  no enabled extensions found")
+        return 1 if args.strict and state["errors"] else 0
 
     this_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -161,7 +208,7 @@ def main() -> int:
         f"  summary: enabled={len(provider_dirs)} considered={considered_count} "
         f"available={available_count} total_routes={total_routes}"
     )
-    return 0
+    return 1 if args.strict and state["errors"] else 0
 
 
 if __name__ == "__main__":
