@@ -40,6 +40,7 @@ done
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 CACHE_DIR="$SCRIPT_DIR/cache"
 ICONS_DIR="$SCRIPT_DIR/icons"
 FUNCTIONS_DIR="$SCRIPT_DIR/functions"
@@ -69,7 +70,7 @@ if [[ "${CITADEL_SCAN_LOCK_HELD:-0}" != "1" ]]; then
     exec flock \
         --wait "$SCAN_LOCK_TIMEOUT" \
         "$SCAN_LOCK_FILE" \
-        env CITADEL_SCAN_LOCK_HELD=1 "$0" \
+        env CITADEL_SCAN_LOCK_HELD=1 "$SCRIPT_PATH" \
         "${scan_arguments[@]}"
 fi
 

@@ -222,14 +222,9 @@ changed web service, automatic mode:
 
 `scan.sh --provider tailscale` performs the same listener discovery and
 HTTPS-before-HTTP probing while reconciling only the enabled Tailscale
-provider. It does not call the Cloudflare or subnet providers.
-
-The Fedora container contribution installs
-`citadel-tailscale-rescan.timer`. Every 15 seconds the timer compares a cheap
-fingerprint of listening TCP endpoints and Tailscale Serve state. A full
-Tailscale-only scan runs when that state changes and at least every five
-minutes for eventual reconciliation. Failed routes are retried on the next
-timer tick. No service-specific port list is maintained.
+provider. It does not call the Cloudflare or subnet providers. The Fedora
+container runs one complete scan during initialization. Further scans run
+only when explicitly requested through the WebUI or CLI.
 
 Route decisions are persisted in `tailscale.json`, so unchanged services are
 not reconfigured on every scan. Foreign or manually changed listeners are not
