@@ -10,6 +10,10 @@
   --shadow-hover: 0 12px 30px rgba(15, 23, 42, 0.12);
 }
 
+[hidden] {
+  display: none !important;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;

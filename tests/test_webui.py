@@ -15,6 +15,12 @@ class WebUiScanBoundaryTests(unittest.TestCase):
         self.assertNotIn("/api/scan", contents)
         self.assertNotIn("SAVE &amp; SCAN", contents)
 
+    def test_hidden_controls_cannot_be_overridden_by_component_display(self):
+        stylesheet = Path(webui.__file__).resolve().parent / "assets" / "style.css"
+        contents = stylesheet.read_text(encoding="utf-8")
+        self.assertIn("[hidden]", contents)
+        self.assertIn("display: none !important", contents)
+
     def test_html_templates_autoescape_dynamic_values(self):
         rendered = webui._jinja.from_string("{{ value }}").render(
             value='<script>alert("xss")</script>',
