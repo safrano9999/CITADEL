@@ -1645,7 +1645,6 @@ configure_from_example() {
                 read -r -a field_choice_values <<< "$field_choices"
                 field_choice_count="${#field_choice_values[@]}"
                 field_choice_total="$field_choice_count"
-                [ ! -t 0 ] || printf '    %s:\n' "$key"
                 [[ -z "${repeat_freeform[$base_key]+x}" ]] || {
                     field_choice_freeform=true
                     field_choice_total=$((field_choice_total + 1))
