@@ -10,11 +10,30 @@ sys.path.insert(0, str(FUNCTIONS_DIR))
 from container_discovery import (
     assign_host_route_ports,
     discover_host_listeners,
+    parse_nmap_listeners,
     parse_proc_listeners,
 )
 
 
 class HostListenerDiscoveryTests(unittest.TestCase):
+    def test_parses_only_open_nmap_ports(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "nmap.xml"
+            path.write_text(
+                """<?xml version="1.0"?>
+<nmaprun><host><ports>
+<port protocol="tcp" portid="22"><state state="open"/><service name="ssh"/></port>
+<port protocol="tcp" portid="5432"><state state="open"/><service name="postgresql"/></port>
+<port protocol="tcp" portid="8080"><state state="closed"/></port>
+</ports></host></nmaprun>
+""",
+                encoding="utf-8",
+            )
+            rows = parse_nmap_listeners(path, "host.containers.internal")
+            self.assertEqual([row["port"] for row in rows], [22, 5432])
+            self.assertEqual(rows[1]["service"], "postgresql")
+            self.assertEqual(rows[1]["addr"], "host.containers.internal")
+
     def test_reads_only_listening_tcp_ports(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "tcp"

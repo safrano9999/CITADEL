@@ -2024,10 +2024,6 @@ generate_container_files() {
     add_repo_sot_file_mounts
     add_sqlite_volume_mounts
     add_optional_persistence_mounts
-    if [ "$(normalize_rule_value "$(config_value CITADEL_CONTAINER || true)")" = "true" ]; then
-        add_unique "/proc:/host/proc:ro" volumes
-    fi
-
     if [ "$tunnel_only" != "true" ] && [ "${#ports[@]}" -eq 0 ] && [ -n "$first_port" ]; then
         add_unique "${host}:${first_port}:${first_port}" ports
     fi

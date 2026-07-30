@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
@@ -81,6 +82,48 @@ def discover_host_listeners(proc_root: Path) -> list[dict[str, Any]]:
             except OSError:
                 pass
     return [by_port[port] for port in sorted(by_port)]
+
+
+def parse_nmap_listeners(path: Path, host: str) -> list[dict[str, Any]]:
+    try:
+        document = ET.parse(path).getroot()
+    except (OSError, ET.ParseError):
+        return []
+
+    listeners: list[dict[str, Any]] = []
+    for port_node in document.findall(".//port"):
+        state_node = port_node.find("state")
+        if state_node is None or state_node.get("state") != "open":
+            continue
+        try:
+            port = int(port_node.get("portid") or 0)
+        except ValueError:
+            continue
+        if not (1 <= port <= 65535):
+            continue
+        service_node = port_node.find("service")
+        service = (
+            str(service_node.get("name") or "").strip()
+            if service_node is not None
+            else ""
+        )
+        if not service or service == "unknown":
+            try:
+                service = socket.getservbyport(port, "tcp")
+            except OSError:
+                service = None
+        listeners.append({
+            "port": port,
+            "addr": host,
+            "addrs": [host],
+            "listeners": [{"addr": host, "process": None}],
+            "process": None,
+            "service": service,
+            "origin": "host",
+            "origin_host": host,
+            "origin_port": port,
+        })
+    return sorted(listeners, key=lambda item: item["port"])
 
 
 def assign_host_route_ports(

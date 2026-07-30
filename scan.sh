@@ -89,7 +89,6 @@ HOST_IP="${CITADEL_SUBNET_IP:-}"
 CONTAINER_MODE="${CITADEL_CONTAINER:-0}"
 CONTAINER_MAP="${CITADEL_CONTAINER_MAP:-0}"
 DEDUPE_PORT="${CITADEL_DEDUPE_PORT:-}"
-HOST_PROC_ROOT="${CITADEL_HOST_PROC_ROOT:-/host/proc}"
 case "${CONTAINER_MODE,,}" in
     1|true|yes|on) CONTAINER_MODE=true ;;
     *) CONTAINER_MODE=false ;;
@@ -185,15 +184,26 @@ echo "Ports written to ss.json"
 echo
 
 if "$CONTAINER_MODE"; then
-    echo "=== Reading host listeners from $HOST_PROC_ROOT ==="
+    command -v nmap >/dev/null 2>&1 || {
+        echo "CITADEL_CONTAINER=1 requires nmap" >&2
+        exit 2
+    }
+    echo "=== Scanning host.containers.internal listeners with Nmap ==="
+    HOST_NMAP_FILE="$(mktemp)"
+    nmap -Pn -n -sT -sV -p- --open --stats-every 15s \
+        -oN /dev/null -oX "$HOST_NMAP_FILE" host.containers.internal
     PYTHONPATH="$FUNCTIONS_DIR:$PROVIDERS_DIR" python3 -c '
 import sys
 from pathlib import Path
 from atomic_io import atomic_write_json
-from container_discovery import discover_host_listeners
+from container_discovery import parse_nmap_listeners
 
-atomic_write_json(sys.argv[2], discover_host_listeners(Path(sys.argv[1])))
-' "$HOST_PROC_ROOT" "$HOST_SS_FILE"
+atomic_write_json(
+    sys.argv[2],
+    parse_nmap_listeners(Path(sys.argv[1]), "host.containers.internal"),
+)
+' "$HOST_NMAP_FILE" "$HOST_SS_FILE"
+    rm -f "$HOST_NMAP_FILE"
     echo "Host listeners written to host_ss.json"
     echo
 fi

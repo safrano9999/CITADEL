@@ -153,7 +153,7 @@ renders provider buttons, and can run the configured scanner.
 | `FASTAPI_HOST` | `127.0.0.1` | Dashboard bind address |
 | `CITADEL_WEBUI_PORT` | `11000` | Dashboard port |
 | `CITADEL_TOKEN` | generated | Optional token protecting Cloudflare edits in the dashboard |
-| `CITADEL_CONTAINER` | `0` | Also discover listeners on the container host through `host.containers.internal` |
+| `CITADEL_CONTAINER` | `0` | Discover container-host listeners with Nmap through `host.containers.internal` |
 | `CITADEL_CONTAINER_MAP` | `0` | Route discovered host HTTP services through Tailscale and Cloudflare |
 | `CITADEL_DEDUPE_PORT` | `65100` | First replacement port when a mapped host service duplicates a container port |
 | `CITADEL_SUBNET_IP` | empty | Address used for subnet routes and the Cloudflare origin |
