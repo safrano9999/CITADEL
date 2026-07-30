@@ -895,7 +895,4 @@ fi
 echo
 
 date '+%Y-%m-%d %H:%M:%S' > "$TIMESTAMP_FILE"
-if [[ -z "$PROVIDER_FILTER" ]]; then
-    chmod -R a+rX "$SCRIPT_DIR"
-fi
 echo "=== Done: $(cat "$TIMESTAMP_FILE") ==="
