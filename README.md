@@ -224,7 +224,7 @@ changed web service, automatic mode:
 HTTPS-before-HTTP probing while reconciling only the enabled Tailscale
 provider. It does not call the Cloudflare or subnet providers. The Fedora
 container runs one complete scan during initialization. Further scans run
-only when explicitly requested through the WebUI or CLI.
+only when explicitly requested through the CLI.
 
 Route decisions are persisted in `tailscale.json`, so unchanged services are
 not reconfigured on every scan. Foreign or manually changed listeners are not
@@ -279,8 +279,8 @@ tailscale.json
 last_scan.txt
 ```
 
-The dashboard's **Scan** action is enabled after an initial successful CLI
-scan has created provider state.
+The dashboard does not execute scans. Cloudflare edits made in the dashboard
+are saved immediately and applied by the next `./scan.sh` CLI run.
 
 Inspect the user service:
 

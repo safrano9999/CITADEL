@@ -38,9 +38,8 @@
         </label>
 
         <button id="page-refresh-btn" class="btn-default" type="button">Refresh</button>
-        <button id="scan-btn" class="btn-default" type="button" title="{{ data.scan_block_reason|default('')|e }}">{{ 'please scan in cli' if data.scan_block_reason else 'Scan' }}</button>
         <button id="cloudflare-edit-btn" class="btn-default" type="button" hidden>EDIT</button>
-        <button id="cloudflare-save-btn" class="btn-default" type="button" hidden disabled>SAVE &amp; SCAN</button>
+        <button id="cloudflare-save-btn" class="btn-default" type="button" hidden disabled>SAVE</button>
     </div>
 </header>
 
@@ -126,7 +125,6 @@
 const modeSel = document.getElementById('route-mode-sel');
 const saveDefaultBtn = document.getElementById('save-default-btn');
 const pageRefreshBtn = document.getElementById('page-refresh-btn');
-const scanBtn = document.getElementById('scan-btn');
 const cloudflareEditBtn = document.getElementById('cloudflare-edit-btn');
 const cloudflareSaveBtn = document.getElementById('cloudflare-save-btn');
 const modeDefaultHint = document.getElementById('mode-default-hint');
@@ -313,7 +311,7 @@ function updateCloudflareSaveState() {
   cloudflareSaveBtn.disabled = !cloudflareEditing || !cloudflareDirty;
 }
 
-async function saveCloudflareRulesAndScan() {
+async function saveCloudflareRules() {
   const rules = {};
   for (const tile of tiles) {
     const editor = tile.querySelector('.cloudflare-editor');
@@ -365,29 +363,6 @@ if (pageRefreshBtn) {
   pageRefreshBtn.addEventListener('click', () => location.reload());
 }
 
-if (scanBtn) {
-  scanBtn.addEventListener('click', async () => {
-    scanBtn.disabled = true;
-    const original = scanBtn.textContent;
-    scanBtn.textContent = 'Scanning...';
-    try {
-      const response = await fetch('/api/scan', { method: 'POST' });
-      let payload = {};
-      try {
-        payload = await response.json();
-      } catch {}
-      if (!response.ok) {
-        throw new Error(payload.detail || 'Scan failed.');
-      }
-    } catch (error) {
-      window.alert(error.message);
-    } finally {
-      scanBtn.textContent = original;
-      scanBtn.disabled = false;
-    }
-  });
-}
-
 if (cloudflareEditBtn) {
   cloudflareEditBtn.addEventListener('click', () => {
     cloudflareEditing = !cloudflareEditing;
@@ -409,9 +384,9 @@ if (cloudflareSaveBtn) {
   cloudflareSaveBtn.addEventListener('click', async () => {
     cloudflareSaveBtn.disabled = true;
     const original = cloudflareSaveBtn.textContent;
-    cloudflareSaveBtn.textContent = 'SAVING & SCANNING...';
+    cloudflareSaveBtn.textContent = 'SAVING...';
     try {
-      await saveCloudflareRulesAndScan();
+      await saveCloudflareRules();
       location.reload();
     } catch (error) {
       window.alert(error.message);
