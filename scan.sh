@@ -190,8 +190,8 @@ if "$CONTAINER_MODE"; then
     }
     echo "=== Scanning host.containers.internal listeners with Nmap ==="
     HOST_NMAP_FILE="$(mktemp)"
-    nmap -Pn -n -sT -sV -p- --open --stats-every 15s \
-        -oN /dev/null -oX "$HOST_NMAP_FILE" host.containers.internal
+    nmap -Pn -n -sT -sV --version-light -p- --open --stats-every 15s \
+        -oN /dev/null -oX "$HOST_NMAP_FILE" host.containers.internal >/dev/null
     PYTHONPATH="$FUNCTIONS_DIR:$PROVIDERS_DIR" python3 -c '
 import sys
 from pathlib import Path
