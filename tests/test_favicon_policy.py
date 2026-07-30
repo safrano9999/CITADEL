@@ -49,7 +49,7 @@ class FaviconPolicyTests(unittest.TestCase):
     def test_only_passive_supported_image_types_are_accepted(self):
         self.assertEqual(icon_extension("image/png; charset=binary"), ".png")
         self.assertEqual(icon_extension("image/x-icon"), ".ico")
-        self.assertEqual(icon_extension("image/svg+xml"), "")
+        self.assertEqual(icon_extension("image/svg+xml"), ".svg")
         self.assertEqual(icon_extension("text/html"), "")
 
 

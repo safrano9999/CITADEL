@@ -7,6 +7,7 @@ MAX_ICON_CANDIDATES = 16
 ALLOWED_ICON_TYPES = {
     "image/gif": ".gif",
     "image/png": ".png",
+    "image/svg+xml": ".svg",
     "image/vnd.microsoft.icon": ".ico",
     "image/webp": ".webp",
     "image/x-icon": ".ico",
