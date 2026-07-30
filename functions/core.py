@@ -205,6 +205,7 @@ def _load_providers() -> dict:
         "provider_urls_by_port": provider_urls_by_port,
         "provider_header_meta": provider_header_meta,
         "provider_order": list(provider_options.keys()),
+        "cloudflare_available": "cloudflare" in available,
         "alerts": alerts,
     }
 
@@ -318,6 +319,7 @@ def build_dashboard() -> dict:
         "provider_options": providers["provider_options"],
         "provider_header_meta": providers["provider_header_meta"],
         "provider_order": provider_order,
+        "cloudflare_available": providers["cloudflare_available"],
         "default_mode": default_mode,
         "default_refresh": default_refresh,
         "last_scan": last_scan,

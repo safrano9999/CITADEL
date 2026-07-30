@@ -38,12 +38,16 @@
         </label>
 
         <button id="page-refresh-btn" class="btn-default" type="button">Refresh</button>
+        {% if data.cloudflare_available and data.edit_token_required %}
         <label id="cloudflare-token-control" class="control cloudflare-token-control" hidden>
             <span>Token:</span>
             <input id="cloudflare-token" type="password" autocomplete="current-password">
         </label>
+        {% endif %}
+        {% if data.cloudflare_available %}
         <button id="cloudflare-edit-btn" class="btn-default" type="button" hidden>EDIT</button>
         <button id="cloudflare-save-btn" class="btn-default" type="button" hidden disabled>SAVE</button>
+        {% endif %}
     </div>
 </header>
 
