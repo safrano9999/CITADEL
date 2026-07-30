@@ -130,15 +130,25 @@ def scan_peer(peer: dict, address: str) -> list[dict]:
     os.close(descriptor)
     xml_path = Path(xml_name)
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             [
                 "nmap", "-Pn", "-n", "-sT", "-sV", "-p-", "--open",
                 "--stats-every", "15s", "-oN", os.devnull, "-oX", str(xml_path),
                 address,
             ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
         )
-        if completed.returncode not in (0, 1):
-            raise RuntimeError(f"nmap exited with {completed.returncode}")
+        assert process.stdout is not None
+        for line in process.stdout:
+            message = line.strip()
+            if message.startswith("Stats:") or "Timing: About" in message:
+                say(f"  {message}")
+        returncode = process.wait()
+        if returncode not in (0, 1):
+            raise RuntimeError(f"nmap exited with {returncode}")
         try:
             document = ET.parse(xml_path).getroot()
         except ET.ParseError as exc:
