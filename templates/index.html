@@ -506,6 +506,7 @@ if (tsDiscoveryToggle && tsDiscoveryPanel && standardDashboard) {
     tsDiscoveryVisible = !tsDiscoveryVisible;
     standardDashboard.hidden = tsDiscoveryVisible;
     tsDiscoveryPanel.hidden = !tsDiscoveryVisible;
+    document.body.classList.toggle('ts-discovery-mode', tsDiscoveryVisible);
     tsDiscoveryToggle.textContent = tsDiscoveryVisible ? '← BACK' : 'TAILSCALE';
     if (modeSel) modeSel.disabled = tsDiscoveryVisible || cloudflareEditing;
     if (cloudflareTokenControl) cloudflareTokenControl.hidden = true;

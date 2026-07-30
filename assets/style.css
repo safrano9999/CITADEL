@@ -27,6 +27,38 @@ body {
   min-height: 100vh;
 }
 
+body.ts-discovery-mode {
+  background-color: #010207;
+  background-image:
+    radial-gradient(circle, rgba(255, 255, 255, 0.9) 0 1px, transparent 1.4px),
+    radial-gradient(circle, rgba(127, 151, 255, 0.72) 0 1px, transparent 1.5px),
+    radial-gradient(circle, rgba(255, 255, 255, 0.45) 0 0.7px, transparent 1.2px),
+    radial-gradient(circle at 18% 22%, rgba(52, 67, 170, 0.16), transparent 34%),
+    radial-gradient(circle at 82% 76%, rgba(20, 121, 154, 0.1), transparent 32%);
+  background-position: 0 0, 31px 47px, 73px 19px, 0 0, 0 0;
+  background-size: 97px 113px, 173px 191px, 251px 269px, 100% 100%, 100% 100%;
+  background-attachment: fixed;
+  animation: ts-space-drift 80s linear infinite;
+}
+
+body.ts-discovery-mode .site-header {
+  background: rgba(3, 5, 13, 0.94);
+}
+
+body.ts-discovery-mode .ts-discovery {
+  background:
+    radial-gradient(circle at 78% 8%, rgba(75, 93, 255, 0.16), transparent 31%),
+    radial-gradient(circle at 14% 86%, rgba(30, 180, 205, 0.08), transparent 35%),
+    rgba(2, 4, 12, 0.78);
+  box-shadow: 0 22px 65px rgba(0, 0, 0, 0.7);
+}
+
+@keyframes ts-space-drift {
+  to {
+    background-position: 388px 452px, -315px 620px, 324px -519px, 0 0, 0 0;
+  }
+}
+
 .site-header {
   background: linear-gradient(135deg, #0b1220, #1c2740);
   color: #f8fafc;
@@ -390,6 +422,22 @@ body {
   background-position: 8px 11px, 37px 53px, 71px 29px;
   background-size: 83px 97px, 127px 139px, 61px 73px;
   mask-image: linear-gradient(to bottom, #000, rgba(0, 0, 0, 0.35));
+  animation: ts-panel-stars 48s linear infinite, ts-star-twinkle 4.5s ease-in-out infinite alternate;
+}
+
+@keyframes ts-panel-stars {
+  to {
+    background-position: 340px 399px, -344px 609px, 254px -336px;
+  }
+}
+
+@keyframes ts-star-twinkle {
+  from {
+    opacity: 0.52;
+  }
+  to {
+    opacity: 0.82;
+  }
 }
 
 .ts-discovery-header,
@@ -555,6 +603,13 @@ body {
   padding: 8px 10px;
   color: #ffc0ca;
   background: rgba(118, 23, 43, 0.22);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.ts-discovery-mode,
+  .ts-stars {
+    animation: none;
+  }
 }
 
 @media (max-width: 760px) {
