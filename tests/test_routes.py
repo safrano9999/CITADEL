@@ -32,6 +32,17 @@ tailscale = load_tailscale_provider()
 
 
 class RouteSchemaTests(unittest.TestCase):
+    def test_host_container_target_uses_dedupe_listener_and_original_origin(self):
+        self.assertEqual(
+            tailscale.serve_target(
+                65100,
+                "http",
+                "host.containers.internal",
+                8080,
+            ),
+            "http://host.containers.internal:8080",
+        )
+
     def make_fixture(
         self,
         base: Path,

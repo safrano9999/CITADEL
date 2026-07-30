@@ -49,14 +49,18 @@ EXTENSIONS_DIR="$SCRIPT_DIR/extensions"
 ENABLED_EXT_DIR="$EXTENSIONS_DIR/enabled"
 CONFIG="$SCRIPT_DIR/config.ini"
 SS_FILE="$SCRIPT_DIR/ss.json"
+HOST_SS_FILE="$SCRIPT_DIR/host_ss.json"
+HOST_SERVICES_FILE="$SCRIPT_DIR/host_services.json"
 SERVICES_FILE="$SCRIPT_DIR/services.json"
 TAILSCALE_FILE="$SCRIPT_DIR/tailscale.json"
+CONTAINER_ROUTES_FILE="$SCRIPT_DIR/container_routes.json"
 PORT_FILTER_FILE="$SCRIPT_DIR/ports.filter.json"
 PROVIDERS_STATE_FILE="$EXTENSIONS_DIR/providers_state.json"
 TIMESTAMP_FILE="$SCRIPT_DIR/last_scan.txt"
 RUNTIME_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
 SCAN_LOCK_FILE="${CITADEL_SCAN_LOCK_FILE:-$RUNTIME_DIR/citadel-scan-${UID}.lock}"
 SCAN_LOCK_TIMEOUT="${CITADEL_SCAN_LOCK_TIMEOUT:-300}"
+MAX_FETCH_BYTES=1048576
 
 if [[ "${CITADEL_SCAN_LOCK_HELD:-0}" != "1" ]]; then
     [[ "$SCAN_LOCK_TIMEOUT" =~ ^[0-9]+$ ]] || {
@@ -82,6 +86,28 @@ if [[ -f "$CONFIG" ]]; then
 fi
 
 HOST_IP="${CITADEL_SUBNET_IP:-}"
+CONTAINER_MODE="${CITADEL_CONTAINER:-0}"
+CONTAINER_MAP="${CITADEL_CONTAINER_MAP:-0}"
+DEDUPE_PORT="${CITADEL_DEDUPE_PORT:-}"
+HOST_PROC_ROOT="${CITADEL_HOST_PROC_ROOT:-/host/proc}"
+case "${CONTAINER_MODE,,}" in
+    1|true|yes|on) CONTAINER_MODE=true ;;
+    *) CONTAINER_MODE=false ;;
+esac
+case "${CONTAINER_MAP,,}" in
+    1|true|yes|on) CONTAINER_MAP=true ;;
+    *) CONTAINER_MAP=false ;;
+esac
+if ! "$CONTAINER_MODE"; then
+    CONTAINER_MAP=false
+fi
+case "${DEDUPE_PORT,,}" in
+    ""|blank|null) DEDUPE_PORT="" ;;
+esac
+if "$CONTAINER_MAP" && [[ -n "$DEDUPE_PORT" ]] && { [[ ! "$DEDUPE_PORT" =~ ^[0-9]+$ ]] || (( DEDUPE_PORT < 1 || DEDUPE_PORT > 65535 )); }; then
+    echo "CITADEL_DEDUPE_PORT must be blank or a port between 1 and 65535" >&2
+    exit 2
+fi
 
 LOCAL_SSL="-k"
 [[ -n "$CA_CERT" && -f "$CA_CERT" ]] && NET_SSL="--cacert $CA_CERT" || NET_SSL="-k"
@@ -95,7 +121,9 @@ import socket
 import sys
 
 old_procs = {}
-ss_file = sys.argv[1]
+ss_file, providers_dir = sys.argv[1:3]
+sys.path.insert(0, providers_dir)
+from atomic_io import atomic_write_json
 if os.path.exists(ss_file):
     try:
         old = json.load(open(ss_file))
@@ -151,10 +179,24 @@ for line in sys.stdin:
     if not entry.get('process') and process:
         entry['process'] = process
 
-print(json.dumps([ports[port] for port in sorted(ports)], indent=2))
-" "$SS_FILE" > "${SS_FILE}.tmp" && mv -f "${SS_FILE}.tmp" "$SS_FILE"
+atomic_write_json(ss_file, [ports[port] for port in sorted(ports)])
+" "$SS_FILE" "$PROVIDERS_DIR"
 echo "Ports written to ss.json"
 echo
+
+if "$CONTAINER_MODE"; then
+    echo "=== Reading host listeners from $HOST_PROC_ROOT ==="
+    PYTHONPATH="$FUNCTIONS_DIR:$PROVIDERS_DIR" python3 -c '
+import sys
+from pathlib import Path
+from atomic_io import atomic_write_json
+from container_discovery import discover_host_listeners
+
+atomic_write_json(sys.argv[2], discover_host_listeners(Path(sys.argv[1])))
+' "$HOST_PROC_ROOT" "$HOST_SS_FILE"
+    echo "Host listeners written to host_ss.json"
+    echo
+fi
 
 echo "=== Applying Port Filter Policy ==="
 python3 -c "
@@ -162,7 +204,9 @@ import json
 import os
 import sys
 
-ss_file, filter_file = sys.argv[1:3]
+ss_file, filter_file, providers_dir = sys.argv[1:4]
+sys.path.insert(0, providers_dir)
+from atomic_io import atomic_write_json
 
 try:
     ports = json.load(open(ss_file))
@@ -174,8 +218,7 @@ if not isinstance(ports, list):
 created_default = False
 if not os.path.exists(filter_file):
     created_default = True
-    with open(filter_file, 'w', encoding='utf-8') as fh:
-        json.dump({'whitelist': [], 'blacklist': [], 'cloudflare': {}}, fh, indent=2)
+    atomic_write_json(filter_file, {'whitelist': [], 'blacklist': [], 'cloudflare': {}})
 
 try:
     policy = json.load(open(filter_file))
@@ -238,8 +281,7 @@ for row in ports:
     else:
         dropped.append(port)
 
-with open(ss_file, 'w', encoding='utf-8') as fh:
-    json.dump(sorted(filtered, key=lambda x: x.get('port', 0)), fh, indent=2)
+atomic_write_json(ss_file, sorted(filtered, key=lambda x: x.get('port', 0)))
 
 if created_default:
     print(f'created default policy: {filter_file}')
@@ -248,7 +290,7 @@ print(f'ports kept: {len(filtered)}/{len(ports)}')
 if dropped:
     uniq = sorted(set(dropped))
     print('dropped ports: ' + ', '.join(str(x) for x in uniq))
-" "$SS_FILE" "$PORT_FILTER_FILE"
+" "$SS_FILE" "$PORT_FILTER_FILE" "$PROVIDERS_DIR"
 echo
 
 body_is_html() {
@@ -312,18 +354,21 @@ probe_http() {
 
 try_fetch_icon() {
     local url="$1" port="$2" ssl="$3"
-    local tmp
+    local tmp result status content_type ext size
     tmp="$(mktemp "$ICONS_DIR/${port}.XXXXXX")"
-    local status
-    status="$(curl -s $ssl --max-time 5 -o "$tmp" -w "%{http_code}" "$url" 2>/dev/null || echo "000")"
-    if [[ "$status" == "200" ]] && [[ -s "$tmp" ]]; then
-        local ext=".ico"
-        case "$url" in
-            *.png) ext=".png" ;;
-            *.svg) ext=".svg" ;;
-            *.webp) ext=".webp" ;;
-            *.gif) ext=".gif" ;;
-        esac
+    if ! result="$(curl -sS $ssl --max-time 5 --max-filesize "$MAX_FETCH_BYTES" \
+        -o "$tmp" -w $'%{http_code}\t%{content_type}' "$url" 2>/dev/null)"; then
+        rm -f "$tmp"
+        echo ""
+        return
+    fi
+    status="${result%%$'\t'*}"
+    content_type="${result#*$'\t'}"
+    size="$(stat -c %s "$tmp" 2>/dev/null || echo 0)"
+    ext="$(PYTHONPATH="$FUNCTIONS_DIR" python3 -c \
+        'from favicon_policy import icon_extension; import sys; print(icon_extension(sys.argv[1]))' \
+        "$content_type")"
+    if [[ "$status" == "200" && -n "$ext" && -s "$tmp" && "$size" -le "$MAX_FETCH_BYTES" ]]; then
         local dest="$ICONS_DIR/${port}${ext}"
         mv "$tmp" "$dest"
         chmod 644 "$dest"
@@ -351,16 +396,17 @@ for p in json.load(open(sys.argv[1])):
             python3 -c "
 import json
 import sys
-f = sys.argv[1]
+f, providers_dir = sys.argv[1:3]
+sys.path.insert(0, providers_dir)
+from atomic_io import atomic_write_json
 try:
     d = json.load(open(f))
 except Exception:
     d = {}
 d['scheme'] = None
 d['network_ip'] = None
-with open(f, 'w') as fh:
-    json.dump(d, fh)
-" "$CACHE_FILE"
+atomic_write_json(f, d)
+" "$CACHE_FILE" "$PROVIDERS_DIR"
         fi
         echo "→ no HTTP service (other)"
         continue
@@ -381,34 +427,34 @@ with open(f, 'w') as fh:
 
     if [[ "$PROBE_KIND" == "openai-v1" ]]; then
         python3 -c "
-import json
 import sys
-with open(sys.argv[4], 'w') as f:
-    json.dump({
+sys.path.insert(0, sys.argv[5])
+from atomic_io import atomic_write_json
+atomic_write_json(sys.argv[4], {
         'title': 'OpenAI v1 API',
         'icon': None,
         'scheme': sys.argv[1],
         'network_ip': sys.argv[2] or None,
         'kind': sys.argv[3],
-    }, f)
-" "$SCHEME" "$NETWORK_IP" "$PROBE_KIND" "$CACHE_FILE"
+    })
+" "$SCHEME" "$NETWORK_IP" "$PROBE_KIND" "$CACHE_FILE" "$PROVIDERS_DIR"
         printf "%s     OpenAI v1 API%s\n" "$SCHEME" "$NET_LABEL"
         continue
     fi
 
     if [[ "$PROBE_KIND" == "http-service" ]]; then
         python3 -c "
-import json
 import sys
-with open(sys.argv[5], 'w') as f:
-    json.dump({
+sys.path.insert(0, sys.argv[6])
+from atomic_io import atomic_write_json
+atomic_write_json(sys.argv[5], {
         'title': sys.argv[1],
         'icon': None,
         'scheme': sys.argv[2],
         'network_ip': sys.argv[3] or None,
         'kind': sys.argv[4],
-    }, f)
-" "HTTP Service" "$SCHEME" "$NETWORK_IP" "$PROBE_KIND" "$CACHE_FILE"
+    })
+" "HTTP Service" "$SCHEME" "$NETWORK_IP" "$PROBE_KIND" "$CACHE_FILE" "$PROVIDERS_DIR"
         printf "%s     HTTP service%s\n" "$SCHEME" "$NET_LABEL"
         continue
     fi
@@ -431,7 +477,9 @@ except Exception:
             python3 -c "
 import json
 import sys
-f = sys.argv[1]
+f, providers_dir = sys.argv[1], sys.argv[4]
+sys.path.insert(0, providers_dir)
+from atomic_io import atomic_write_json
 try:
     d = json.load(open(f))
 except Exception:
@@ -439,9 +487,8 @@ except Exception:
 d['scheme'] = sys.argv[2]
 d['network_ip'] = sys.argv[3] or None
 d['kind'] = 'html'
-with open(f, 'w') as fh:
-    json.dump(d, fh)
-" "$CACHE_FILE" "$SCHEME" "$NETWORK_IP"
+atomic_write_json(f, d)
+" "$CACHE_FILE" "$SCHEME" "$NETWORK_IP" "$PROVIDERS_DIR"
             printf "%-8s cached: \"%s\"%s\n" "$SCHEME" "$EXISTING_TITLE" "$NET_LABEL"
             continue
         fi
@@ -450,11 +497,13 @@ with open(f, 'w') as fh:
     printf "%-8s fetching title+icons..." "$SCHEME"
 
     TMP_HTML="$(mktemp)"
-    EFFECTIVE_URL="$(curl -s $LOCAL_SSL --max-time 5 --location "$LOCAL_URL/" -o "$TMP_HTML" -w "%{url_effective}" 2>/dev/null || echo "$LOCAL_URL/")"
+    if ! EFFECTIVE_URL="$(curl -sS $LOCAL_SSL --max-time 5 --max-filesize "$MAX_FETCH_BYTES" \
+        --location "$LOCAL_URL/" -o "$TMP_HTML" -w "%{url_effective}" 2>/dev/null)"; then
+        EFFECTIVE_URL="$LOCAL_URL/"
+        : > "$TMP_HTML"
+    fi
     HTML="$(cat "$TMP_HTML")"
     rm -f "$TMP_HTML"
-    EFFECTIVE_BASE="${EFFECTIVE_URL%/*}/"
-
     TITLE="$(echo "$HTML" | python3 -c "
 import re
 import sys
@@ -483,17 +532,16 @@ for _, href in candidates:
 
     rm -f "$ICONS_DIR/${PORT}".*
 
-    ICON_URLS=()
-    while IFS= read -r href; do
-        [[ -z "$href" ]] && continue
-        if [[ "$href" == http* ]]; then
-            ICON_URLS+=("$href")
-        elif [[ "$href" == /* ]]; then
-            ICON_URLS+=("${LOCAL_URL}${href}")
-        else
-            ICON_URLS+=("${EFFECTIVE_BASE}${href}")
-        fi
-    done <<< "$FAVICON_CANDIDATES"
+    mapfile -t ICON_URLS < <(
+        printf '%s\n' "$FAVICON_CANDIDATES" |
+            PYTHONPATH="$FUNCTIONS_DIR" python3 -c '
+import sys
+from favicon_policy import safe_icon_urls
+
+for url in safe_icon_urls(sys.argv[1], sys.argv[2], list(sys.stdin)):
+    print(url)
+' "$LOCAL_URL" "$EFFECTIVE_URL"
+    )
 
     ICON_URLS+=("${LOCAL_URL}/favicon.png")
     ICON_URLS+=("${LOCAL_URL}/favicon.ico")
@@ -506,21 +554,75 @@ for _, href in candidates:
     done
 
     python3 -c "
-import json
 import sys
-with open(sys.argv[5], 'w') as f:
-    json.dump({
+sys.path.insert(0, sys.argv[6])
+from atomic_io import atomic_write_json
+atomic_write_json(sys.argv[5], {
         'title': sys.argv[1],
         'icon': sys.argv[2] or None,
         'scheme': sys.argv[3],
         'network_ip': sys.argv[4] or None,
         'kind': 'html',
-    }, f)
-" "$TITLE" "$ICON_NAME" "$SCHEME" "$NETWORK_IP" "$CACHE_FILE"
+    })
+" "$TITLE" "$ICON_NAME" "$SCHEME" "$NETWORK_IP" "$CACHE_FILE" "$PROVIDERS_DIR"
 
     printf " %-20s" "${ICON_NAME:-(no icon)}"
     [[ -n "$TITLE" ]] && echo "\"$TITLE\"${NET_LABEL}" || echo "(no title)${NET_LABEL}"
 done
+
+HOST_RESULTS_FILE=""
+if "$CONTAINER_MODE"; then
+    HOST_RESULTS_FILE="$(mktemp)"
+    echo "=== Probing host.containers.internal listeners ==="
+    python3 -c '
+import json
+import sys
+for row in json.load(open(sys.argv[1], encoding="utf-8")):
+    print(row["port"])
+' "$HOST_SS_FILE" | while read -r PORT; do
+        printf "Host port %-6s " "$PORT"
+        HOST_PROBE="$(probe_http "host.containers.internal" "$PORT")"
+        TITLE=""
+        if [[ -n "$HOST_PROBE" ]]; then
+            HOST_URL="${HOST_PROBE%%|*}"
+            HOST_KIND="${HOST_PROBE##*|}"
+            HOST_SCHEME="${HOST_URL%%://*}"
+            if [[ "$HOST_KIND" == "openai-v1" ]]; then
+                TITLE="OpenAI v1 API"
+            elif [[ "$HOST_KIND" == "http-service" ]]; then
+                TITLE="HTTP Service"
+            else
+                HOST_HTML="$(curl -sS $NET_SSL --max-time 5 --max-filesize "$MAX_FETCH_BYTES" \
+                    --location "$HOST_URL/" 2>/dev/null || true)"
+                TITLE="$(printf '%s' "$HOST_HTML" | python3 -c '
+import re
+import sys
+html = sys.stdin.read()
+match = re.search(r"<title[^>]*>([^<]+)</title>", html, re.IGNORECASE)
+print(match.group(1).strip() if match else "")
+')"
+            fi
+            python3 -c '
+import json
+import sys
+print(json.dumps({
+    "port": int(sys.argv[1]),
+    "scheme": sys.argv[2],
+    "kind": sys.argv[3],
+    "title": sys.argv[4] or None,
+}))
+' "$PORT" "$HOST_SCHEME" "$HOST_KIND" "$TITLE" >> "$HOST_RESULTS_FILE"
+            printf "%-8s %s\n" "$HOST_SCHEME" "${TITLE:-(no title)}"
+        else
+            python3 -c '
+import json
+import sys
+print(json.dumps({"port": int(sys.argv[1]), "scheme": None, "kind": None, "title": None}))
+' "$PORT" >> "$HOST_RESULTS_FILE"
+            echo "→ no HTTP service (other)"
+        fi
+    done
+fi
 
 echo "=== Building services.json ==="
 python3 -c "
@@ -529,7 +631,24 @@ import json
 import os
 import sys
 
-ss_file, cache_dir, icons_dir, out_file = sys.argv[1:5]
+(
+    ss_file,
+    cache_dir,
+    icons_dir,
+    out_file,
+    providers_dir,
+    container_mode_raw,
+    host_ss_file,
+    host_results_file,
+    container_map_raw,
+    dedupe_raw,
+    container_routes_file,
+    host_services_file,
+) = sys.argv[1:13]
+sys.path.insert(0, providers_dir)
+from atomic_io import atomic_write_json
+sys.path.insert(0, os.path.dirname(providers_dir))
+from container_discovery import assign_host_route_ports
 
 def int_or_none(value):
     try:
@@ -623,10 +742,100 @@ payload = {
     'generated_at': datetime.datetime.now().isoformat(timespec='seconds'),
     'http_services': http_services,
     'other_ports': other_ports,
+    'host_http_services': [],
+    'host_other_ports': [],
+    'deduplicated_ports': [],
 }
-with open(out_file, 'w') as fh:
-    json.dump(payload, fh)
-" "$SS_FILE" "$CACHE_DIR" "$ICONS_DIR" "$SERVICES_FILE"
+host_payload = {
+    'generated_at': payload['generated_at'],
+    'host_http_services': [],
+    'host_other_ports': [],
+    'deduplicated_ports': [],
+    'errors': [],
+}
+
+if container_mode_raw == 'true':
+    try:
+        host_rows = json.load(open(host_ss_file, encoding='utf-8'))
+    except Exception:
+        host_rows = []
+    results = {}
+    if host_results_file and os.path.exists(host_results_file):
+        with open(host_results_file, encoding='utf-8') as handle:
+            for line in handle:
+                try:
+                    result = json.loads(line)
+                    results[int(result['port'])] = result
+                except Exception:
+                    continue
+
+    host_http_services = []
+    host_other_ports = []
+    for row in host_rows:
+        port = int(row.get('port') or 0)
+        result = results.get(port, {})
+        scheme = result.get('scheme')
+        if scheme in ('http', 'https'):
+            title = result.get('title') or f'Host Port {port}'
+            host_http_services.append({
+                **row,
+                'port': port,
+                'origin': 'host',
+                'origin_host': 'host.containers.internal',
+                'origin_port': port,
+                'route_port': None,
+                'title': title,
+                'name': title,
+                'icon': None,
+                'scheme': scheme,
+                'kind': result.get('kind'),
+                'urls': {},
+            })
+        else:
+            host_other_ports.append({**row, 'origin': 'host'})
+
+    try:
+        previous_routes = json.load(open(container_routes_file, encoding='utf-8'))
+    except Exception:
+        previous_routes = {}
+    previous_assignments = previous_routes.get('assignments', {}) if isinstance(previous_routes, dict) else {}
+    dedupe_start = int(dedupe_raw) if container_map_raw == 'true' and dedupe_raw else None
+    host_http_services, assignments, assignment_errors = assign_host_route_ports(
+        http_services,
+        host_http_services,
+        dedupe_start,
+        previous_assignments,
+    )
+    payload['host_http_services'] = host_http_services
+    payload['host_other_ports'] = host_other_ports
+    payload['container_errors'] = assignment_errors
+    payload['deduplicated_ports'] = [
+        {
+            'origin': key,
+            'origin_port': int(key.rsplit(':', 1)[1]),
+            'route_port': route_port,
+        }
+        for key, route_port in sorted(assignments.items(), key=lambda item: item[1])
+    ]
+    if container_map_raw == 'true' and dedupe_start is not None:
+        atomic_write_json(container_routes_file, {
+            'dedupe_start': dedupe_start,
+            'assignments': assignments,
+        })
+    host_payload = {
+        'generated_at': payload['generated_at'],
+        'host_http_services': host_http_services,
+        'host_other_ports': host_other_ports,
+        'deduplicated_ports': payload['deduplicated_ports'],
+        'errors': assignment_errors,
+    }
+
+atomic_write_json(host_services_file, host_payload)
+atomic_write_json(out_file, payload, indent=None)
+" "$SS_FILE" "$CACHE_DIR" "$ICONS_DIR" "$SERVICES_FILE" "$PROVIDERS_DIR" \
+    "$CONTAINER_MODE" "$HOST_SS_FILE" "$HOST_RESULTS_FILE" "$CONTAINER_MAP" "$DEDUPE_PORT" "$CONTAINER_ROUTES_FILE" \
+    "$HOST_SERVICES_FILE"
+[[ -z "$HOST_RESULTS_FILE" ]] || rm -f "$HOST_RESULTS_FILE"
 echo "services.json written"
 echo
 

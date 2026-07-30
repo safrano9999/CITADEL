@@ -9,9 +9,10 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any, Callable
+
+from providers.atomic_io import atomic_write_json
 
 
 PORT_MAP_KEYS = (
@@ -164,33 +165,10 @@ def clear_cached_metadata(project_dir: Path, port: int) -> None:
 
 
 def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    stat = path.stat()
-    temp_name: str | None = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as handle:
-            temp_name = handle.name
-            json.dump(payload, handle, indent=2)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(temp_name, stat.st_mode & 0o777)
-        os.chown(temp_name, stat.st_uid, stat.st_gid)
-        os.replace(temp_name, path)
+        atomic_write_json(path, payload)
     except OSError as exc:
         raise UnrouteError(f"cannot update {path}: {exc}") from exc
-    finally:
-        if temp_name is not None:
-            try:
-                os.unlink(temp_name)
-            except FileNotFoundError:
-                pass
 
 
 def clear_persisted_port(project_dir: Path, port: int) -> None:

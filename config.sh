@@ -1560,35 +1560,68 @@ configure_from_example() {
             field_choice_numbers=""
             field_choice_freeform=false
             field_choice_selected_freeform=false
-            if [ "$required" = "true" ] && openssl_generator_default "$default"; then
+            if openssl_generator_default "$default"; then
                 generator_label="$(openssl_generator_label "$default")"
                 if [ -t 0 ]; then
                     echo "    $key:"
-                    echo "      (1) enter value"
-                    echo "      (2) generate $generator_label"
-                    read -r -p "    Choose [1/2] (default: 2): " choice || read_status=$?
-                    choice="${choice:-2}"
-                    case "$choice" in
-                        1)
-                            if [ "$secret" = "true" ]; then
-                                read -r -s -p "    $key: " val || read_status=$?
-                                echo "" >&2
-                            else
-                                read -r -p "    $key: " val || read_status=$?
-                            fi
-                            ;;
-                        2)
-                            val="$(run_openssl_generator "$default")" || {
-                                echo "    $key generator failed" >&2
-                                exit 1
-                            }
-                            echo "    $key= generated"
-                            ;;
-                        *)
-                            echo "    choose 1 or 2"
-                            val=""
-                            ;;
-                    esac
+                    if [ "$required" = "true" ]; then
+                        echo "      (1) enter value"
+                        echo "      (2) generate $generator_label"
+                        read -r -p "    Choose [1/2] (default: 2): " choice || read_status=$?
+                        choice="${choice:-2}"
+                        case "$choice" in
+                            1)
+                                if [ "$secret" = "true" ]; then
+                                    read -r -s -p "    $key: " val || read_status=$?
+                                    echo "" >&2
+                                else
+                                    read -r -p "    $key: " val || read_status=$?
+                                fi
+                                ;;
+                            2)
+                                val="$(run_openssl_generator "$default")" || {
+                                    echo "    $key generator failed" >&2
+                                    exit 1
+                                }
+                                echo "    $key= generated"
+                                ;;
+                            *)
+                                echo "    choose 1 or 2"
+                                val=""
+                                ;;
+                        esac
+                    else
+                        echo "      (1) no token"
+                        echo "      (2) enter token"
+                        echo "      (3) generate $generator_label"
+                        read -r -p "    Choose [1/2/3] (default: 3): " choice || read_status=$?
+                        choice="${choice:-3}"
+                        case "$choice" in
+                            1)
+                                val="blank"
+                                echo "    $key= blank"
+                                ;;
+                            2)
+                                if [ "$secret" = "true" ]; then
+                                    read -r -s -p "    $key: " val || read_status=$?
+                                    echo "" >&2
+                                else
+                                    read -r -p "    $key: " val || read_status=$?
+                                fi
+                                ;;
+                            3)
+                                val="$(run_openssl_generator "$default")" || {
+                                    echo "    $key generator failed" >&2
+                                    exit 1
+                                }
+                                echo "    $key= generated"
+                                ;;
+                            *)
+                                echo "    choose 1, 2 or 3"
+                                val=""
+                                ;;
+                        esac
+                    fi
                 else
                     val="$(run_openssl_generator "$default")" || {
                         echo "    $key generator failed" >&2
@@ -1991,6 +2024,9 @@ generate_container_files() {
     add_repo_sot_file_mounts
     add_sqlite_volume_mounts
     add_optional_persistence_mounts
+    if [ "$(normalize_rule_value "$(config_value CITADEL_CONTAINER || true)")" = "true" ]; then
+        add_unique "/proc:/host/proc:ro" volumes
+    fi
 
     if [ "$tunnel_only" != "true" ] && [ "${#ports[@]}" -eq 0 ] && [ -n "$first_port" ]; then
         add_unique "${host}:${first_port}:${first_port}" ports

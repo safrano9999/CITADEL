@@ -162,6 +162,7 @@ class DashboardCoreTests(unittest.TestCase):
 
             original = {
                 "SERVICES_FILE": core.SERVICES_FILE,
+                "HOST_SERVICES_FILE": core.HOST_SERVICES_FILE,
                 "LAST_SCAN_FILE": core.LAST_SCAN_FILE,
                 "ENABLED_EXT_DIR": core.ENABLED_EXT_DIR,
                 "PROVIDERS_STATE_FILE": core.PROVIDERS_STATE_FILE,
@@ -171,6 +172,7 @@ class DashboardCoreTests(unittest.TestCase):
             old_port = os.environ.get("CITADEL_WEBUI_PORT")
             try:
                 core.SERVICES_FILE = base / "services.json"
+                core.HOST_SERVICES_FILE = base / "host_services.json"
                 core.LAST_SCAN_FILE = base / "last_scan.txt"
                 core.ENABLED_EXT_DIR = enabled
                 core.PROVIDERS_STATE_FILE = base / "extensions" / "providers_state.json"
@@ -189,6 +191,46 @@ class DashboardCoreTests(unittest.TestCase):
             self.assertEqual([item["port"] for item in dashboard["http_tiles"]], [10999, 11000])
             self.assertTrue(dashboard["http_tiles"][0]["featured"])
             self.assertEqual(dashboard["http_tiles"][0]["display_name"], "⭐ CITADEL ⭐")
+
+    def test_separate_host_file_lists_unmapped_services_without_tiles(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            (base / "services.json").write_text(
+                json.dumps({"http_services": [{"port": 11000}], "other_ports": []}),
+                encoding="utf-8",
+            )
+            (base / "host_services.json").write_text(
+                json.dumps({
+                    "host_http_services": [{
+                        "port": 8080,
+                        "origin": "host",
+                        "origin_port": 8080,
+                        "route_port": None,
+                        "scheme": "http",
+                    }],
+                    "host_other_ports": [{"port": 5432, "service": "postgres"}],
+                    "deduplicated_ports": [],
+                }),
+                encoding="utf-8",
+            )
+            original_services = core.SERVICES_FILE
+            original_host_services = core.HOST_SERVICES_FILE
+            original_enabled = core.ENABLED_EXT_DIR
+            try:
+                core.SERVICES_FILE = base / "services.json"
+                core.HOST_SERVICES_FILE = base / "host_services.json"
+                core.ENABLED_EXT_DIR = base / "extensions" / "enabled"
+                dashboard = core.build_dashboard()
+            finally:
+                core.SERVICES_FILE = original_services
+                core.HOST_SERVICES_FILE = original_host_services
+                core.ENABLED_EXT_DIR = original_enabled
+
+            self.assertEqual([item["port"] for item in dashboard["http_tiles"]], [11000])
+            self.assertEqual(
+                [item["port"] for item in dashboard["host_listeners"]],
+                [5432, 8080],
+            )
 
 
 class CloudflareDefaultsTests(unittest.TestCase):
@@ -481,8 +523,10 @@ class CloudflareCoreTests(unittest.TestCase):
                 encoding="utf-8",
             )
             old_services = core.SERVICES_FILE
+            old_host_services = core.HOST_SERVICES_FILE
             old_policy = core.PORT_FILTER_FILE
             core.SERVICES_FILE = services
+            core.HOST_SERVICES_FILE = base / "host_services.json"
             core.PORT_FILTER_FILE = policy
             try:
                 saved = core.save_all_cloudflare_rules(
@@ -520,6 +564,7 @@ class CloudflareCoreTests(unittest.TestCase):
                 self.assertEqual(cloudflare_rules(policy), saved)
             finally:
                 core.SERVICES_FILE = old_services
+                core.HOST_SERVICES_FILE = old_host_services
                 core.PORT_FILTER_FILE = old_policy
 
 

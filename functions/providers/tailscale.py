@@ -40,7 +40,9 @@ def clear_stale_tailscale(cache_dir: str, services_payload: dict) -> None:
             payload.pop("tailscale_path", None)
             write_json(path, payload)
 
-    for svc in services_payload.get("http_services", []):
+    all_services = list(services_payload.get("http_services", []))
+    all_services.extend(services_payload.get("host_http_services", []))
+    for svc in all_services:
         urls = svc.get("urls")
         if not isinstance(urls, dict):
             urls = {}
@@ -52,9 +54,14 @@ def build_tailscale_url(domain: str, port: int, scheme: str) -> str:
     return f"{scheme}://{domain}:{port}"
 
 
-def serve_target(port: int, scheme: str) -> str:
+def serve_target(
+    port: int,
+    scheme: str,
+    origin_host: str = "127.0.0.1",
+    origin_port: int | None = None,
+) -> str:
     protocol = "https+insecure" if scheme == "https" else "http"
-    return f"{protocol}://127.0.0.1:{port}"
+    return f"{protocol}://{origin_host}:{origin_port or port}"
 
 
 def remove_serve_route(port: str | int, public_scheme: str = "https") -> str | None:
@@ -276,11 +283,18 @@ def service_signature(
 ) -> dict[str, Any]:
     if configured_mode not in {"auto", "direct", "proxy"}:
         raise ValueError(f"unsupported route_mode '{configured_mode}'")
-    return {
+    signature = {
         "origin_scheme": service_scheme(service),
-        "direct_capable": resolve_route_mode("auto", service, tailscale_ips) == "direct",
+        "direct_capable": (
+            service.get("origin") != "host"
+            and resolve_route_mode("auto", service, tailscale_ips) == "direct"
+        ),
         "route_mode": configured_mode,
     }
+    if service.get("origin") == "host":
+        signature["origin_host"] = str(service.get("origin_host") or "host.containers.internal")
+        signature["origin_port"] = int(service.get("origin_port") or service.get("port") or 0)
+    return signature
 
 
 def previous_managed_routes(previous_payload: dict[str, Any]) -> dict[str, str]:
@@ -361,7 +375,12 @@ def reusable_route(
             return None
         if managed_routes.get(port_key) != public_scheme:
             return None
-        if str(route.get("target") or "") != serve_target(port, origin_scheme):
+        if str(route.get("target") or "") != serve_target(
+            port,
+            origin_scheme,
+            str(signature.get("origin_host") or "127.0.0.1"),
+            int(signature.get("origin_port") or port),
+        ):
             return None
     elif mode != "direct" or not direct_capable or public_scheme != origin_scheme:
         return None
@@ -672,8 +691,11 @@ def main() -> int:
                 errors.append(f"unsupported route_mode '{route_mode}'")
             if running and domain and valid_route_mode:
                 reconciliation_completed = True
-                for svc in services_payload.get("http_services", []):
-                    port = int(svc.get("port", 0))
+                all_services = list(services_payload.get("http_services", []))
+                all_services.extend(services_payload.get("host_http_services", []))
+                for svc in all_services:
+                    is_host_service = svc.get("origin") == "host"
+                    port = int(svc.get("route_port") or (0 if is_host_service else svc.get("port", 0)))
                     if port <= 0:
                         continue
                     port_key = str(port)
@@ -684,6 +706,8 @@ def main() -> int:
                         errors.append(str(exc))
                         continue
                     origin_scheme = str(signature["origin_scheme"])
+                    origin_host = str(signature.get("origin_host") or "127.0.0.1")
+                    origin_port = int(signature.get("origin_port") or svc.get("port") or port)
                     direct_capable = bool(signature["direct_capable"])
 
                     previous_route = normalize_previous_route(
@@ -745,6 +769,11 @@ def main() -> int:
                         continue
 
                     live_route = current_live_routes.get(port_key)
+                    if is_host_service and live_route is not None and previous_public_scheme is None:
+                        for hard_scheme in ("https", "http"):
+                            remove_serve_route(port, hard_scheme)
+                        current_live_routes.pop(port_key, None)
+                        live_route = None
                     if previous_public_scheme is not None:
                         previous_target = recorded_target(port_key)
                         previous_authority = recorded_authority(port_key)
@@ -794,7 +823,7 @@ def main() -> int:
                             managed_routes.pop(port_key, None)
                             current_live_routes.pop(port_key, None)
                     elif live_route is not None:
-                        target = serve_target(port, origin_scheme)
+                        target = serve_target(port, origin_scheme, origin_host, origin_port)
                         adopted_scheme = next(
                             (
                                 public_scheme
@@ -885,7 +914,7 @@ def main() -> int:
                         )
                         continue
 
-                    target = serve_target(port, origin_scheme)
+                    target = serve_target(port, origin_scheme, origin_host, origin_port)
                     https_result = apply_serve_route(port, target, "https")
                     if https_result.returncode == 0:
                         store_route(

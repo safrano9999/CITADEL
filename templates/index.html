@@ -38,6 +38,10 @@
         </label>
 
         <button id="page-refresh-btn" class="btn-default" type="button">Refresh</button>
+        <label id="cloudflare-token-control" class="control cloudflare-token-control" hidden>
+            <span>Token:</span>
+            <input id="cloudflare-token" type="password" autocomplete="current-password">
+        </label>
         <button id="cloudflare-edit-btn" class="btn-default" type="button" hidden>EDIT</button>
         <button id="cloudflare-save-btn" class="btn-default" type="button" hidden disabled>SAVE</button>
     </div>
@@ -57,9 +61,11 @@
     <section class="grid" id="services-grid">
         {% for svc in data.http_tiles %}
         {% set port = svc.port|string %}
+        {% set route_port = svc.route_port|default(svc.port)|string %}
         {% set scheme = svc.scheme|default('http') %}
         <article class="tile" tabindex="0"
-            data-port="{{ port|e }}"
+            data-port="{{ route_port|e }}"
+            data-origin="{{ svc.origin|default('localhost')|e }}"
             data-cloudflare-subdomains="{{ svc.cloudflare_rule.subdomains|join(',')|e }}"
             data-cloudflare-whitelist="{{ '1' if svc.cloudflare_rule.whitelist else '0' }}"
             data-cloudflare-emails="{{ svc.cloudflare_rule.emails|tojson|e }}"
@@ -74,7 +80,12 @@
             {% endif %}
 
             <span class="tile-name">{{ svc.display_name|default(svc.name|default('Port ' ~ port))|e }}</span>
-            <span class="tile-port">{{ '&#128274; ' if scheme == 'https' else '' }}:{{ port }}</span>
+            <span class="tile-port">
+                {{ '&#128274; ' if scheme == 'https' else '' }}:{{ svc.origin_port|default(svc.port)|int }}
+                {% if svc.origin|default('localhost') == 'host' and svc.route_port|default(0)|int != svc.origin_port|default(svc.port)|int %}
+                → :{{ svc.route_port|int }}
+                {% endif %}
+            </span>
             <span class="tile-url">-</span>
             <div class="cloudflare-editor" hidden>
                 <label>
@@ -93,8 +104,47 @@
     </section>
     {% endif %}
 
+    {% if data.deduplicated_ports %}
+    <div class="section-title">Redefined duplicated ports</div>
+    <section class="other-wrap">
+        <table class="other-table">
+            <thead><tr><th>Origin</th><th>Original port</th><th>Tailscale / Cloudflare port</th></tr></thead>
+            <tbody>
+                {% for item in data.deduplicated_ports %}
+                <tr>
+                    <td>{{ item.origin|e }}</td>
+                    <td>:{{ item.origin_port|int }}</td>
+                    <td>:{{ item.route_port|int }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+    {% endif %}
+
+    {% if data.host_listeners %}
+    <div class="section-title">Other Listening Ports — Host (host.containers.internal)</div>
+    <section class="other-wrap">
+        <table class="other-table">
+            <thead>
+                <tr><th>Port</th><th>Service</th><th>Address</th><th>Process</th></tr>
+            </thead>
+            <tbody>
+                {% for p in data.host_listeners %}
+                <tr>
+                    <td>:{{ p.port|default(0)|int }}</td>
+                    <td>{{ p.service|default(p.title|default('—'), true)|e }}</td>
+                    <td>host.containers.internal</td>
+                    <td>{{ p.process|default('—', true)|e }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+    {% endif %}
+
     {% if data.other_ports %}
-    <div class="section-title">Other Listening Ports</div>
+    <div class="section-title">{{ 'Other Listening Ports — Localhost' if data.host_listeners else 'Other Listening Ports' }}</div>
     <section class="other-wrap">
         <table class="other-table">
             <thead>
@@ -125,12 +175,15 @@
 const modeSel = document.getElementById('route-mode-sel');
 const saveDefaultBtn = document.getElementById('save-default-btn');
 const pageRefreshBtn = document.getElementById('page-refresh-btn');
+const cloudflareTokenControl = document.getElementById('cloudflare-token-control');
+const cloudflareToken = document.getElementById('cloudflare-token');
 const cloudflareEditBtn = document.getElementById('cloudflare-edit-btn');
 const cloudflareSaveBtn = document.getElementById('cloudflare-save-btn');
 const modeDefaultHint = document.getElementById('mode-default-hint');
 const tiles = Array.from(document.querySelectorAll('.tile'));
 const defaultMode = document.body.dataset.defaultMode || 'localhost';
-const providerOrder = {{ provider_order_json|safe }};
+const providerOrder = {{ data.provider_order|tojson }};
+const editTokenRequired = {{ 'true' if data.edit_token_required else 'false' }};
 const routeDefaultKey = 'citadel-route-default';
 let cloudflareEditing = false;
 let cloudflareInitialState = '';
@@ -223,12 +276,17 @@ function applyMode(mode) {
   if (cloudflareEditBtn) {
     cloudflareEditBtn.hidden = !cloudflareMode;
   }
+  if (cloudflareTokenControl) {
+    cloudflareTokenControl.hidden = !(cloudflareMode && editTokenRequired && !cloudflareEditing);
+  }
   if (cloudflareSaveBtn) {
     cloudflareSaveBtn.hidden = !(cloudflareMode && cloudflareEditing);
   }
 
   tiles.forEach(tile => {
     const choice = chooseTileUrl(tile, mode);
+    const hostService = tile.dataset.origin === 'host';
+    tile.hidden = hostService && (mode === 'localhost' || mode === 'subnet' || !choice);
 
     tile.dataset.activeUrl = choice;
     tile.classList.toggle('no-link', !choice);
@@ -335,7 +393,10 @@ async function saveCloudflareRules() {
   }
   const response = await fetch('/api/cloudflare/ports', {
     method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Citadel-Token': cloudflareToken ? cloudflareToken.value : '',
+    },
     body: JSON.stringify(rules),
   });
   let payload = {};
@@ -363,8 +424,45 @@ if (pageRefreshBtn) {
   pageRefreshBtn.addEventListener('click', () => location.reload());
 }
 
+async function authorizeCloudflareEdit() {
+  if (!editTokenRequired) return true;
+  const token = cloudflareToken ? cloudflareToken.value : '';
+  if (!token) {
+    if (cloudflareToken) cloudflareToken.focus();
+    return false;
+  }
+  const response = await fetch('/api/cloudflare/edit-auth', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({token}),
+  });
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch {}
+  if (!response.ok) {
+    throw new Error(payload.detail || 'Token verification failed.');
+  }
+  return true;
+}
+
 if (cloudflareEditBtn) {
-  cloudflareEditBtn.addEventListener('click', () => {
+  cloudflareEditBtn.addEventListener('click', async () => {
+    if (!cloudflareEditing) {
+      cloudflareEditBtn.disabled = true;
+      try {
+        if (!await authorizeCloudflareEdit()) return;
+      } catch (error) {
+        window.alert(error.message);
+        if (cloudflareToken) {
+          cloudflareToken.focus();
+          cloudflareToken.select();
+        }
+        return;
+      } finally {
+        cloudflareEditBtn.disabled = false;
+      }
+    }
     cloudflareEditing = !cloudflareEditing;
     cloudflareEditBtn.textContent = cloudflareEditing ? 'CLOSE' : 'EDIT';
     if (modeSel) modeSel.disabled = cloudflareEditing;

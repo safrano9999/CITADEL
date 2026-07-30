@@ -8,6 +8,8 @@ import os
 import subprocess
 from typing import Any
 
+from atomic_io import atomic_write_json
+
 
 ROUTE_SCHEMA_VERSION = 1
 WILDCARD_ADDRESSES = {"*", "0.0.0.0", "::"}
@@ -28,11 +30,7 @@ def read_json(path: str, default: Any) -> Any:
 
 
 def write_json(path: str, payload: Any) -> None:
-    parent = os.path.dirname(path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2)
+    atomic_write_json(path, payload)
 
 
 def parse_bool(value: Any) -> bool:

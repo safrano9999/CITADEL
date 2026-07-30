@@ -151,6 +151,10 @@ renders provider buttons, and can run the configured scanner.
 |---|---:|---|
 | `FASTAPI_HOST` | `127.0.0.1` | Dashboard bind address |
 | `CITADEL_WEBUI_PORT` | `11000` | Dashboard port |
+| `CITADEL_TOKEN` | generated | Optional token protecting Cloudflare edits in the dashboard |
+| `CITADEL_CONTAINER` | `0` | Also discover listeners on the container host through `host.containers.internal` |
+| `CITADEL_CONTAINER_MAP` | `0` | Route discovered host HTTP services through Tailscale and Cloudflare |
+| `CITADEL_DEDUPE_PORT` | `65100` | First replacement port when a mapped host service duplicates a container port |
 | `CITADEL_SUBNET_IP` | empty | Address used for subnet routes and the Cloudflare origin |
 | `CITADEL_TAILSCALE` | `true` | Enable Tailscale route reconciliation |
 | `CITADEL_CLOUDFLARE` | `1` | Enable Cloudflare reconciliation when all required values exist |
@@ -164,6 +168,22 @@ renders provider buttons, and can run the configured scanner.
 
 Non-secret service settings belong in `config.conf`. Secrets belong in `.env`,
 which is ignored by Git.
+
+During interactive configuration, `CITADEL_TOKEN` offers three choices: no
+token, enter a token, or generate one with `openssl rand -hex 32` (the default).
+An empty or `blank` value disables the prompt in the dashboard. When configured,
+the token is required to enter Cloudflare edit mode and to save Cloudflare
+rules. Five invalid attempts within five minutes lock that client out for
+15 minutes.
+
+With `CITADEL_CONTAINER=0`, discovery and routing behave exactly like the
+bare-metal mode. With `CITADEL_CONTAINER=1`, host listeners are additionally
+written to `host_services.json` and shown in a separate dashboard list.
+`CITADEL_CONTAINER_MAP=0` keeps them list-only. When mapping is enabled, only
+HTTP/HTTPS host listeners are added to Tailscale and Cloudflare; subnet routes
+continue to use only the container-local services. A collision between a local
+and host origin port is assigned from `CITADEL_DEDUPE_PORT` upward and recorded
+in `host_services.json`.
 
 An optional `config.ini` selects a custom CA:
 
@@ -298,6 +318,11 @@ journalctl --user -u citadel.service
   described in `CITADEL_CLOUDFLARE.md`.
 - The scanner records listener metadata and service titles. Protect the
   repository directory if that inventory is sensitive.
+- Downloaded service icons are limited to 1 MiB, passive image formats, and
+  the same host and port as the discovered service.
+- Dashboard templates use automatic HTML escaping.
+- Runtime JSON is written through durable temporary files and atomically
+  replaced so readers never observe a partial update.
 - Runtime state, caches, generated routes, local configuration, and release
   archives are excluded by `.gitignore`.
 - Back up `ports.filter.json` and provider state when custom routes must survive

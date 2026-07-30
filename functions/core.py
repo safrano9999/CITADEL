@@ -18,6 +18,7 @@ from cloudflare_policy import (
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SERVICES_FILE = BASE_DIR / "services.json"
+HOST_SERVICES_FILE = BASE_DIR / "host_services.json"
 TAILSCALE_FILE = BASE_DIR / "tailscale.json"
 LAST_SCAN_FILE = BASE_DIR / "last_scan.txt"
 EXTENSIONS_DIR = BASE_DIR / "extensions"
@@ -72,6 +73,8 @@ def _service_port(tile: dict) -> int:
 
 
 def _is_citadel_service(tile: dict) -> bool:
+    if tile.get("origin") == "host":
+        return False
     configured = os.environ.get("CITADEL_WEBUI_PORT", "").strip()
     port = _service_port(tile)
     if configured.isdigit():
@@ -219,12 +222,33 @@ def build_dashboard() -> dict:
         "http_services": [],
         "other_ports": [],
     })
+    host_payload = _read_json(HOST_SERVICES_FILE, {})
     http_tiles = [
         dict(item)
         for item in services_payload.get("http_services") or []
         if isinstance(item, dict)
     ]
+    host_http_tiles = [
+        dict(item)
+        for item in (
+            host_payload.get("host_http_services")
+            or services_payload.get("host_http_services")
+            or []
+        )
+        if isinstance(item, dict)
+    ]
+    http_tiles.extend(
+        item for item in host_http_tiles if int(item.get("route_port") or 0) > 0
+    )
     other_ports = services_payload.get("other_ports") or []
+    host_other_ports = (
+        host_payload.get("host_other_ports")
+        or services_payload.get("host_other_ports")
+        or []
+    )
+    host_listeners = host_http_tiles + [
+        dict(item) for item in host_other_ports if isinstance(item, dict)
+    ]
     cloudflare = cloudflare_rules(PORT_FILTER_FILE)
 
     # UI config
@@ -253,19 +277,23 @@ def build_dashboard() -> dict:
     # Build tile URL maps for template
     for tile in http_tiles:
         port = str(int(tile.get("port", 0)))
+        route_port = str(int(tile.get("route_port") or port))
+        tile["route_port"] = int(route_port)
+        tile["origin_port"] = int(tile.get("origin_port") or port)
+        tile["origin"] = str(tile.get("origin") or "localhost")
         name = str(tile.get("name") or tile.get("title") or f"Port {port}")
         tile["featured"] = _is_citadel_service(tile)
         tile["display_name"] = f"⭐ {name} ⭐" if tile["featured"] else name
         tile["cloudflare_rule"] = cloudflare.get(
-            port,
-            {"subdomains": [port], "whitelist": False, "emails": []},
+            route_port,
+            {"subdomains": [route_port], "whitelist": False, "emails": []},
         )
         tile_urls: dict[str, str] = {}
         for pid in provider_order:
             url = (
                 providers["provider_urls_by_port"]
                 .get(pid, {})
-                .get(port, "")
+                .get(route_port, "")
             )
             if not url:
                 url = (tile.get("urls") or {}).get(pid, "")
@@ -277,6 +305,15 @@ def build_dashboard() -> dict:
     return {
         "http_tiles": http_tiles,
         "other_ports": other_ports,
+        "host_listeners": sorted(
+            host_listeners,
+            key=lambda item: int(item.get("port") or 0),
+        ),
+        "deduplicated_ports": (
+            host_payload.get("deduplicated_ports")
+            or services_payload.get("deduplicated_ports")
+            or []
+        ),
         "alerts": providers["alerts"],
         "provider_options": providers["provider_options"],
         "provider_header_meta": providers["provider_header_meta"],
@@ -293,10 +330,20 @@ def save_cloudflare_rule(port: int, payload: dict) -> dict:
         raise ValueError("Port must be between 1 and 65535.")
 
     services = _read_json(SERVICES_FILE, {"http_services": []})
+    host_services = _read_json(HOST_SERVICES_FILE, {})
+    known_services = list(services.get("http_services", []))
+    known_services.extend(
+        host_services.get("host_http_services")
+        or services.get("host_http_services", [])
+    )
     known_ports = {
-        int(item.get("port", 0))
-        for item in services.get("http_services", [])
-        if isinstance(item, dict) and str(item.get("port", "")).isdigit()
+        int(item.get("route_port") or item.get("port", 0))
+        for item in known_services
+        if (
+            isinstance(item, dict)
+            and str(item.get("port", "")).isdigit()
+            and (item.get("origin") != "host" or item.get("route_port") is not None)
+        )
     }
     if port not in known_ports:
         raise ValueError(f"Port {port} is not a discovered HTTP service.")
@@ -320,10 +367,20 @@ def save_all_cloudflare_rules(payload: dict) -> dict[str, dict]:
         raise ValueError("Rules must be a JSON object keyed by port.")
 
     services = _read_json(SERVICES_FILE, {"http_services": []})
+    host_services = _read_json(HOST_SERVICES_FILE, {})
+    known_services = list(services.get("http_services", []))
+    known_services.extend(
+        host_services.get("host_http_services")
+        or services.get("host_http_services", [])
+    )
     known_ports = {
-        str(int(item.get("port", 0)))
-        for item in services.get("http_services", [])
-        if isinstance(item, dict) and str(item.get("port", "")).isdigit()
+        str(int(item.get("route_port") or item.get("port", 0)))
+        for item in known_services
+        if (
+            isinstance(item, dict)
+            and str(item.get("port", "")).isdigit()
+            and (item.get("origin") != "host" or item.get("route_port") is not None)
+        )
     }
 
     existing = cloudflare_rules(PORT_FILTER_FILE)

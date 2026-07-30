@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 from pathlib import Path
 from typing import Any
+
+from providers.atomic_io import atomic_write_json
 
 
 DNS_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -124,16 +124,4 @@ def write_cloudflare_rules(path: Path, rules: dict[str, dict[str, Any]]) -> None
         str(port): normalize_rule(rule, int(port))
         for port, rule in sorted(rules.items(), key=lambda item: int(item[0]))
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2)
-            handle.write("\n")
-        os.replace(temporary, path)
-    except Exception:
-        try:
-            os.unlink(temporary)
-        except OSError:
-            pass
-        raise
+    atomic_write_json(path, payload)

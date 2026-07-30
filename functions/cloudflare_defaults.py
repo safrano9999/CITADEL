@@ -7,11 +7,11 @@ import os
 import re
 import importlib
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 
 from cloudflare_policy import normalize_rule
+from providers.atomic_io import atomic_write_json
 
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
@@ -58,19 +58,7 @@ def read_json(path: Path, default: Any) -> Any:
 
 
 def write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2)
-            handle.write("\n")
-        os.replace(temporary, path)
-    except Exception:
-        try:
-            os.unlink(temporary)
-        except OSError:
-            pass
-        raise
+    atomic_write_json(path, payload)
 
 
 
@@ -89,13 +77,18 @@ def normalize_emails_csv(value: str) -> list[str]:
 
 def http_ports(services_file: Path) -> list[str]:
     services = read_json(services_file, {"http_services": []})
-    rows = services.get("http_services", []) if isinstance(services, dict) else []
+    rows = list(services.get("http_services", [])) if isinstance(services, dict) else []
+    if isinstance(services, dict):
+        rows.extend(services.get("host_http_services", []))
     ports: list[str] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
         try:
-            port = int(str(row.get("port") or ""))
+            if row.get("origin") == "host":
+                port = int(str(row.get("route_port") or ""))
+            else:
+                port = int(str(row.get("port") or ""))
         except ValueError:
             continue
         if 1 <= port <= 65535 and str(port) not in ports:

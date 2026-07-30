@@ -84,6 +84,16 @@ body {
   cursor: pointer;
 }
 
+.cloudflare-token-control input {
+  width: 13rem;
+  background: rgba(15, 23, 42, 0.85);
+  color: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 0.82rem;
+}
+
 .btn-default {
   border: 1px solid rgba(148, 163, 184, 0.5);
   background: #f8fafc;

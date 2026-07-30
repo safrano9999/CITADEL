@@ -114,7 +114,7 @@ def adopt_matching_ingress(
     config: dict[str, Any],
     desired: dict[str, dict[str, Any]],
     managed_hostnames: set[str],
-    origin_host: str,
+    origin_host: str = "",
 ) -> set[str]:
     adopted = set(managed_hostnames)
     ingress = config.get("ingress")
@@ -126,7 +126,9 @@ def adopt_matching_ingress(
         route = desired.get(hostname)
         if not route or hostname in adopted:
             continue
-        expected_service = f"{route['scheme']}://{origin_host}:{route['port']}"
+        route_origin_host = str(route.get("origin_host") or origin_host)
+        route_origin_port = int(route.get("origin_port") or route["port"])
+        expected_service = f"{route['scheme']}://{route_origin_host}:{route_origin_port}"
         if str(entry.get("service") or "") == expected_service:
             adopted.add(hostname)
     return adopted
@@ -364,12 +366,17 @@ def main() -> int:
             policy = cloudflare_rules(root / "ports.filter.json", strict=True)
             desired: dict[str, dict[str, Any]] = {}
             hostnames_seen: set[str] = set()
-            for item in services.get("http_services", []):
+            all_services = list(services.get("http_services", []))
+            all_services.extend(services.get("host_http_services", []))
+            for item in all_services:
                 if not isinstance(item, dict):
                     continue
-                port = int(item.get("port") or 0)
+                is_host_service = item.get("origin") == "host"
+                port = int(item.get("route_port") or (0 if is_host_service else item.get("port") or 0))
                 if not (1 <= port <= 65535):
                     continue
+                item_origin_host = str(item.get("origin_host") or origin_host)
+                item_origin_port = int(item.get("origin_port") or item.get("port") or port)
                 rule = policy.get(str(port), {"subdomains": [str(port)], "whitelist": False, "emails": []})
                 scheme = "https" if item.get("scheme") == "https" else "http"
                 for subdomain in rule["subdomains"]:
@@ -380,6 +387,8 @@ def main() -> int:
                     desired[hostname] = {
                         "port": port,
                         "scheme": scheme,
+                        "origin_host": item_origin_host,
+                        "origin_port": item_origin_port,
                         "whitelist": bool(rule["whitelist"]),
                         "emails": list(rule["emails"]),
                     }
@@ -402,7 +411,10 @@ def main() -> int:
             for hostname, route in desired.items():
                 entry: dict[str, Any] = {
                     "hostname": hostname,
-                    "service": f"{route['scheme']}://{origin_host}:{route['port']}",
+                    "service": (
+                        f"{route['scheme']}://{route['origin_host']}:"
+                        f"{route['origin_port']}"
+                    ),
                 }
                 if route["scheme"] == "https":
                     entry["originRequest"] = {"noTLSVerify": True}
@@ -412,7 +424,10 @@ def main() -> int:
                     route_record(
                         "proxy",
                         f"https://{hostname}",
-                        target=f"{route['scheme']}://{origin_host}:{route['port']}",
+                        target=(
+                            f"{route['scheme']}://{route['origin_host']}:"
+                            f"{route['origin_port']}"
+                        ),
                     ),
                 )
 
@@ -452,13 +467,16 @@ def main() -> int:
         access_apps = {**previous_access_apps, **access_apps}
         access_policies = {**previous_access_policies, **access_policies}
 
-    for item in services.get("http_services", []):
+    all_services = list(services.get("http_services", []))
+    all_services.extend(services.get("host_http_services", []))
+    for item in all_services:
         if not isinstance(item, dict):
             continue
         urls = item.setdefault("urls", {})
         if isinstance(urls, dict):
             urls.pop("cloudflare", None)
-            port_key = str(item.get("port") or "")
+            is_host_service = item.get("origin") == "host"
+            port_key = str(item.get("route_port") or ("" if is_host_service else item.get("port") or ""))
             if port_key in routes:
                 urls["cloudflare"] = routes[port_key]["url"]
     write_json(args.services_file, services)
