@@ -6,6 +6,7 @@ No Flask/HTTP dependencies. Returns plain dicts/lists.
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from cloudflare_policy import (
     cloudflare_rules,
@@ -19,6 +20,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SERVICES_FILE = BASE_DIR / "services.json"
 HOST_SERVICES_FILE = BASE_DIR / "host_services.json"
+TS_DISCOVERY_FILE = BASE_DIR / "ts.json"
 TAILSCALE_FILE = BASE_DIR / "tailscale.json"
 LAST_SCAN_FILE = BASE_DIR / "last_scan.txt"
 EXTENSIONS_DIR = BASE_DIR / "extensions"
@@ -50,6 +52,49 @@ def _route_url(route: object) -> str:
         return ""
     url = route.get("url")
     return url if isinstance(url, str) else ""
+
+
+def _enabled(value: object) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _safe_discovery_url(value: object) -> str:
+    url = str(value or "").strip()
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return ""
+    if parsed.scheme not in {
+        "http", "https", "ssh", "ftp", "mysql", "postgresql",
+        "redis", "smb", "tcp",
+    } or not parsed.hostname:
+        return ""
+    return url
+
+
+def _ts_discovery_hosts(payload: dict) -> list[dict]:
+    hosts: list[dict] = []
+    for raw_host in payload.get("hosts") or []:
+        if not isinstance(raw_host, dict):
+            continue
+        host = dict(raw_host)
+        services: list[dict] = []
+        for raw_service in raw_host.get("services") or []:
+            if not isinstance(raw_service, dict):
+                continue
+            try:
+                port = int(raw_service.get("port") or 0)
+            except (TypeError, ValueError):
+                continue
+            if not (1 <= port <= 65535):
+                continue
+            service = dict(raw_service)
+            service["port"] = port
+            service["url"] = _safe_discovery_url(service.get("url"))
+            services.append(service)
+        host["services"] = sorted(services, key=lambda item: item["port"])
+        hosts.append(host)
+    return hosts
 
 
 def _cloudflare_assignment(port: str, subdomain: str) -> str:
@@ -251,6 +296,12 @@ def build_dashboard() -> dict:
         dict(item) for item in host_other_ports if isinstance(item, dict)
     ]
     cloudflare = cloudflare_rules(PORT_FILTER_FILE)
+    ts_discovery_enabled = _enabled(os.environ.get("CITADEL_TS_DISCOVERY"))
+    ts_payload = (
+        _read_json(TS_DISCOVERY_FILE, {"hosts": [], "errors": []})
+        if ts_discovery_enabled
+        else {"hosts": [], "errors": []}
+    )
 
     # UI config
     ui_cfg = _read_json(UI_CONFIG_FILE, {
@@ -320,6 +371,12 @@ def build_dashboard() -> dict:
         "provider_header_meta": providers["provider_header_meta"],
         "provider_order": provider_order,
         "cloudflare_available": providers["cloudflare_available"],
+        "ts_discovery_enabled": ts_discovery_enabled,
+        "ts_discovery_generated_at": ts_payload.get("generated_at"),
+        "ts_discovery_hosts": _ts_discovery_hosts(ts_payload),
+        "ts_discovery_errors": [
+            str(error) for error in ts_payload.get("errors") or [] if error
+        ],
         "default_mode": default_mode,
         "default_refresh": default_refresh,
         "last_scan": last_scan,

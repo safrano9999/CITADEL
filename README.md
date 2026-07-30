@@ -58,6 +58,7 @@ Requirements:
 - `ss` from `iproute2`
 - `flock` from `util-linux`
 - Tailscale CLI only when the Tailscale provider is enabled
+- Nmap only when the optional Tailscale Discovery scan is used
 
 Clone the source and create an isolated Python environment:
 
@@ -157,6 +158,7 @@ renders provider buttons, and can run the configured scanner.
 | `CITADEL_DEDUPE_PORT` | `65100` | First replacement port when a mapped host service duplicates a container port |
 | `CITADEL_SUBNET_IP` | empty | Address used for subnet routes and the Cloudflare origin |
 | `CITADEL_TAILSCALE` | `true` | Enable Tailscale route reconciliation |
+| `CITADEL_TS_DISCOVERY` | `0` | Show manually generated Tailnet discovery data in a separate view |
 | `CITADEL_CLOUDFLARE` | `1` | Enable Cloudflare reconciliation when all required values exist |
 | `CITADEL_CLOUDFLARE_DOMAIN` | empty | DNS suffix used for generated hostnames |
 | `CITADEL_CLOUDFLARE_ACCOUNT_ID` | empty | Existing Cloudflare account ID |
@@ -184,6 +186,22 @@ HTTP/HTTPS host listeners are added to Tailscale and Cloudflare; subnet routes
 continue to use only the container-local services. A collision between a local
 and host origin port is assigned from `CITADEL_DEDUPE_PORT` upward and recorded
 in `host_services.json`.
+
+### Tailscale Discovery
+
+Set `CITADEL_TS_DISCOVERY=1` to show the separate Tailscale button in the
+dashboard. Discovery remains independent from the normal scan and is started
+manually:
+
+```bash
+./Scan_TS.sh
+```
+
+The script reads online peers from `tailscale status --json`, excludes the
+local host, scans every TCP port with Nmap, identifies HTTP/HTTPS endpoints,
+and writes the result atomically to the ignored `ts.json` runtime file. It
+never invokes `scan.sh`, creates mappings, or changes remote hosts. The
+dashboard groups all discovered services by host.
 
 An optional `config.ini` selects a custom CA:
 

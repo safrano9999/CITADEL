@@ -4,6 +4,7 @@ icons/
 services.json
 ss.json
 tailscale.json
+ts.json
 container_routes.json
 host_ss.json
 host_services.json

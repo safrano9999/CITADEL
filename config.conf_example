@@ -24,6 +24,10 @@ CITADEL_DEDUPE_PORT=65100
 #default-preset: insert later
 CITADEL_TAILSCALE=true
 
+#default-preset: 0
+#choices: 0 1
+CITADEL_TS_DISCOVERY=0
+
 #default-preset: insert later
 CITADEL_CLOUDFLARE=1
 

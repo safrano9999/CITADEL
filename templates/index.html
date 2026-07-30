@@ -24,6 +24,9 @@
     {% endif %}
 
     <div class="header-controls">
+        {% if data.ts_discovery_enabled %}
+        <button id="ts-discovery-toggle" class="btn-default" type="button">TAILSCALE</button>
+        {% endif %}
         <label class="control" for="route-mode-sel">
             <span>Provider</span>
             <select id="route-mode-sel" {{ '' if data.provider_options else 'disabled' }}>
@@ -52,6 +55,7 @@
 </header>
 
 <main class="layout">
+    <div id="standard-dashboard">
     {% if data.alerts %}
     <section class="alerts">
         {% for msg in data.alerts %}
@@ -172,11 +176,79 @@
         </table>
     </section>
     {% endif %}
+    </div>
+
+    {% if data.ts_discovery_enabled %}
+    <section id="ts-discovery-panel" class="ts-discovery" hidden>
+        <div class="ts-stars" aria-hidden="true"></div>
+        <header class="ts-discovery-header">
+            <div>
+                <span class="ts-eyebrow">TAILNET</span>
+                <h2>Tailscale Discovery</h2>
+            </div>
+            {% if data.ts_discovery_generated_at %}
+            <span class="ts-scanned-at">scanned {{ data.ts_discovery_generated_at|e }}</span>
+            {% endif %}
+        </header>
+
+        {% for error in data.ts_discovery_errors %}
+        <div class="ts-error">{{ error|e }}</div>
+        {% endfor %}
+
+        {% if data.ts_discovery_hosts %}
+        <div class="ts-hosts">
+            {% for host in data.ts_discovery_hosts %}
+            <article class="ts-host">
+                <header class="ts-host-header">
+                    <span class="ts-host-star">✦</span>
+                    <div>
+                        <h3>{{ host.name|default(host.dns_name|default(host.ip))|e }}</h3>
+                        <p>
+                            {{ host.dns_name|default('', true)|e }}
+                            {% if host.dns_name %} · {% endif %}
+                            {{ host.ip|default('—')|e }}
+                            {% if host.os %} · {{ host.os|e }}{% endif %}
+                        </p>
+                    </div>
+                    <span class="ts-service-count">{{ host.services|default([])|length }} services</span>
+                </header>
+                {% if host.services %}
+                <div class="ts-service-list">
+                    {% for service in host.services %}
+                    {% if service.url %}<a class="ts-service" href="{{ service.url|e }}" target="_blank" rel="noopener">
+                    {% else %}<div class="ts-service">{% endif %}
+                        <span class="ts-service-icon" aria-hidden="true">{{ service.icon|default('✦')|e }}</span>
+                        <span class="ts-service-port">:{{ service.port|int }}</span>
+                        <span class="ts-service-name">{{ service.service|default('unknown')|e }}</span>
+                        <span class="ts-service-detail">
+                            {{ service.product|default('', true)|e }}
+                            {% if service.version %} {{ service.version|e }}{% endif %}
+                        </span>
+                        {% if service.web %}<span class="ts-web-badge">{{ service.scheme|upper|e }}</span>{% endif %}
+                    {% if service.url %}</a>{% else %}</div>{% endif %}
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="ts-empty-host">No open TCP services found.</p>
+                {% endif %}
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="ts-empty">
+            No discovery data yet. Run <code>./Scan_TS.sh</code> manually.
+        </div>
+        {% endif %}
+    </section>
+    {% endif %}
 </main>
 
 
 <script>
 const modeSel = document.getElementById('route-mode-sel');
+const tsDiscoveryToggle = document.getElementById('ts-discovery-toggle');
+const standardDashboard = document.getElementById('standard-dashboard');
+const tsDiscoveryPanel = document.getElementById('ts-discovery-panel');
 const saveDefaultBtn = document.getElementById('save-default-btn');
 const pageRefreshBtn = document.getElementById('page-refresh-btn');
 const cloudflareTokenControl = document.getElementById('cloudflare-token-control');
@@ -192,6 +264,7 @@ const routeDefaultKey = 'citadel-route-default';
 let cloudflareEditing = false;
 let cloudflareInitialState = '';
 let cloudflareDirty = false;
+let tsDiscoveryVisible = false;
 
 function splitCsv(value) {
   return String(value || '')
@@ -426,6 +499,22 @@ tiles.forEach(tile => {
 
 if (pageRefreshBtn) {
   pageRefreshBtn.addEventListener('click', () => location.reload());
+}
+
+if (tsDiscoveryToggle && tsDiscoveryPanel && standardDashboard) {
+  tsDiscoveryToggle.addEventListener('click', () => {
+    tsDiscoveryVisible = !tsDiscoveryVisible;
+    standardDashboard.hidden = tsDiscoveryVisible;
+    tsDiscoveryPanel.hidden = !tsDiscoveryVisible;
+    tsDiscoveryToggle.textContent = tsDiscoveryVisible ? '← BACK' : 'TAILSCALE';
+    if (modeSel) modeSel.disabled = tsDiscoveryVisible || cloudflareEditing;
+    if (cloudflareTokenControl) cloudflareTokenControl.hidden = true;
+    if (cloudflareEditBtn) {
+      cloudflareEditBtn.hidden = tsDiscoveryVisible || modeSel?.value !== 'cloudflare';
+    }
+    if (cloudflareSaveBtn) cloudflareSaveBtn.hidden = true;
+    if (!tsDiscoveryVisible) applyMode(modeSel ? modeSel.value : defaultMode);
+  });
 }
 
 async function authorizeCloudflareEdit() {

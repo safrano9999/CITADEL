@@ -362,6 +362,201 @@ body {
   border-bottom: none;
 }
 
+.ts-discovery {
+  position: relative;
+  isolation: isolate;
+  min-height: 68vh;
+  overflow: hidden;
+  border: 1px solid rgba(120, 150, 255, 0.2);
+  border-radius: 18px;
+  padding: 24px;
+  color: #edf2ff;
+  background:
+    radial-gradient(circle at 78% 8%, rgba(75, 93, 255, 0.24), transparent 31%),
+    radial-gradient(circle at 14% 86%, rgba(30, 180, 205, 0.13), transparent 35%),
+    linear-gradient(145deg, #070914 0%, #0a1022 52%, #080b17 100%);
+  box-shadow: 0 22px 55px rgba(5, 8, 22, 0.35);
+}
+
+.ts-stars {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  opacity: 0.72;
+  background-image:
+    radial-gradient(circle, rgba(255, 255, 255, 0.92) 0 1px, transparent 1.5px),
+    radial-gradient(circle, rgba(151, 173, 255, 0.75) 0 1px, transparent 1.5px),
+    radial-gradient(circle, rgba(255, 255, 255, 0.5) 0 0.7px, transparent 1.2px);
+  background-position: 8px 11px, 37px 53px, 71px 29px;
+  background-size: 83px 97px, 127px 139px, 61px 73px;
+  mask-image: linear-gradient(to bottom, #000, rgba(0, 0, 0, 0.35));
+}
+
+.ts-discovery-header,
+.ts-host-header {
+  display: flex;
+  align-items: center;
+}
+
+.ts-discovery-header {
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.ts-eyebrow {
+  color: #879cff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.24em;
+}
+
+.ts-discovery-header h2 {
+  margin-top: 3px;
+  font-size: 1.55rem;
+  letter-spacing: 0.02em;
+}
+
+.ts-scanned-at {
+  color: #9ca9c8;
+  font-size: 0.74rem;
+}
+
+.ts-hosts {
+  display: grid;
+  gap: 14px;
+}
+
+.ts-host {
+  overflow: hidden;
+  border: 1px solid rgba(144, 164, 255, 0.16);
+  border-radius: 14px;
+  background: rgba(12, 18, 39, 0.82);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.035);
+  backdrop-filter: blur(8px);
+}
+
+.ts-host-header {
+  gap: 11px;
+  padding: 13px 15px;
+  border-bottom: 1px solid rgba(144, 164, 255, 0.12);
+}
+
+.ts-host-star {
+  color: #91a5ff;
+  font-size: 1.05rem;
+  text-shadow: 0 0 12px rgba(130, 155, 255, 0.85);
+}
+
+.ts-host-header h3 {
+  color: #f5f7ff;
+  font-size: 0.94rem;
+}
+
+.ts-host-header p {
+  margin-top: 2px;
+  color: #8592b2;
+  font-size: 0.7rem;
+}
+
+.ts-service-count {
+  margin-left: auto;
+  color: #91a1c5;
+  font-size: 0.68rem;
+}
+
+.ts-service-list {
+  display: grid;
+}
+
+.ts-service {
+  display: grid;
+  grid-template-columns: 28px 64px minmax(110px, 0.65fr) minmax(120px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 9px 15px;
+  border-bottom: 1px solid rgba(144, 164, 255, 0.08);
+  color: #dce4ff;
+  text-decoration: none;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.ts-service:last-child {
+  border-bottom: 0;
+}
+
+.ts-service:hover {
+  color: #ffffff;
+  background: rgba(91, 112, 221, 0.15);
+}
+
+.ts-service-icon {
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.ts-service-port {
+  color: #8fa3ff;
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ts-service-name {
+  overflow: hidden;
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-service-detail {
+  overflow: hidden;
+  color: #8f9ab7;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-web-badge {
+  border: 1px solid rgba(119, 145, 255, 0.28);
+  border-radius: 999px;
+  padding: 3px 6px;
+  color: #aebcff;
+  background: rgba(75, 93, 190, 0.14);
+  font-size: 0.58rem;
+  font-weight: 800;
+}
+
+.ts-empty,
+.ts-empty-host,
+.ts-error {
+  color: #aab4cd;
+  font-size: 0.78rem;
+}
+
+.ts-empty {
+  padding: 36px 10px;
+  text-align: center;
+}
+
+.ts-empty code {
+  color: #cbd5ff;
+}
+
+.ts-empty-host {
+  padding: 13px 54px;
+}
+
+.ts-error {
+  margin-bottom: 10px;
+  border: 1px solid rgba(255, 120, 140, 0.25);
+  border-radius: 9px;
+  padding: 8px 10px;
+  color: #ffc0ca;
+  background: rgba(118, 23, 43, 0.22);
+}
+
 @media (max-width: 760px) {
   .header-controls {
     margin-left: 0;
@@ -375,6 +570,23 @@ body {
   .grid {
     grid-template-columns: repeat(2, 1fr);
     gap: 10px;
+  }
+
+  .ts-discovery {
+    padding: 16px 10px;
+  }
+
+  .ts-discovery-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ts-service {
+    grid-template-columns: 24px 54px minmax(0, 1fr) auto;
+  }
+
+  .ts-service-detail {
+    display: none;
   }
 
 }
