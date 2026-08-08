@@ -174,10 +174,11 @@ def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
 def clear_persisted_port(project_dir: Path, port: int) -> None:
     port_key = str(port)
     updates: dict[Path, dict[str, Any]] = {}
+    data_dir = Path(os.environ.get("CITADEL_DATA_DIR") or project_dir).expanduser()
 
     for path in (
         project_dir / "tailscale.json",
-        project_dir / "extensions" / "enabled" / "tailscale" / "routes.json",
+        data_dir / "extensions" / "enabled" / "tailscale" / "routes.json",
     ):
         payload = read_json_object(path)
         if payload is not None and prune_route_state(payload, port_key):

@@ -4,8 +4,11 @@ import { fileURLToPath } from "node:url";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 
 const pluginRoot = path.resolve(fileURLToPath(new URL(".", import.meta.url)));
+const dataRoot = process.env.CITADEL_DATA_DIR
+  ? path.resolve(process.env.CITADEL_DATA_DIR)
+  : pluginRoot;
 const defaultServicesPath = path.join(pluginRoot, "services.json");
-const defaultPolicyPath = path.join(pluginRoot, "ports.filter.json");
+const defaultPolicyPath = path.join(dataRoot, "ports.filter.json");
 const defaultScanScript = path.join(pluginRoot, "scan.sh");
 const coreBridge = path.join(pluginRoot, "functions", "plugin_bridge.py");
 const providerNames = new Set(["localhost", "subnet", "tailscale", "cloudflare", "other"]);

@@ -41,12 +41,18 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
+DATA_DIR="${CITADEL_DATA_DIR:-$SCRIPT_DIR}"
+if [[ "$DATA_DIR" != /* ]]; then
+    echo "CITADEL_DATA_DIR must be an absolute path" >&2
+    exit 2
+fi
 CACHE_DIR="$SCRIPT_DIR/cache"
 ICONS_DIR="$SCRIPT_DIR/icons"
 FUNCTIONS_DIR="$SCRIPT_DIR/functions"
 PROVIDERS_DIR="$FUNCTIONS_DIR/providers"
 EXTENSIONS_DIR="$SCRIPT_DIR/extensions"
 ENABLED_EXT_DIR="$EXTENSIONS_DIR/enabled"
+PROVIDER_ROUTES_DIR="$DATA_DIR/extensions/enabled"
 CONFIG="$SCRIPT_DIR/config.ini"
 SS_FILE="$SCRIPT_DIR/ss.json"
 HOST_SS_FILE="$SCRIPT_DIR/host_ss.json"
@@ -54,8 +60,8 @@ HOST_SERVICES_FILE="$SCRIPT_DIR/host_services.json"
 SERVICES_FILE="$SCRIPT_DIR/services.json"
 TAILSCALE_FILE="$SCRIPT_DIR/tailscale.json"
 CONTAINER_ROUTES_FILE="$SCRIPT_DIR/container_routes.json"
-PORT_FILTER_FILE="$SCRIPT_DIR/ports.filter.json"
-PROVIDERS_STATE_FILE="$EXTENSIONS_DIR/providers_state.json"
+PORT_FILTER_FILE="$DATA_DIR/ports.filter.json"
+PROVIDERS_STATE_FILE="$DATA_DIR/extensions/providers_state.json"
 TIMESTAMP_FILE="$SCRIPT_DIR/last_scan.txt"
 RUNTIME_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
 SCAN_LOCK_FILE="${CITADEL_SCAN_LOCK_FILE:-$RUNTIME_DIR/citadel-scan-${UID}.lock}"
@@ -78,7 +84,9 @@ if [[ "${CITADEL_SCAN_LOCK_HELD:-0}" != "1" ]]; then
         "${scan_arguments[@]}"
 fi
 
-mkdir -p "$CACHE_DIR" "$ICONS_DIR" "$FUNCTIONS_DIR" "$PROVIDERS_DIR" "$ENABLED_EXT_DIR"
+mkdir -p \
+    "$CACHE_DIR" "$ICONS_DIR" "$FUNCTIONS_DIR" "$PROVIDERS_DIR" \
+    "$ENABLED_EXT_DIR" "$PROVIDER_ROUTES_DIR"
 
 CA_CERT=""
 if [[ -f "$CONFIG" ]]; then
@@ -876,6 +884,7 @@ if [[ -f "$PROVIDERS_DIR/dispatch.py" ]]; then
             --cache-dir "$CACHE_DIR" \
             --config-ini "$CONFIG" \
             --state-file "$FILTERED_STATE_FILE" \
+            --routes-dir "$PROVIDER_ROUTES_DIR" \
             --tailscale-file "$TAILSCALE_FILE" \
             --provider "$PROVIDER_FILTER" \
             --strict
@@ -886,6 +895,7 @@ if [[ -f "$PROVIDERS_DIR/dispatch.py" ]]; then
             --cache-dir "$CACHE_DIR" \
             --config-ini "$CONFIG" \
             --state-file "$PROVIDERS_STATE_FILE" \
+            --routes-dir "$PROVIDER_ROUTES_DIR" \
             --tailscale-file "$TAILSCALE_FILE" || true
     fi
 else

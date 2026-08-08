@@ -231,6 +231,28 @@ ca_cert = /path/to/certs/ca.pem
 
 A non-empty whitelist takes precedence. Otherwise the blacklist is applied.
 
+### Persistent Fedora container state
+
+The merged Fedora container setup asks for `CITADEL_PERSISTENT` and enables it
+by default. When enabled, the generated container mounts the instance-specific
+named volume `<container>-citadel` at `/named_volumes/CITADEL` and sets
+`CITADEL_DATA_DIR` to that path.
+
+The volume stores only mutable runtime state. Provider code and configuration
+remain in `/opt/safrano9999/CITADEL`, so image updates are never hidden by the
+volume. The compatibility links generated during container initialization
+migrate existing files once and are safe to recreate:
+
+```text
+ports.filter.json
+extensions/providers_state.json
+extensions/enabled/cloudflare/routes.json
+```
+
+All enabled providers write their generated `routes.json` below the same data
+root. Atomic replacements therefore stay inside the volume instead of
+replacing a persistence symlink.
+
 ## Providers
 
 Provider activation is directory based:
@@ -343,8 +365,8 @@ journalctl --user -u citadel.service
   replaced so readers never observe a partial update.
 - Runtime state, caches, generated routes, local configuration, and release
   archives are excluded by `.gitignore`.
-- Back up `ports.filter.json` and provider state when custom routes must survive
-  a fresh checkout.
+- Without Fedora container persistence, back up `ports.filter.json` and
+  provider state when custom routes must survive a fresh checkout.
 
 ## Development and checks
 

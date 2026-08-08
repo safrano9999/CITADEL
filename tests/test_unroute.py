@@ -154,7 +154,8 @@ class UnrouteTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            unroute.clear_persisted_port(base, 11000)
+            with patch.dict(unroute.os.environ, {}, clear=True):
+                unroute.clear_persisted_port(base, 11000)
 
             for path in (
                 base / "tailscale.json",

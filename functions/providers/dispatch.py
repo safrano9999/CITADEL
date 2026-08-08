@@ -34,6 +34,13 @@ def main() -> int:
     parser.add_argument("--cache-dir", required=True)
     parser.add_argument("--config-ini", required=True)
     parser.add_argument("--state-file", required=True)
+    parser.add_argument(
+        "--routes-dir",
+        help=(
+            "Optional runtime root for per-provider routes.json files. "
+            "Provider code and configuration remain in --enabled-dir."
+        ),
+    )
     parser.add_argument("--tailscale-file", required=True)
     parser.add_argument(
         "--provider",
@@ -107,7 +114,15 @@ def main() -> int:
         provider_impl = str(ext_payload.get("provider") or provider_id).strip() or provider_id
 
         script_path = os.path.join(this_dir, f"{provider_impl}.py")
-        routes_out = os.path.join(provider_dir, "routes.json")
+        if args.routes_dir:
+            routes_out = os.path.join(
+                os.path.abspath(args.routes_dir),
+                provider_id,
+                "routes.json",
+            )
+            os.makedirs(os.path.dirname(routes_out), exist_ok=True)
+        else:
+            routes_out = os.path.join(provider_dir, "routes.json")
 
         if not os.path.isfile(script_path):
             state["errors"].append(f"Missing provider script: {script_path}")

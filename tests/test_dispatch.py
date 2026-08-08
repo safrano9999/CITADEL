@@ -154,6 +154,41 @@ class DispatchFilterTests(unittest.TestCase):
             ):
                 self.assertEqual(dispatch.main(), 1)
 
+    def test_writes_routes_to_separate_runtime_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            routes_dir = base / "runtime" / "extensions" / "enabled"
+            (base / "cache").mkdir()
+            (base / "services.json").write_text("{}", encoding="utf-8")
+            self.provider(base, "tailscale")
+            commands: list[list[str]] = []
+
+            def fake_run(command: list[str], **_kwargs):
+                commands.append(command)
+                return self.run_provider(command)
+
+            with (
+                patch.object(
+                    sys,
+                    "argv",
+                    self.arguments(
+                        base,
+                        "--routes-dir",
+                        str(routes_dir),
+                    ),
+                ),
+                patch.object(dispatch.subprocess, "run", side_effect=fake_run),
+            ):
+                self.assertEqual(dispatch.main(), 0)
+
+            routes_out = Path(commands[0][commands[0].index("--routes-out") + 1])
+            self.assertEqual(
+                routes_out,
+                routes_dir / "tailscale" / "routes.json",
+            )
+            self.assertTrue(routes_out.is_file())
+            self.assertFalse((base / "enabled" / "tailscale" / "routes.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

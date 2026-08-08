@@ -17,6 +17,7 @@ from cloudflare_policy import (
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = Path(os.environ.get("CITADEL_DATA_DIR") or BASE_DIR).expanduser()
 
 SERVICES_FILE = BASE_DIR / "services.json"
 HOST_SERVICES_FILE = BASE_DIR / "host_services.json"
@@ -26,9 +27,9 @@ LAST_SCAN_FILE = BASE_DIR / "last_scan.txt"
 EXTENSIONS_DIR = BASE_DIR / "extensions"
 ENABLED_EXT_DIR = EXTENSIONS_DIR / "enabled"
 DISABLED_EXT_DIR = EXTENSIONS_DIR / "disabled"
-PROVIDERS_STATE_FILE = EXTENSIONS_DIR / "providers_state.json"
+PROVIDERS_STATE_FILE = DATA_DIR / "extensions" / "providers_state.json"
 UI_CONFIG_FILE = EXTENSIONS_DIR / "ui.json"
-PORT_FILTER_FILE = BASE_DIR / "ports.filter.json"
+PORT_FILTER_FILE = DATA_DIR / "ports.filter.json"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -45,6 +46,12 @@ def _read_json(path: Path, default: dict | list | None = None):
         return data if isinstance(data, (dict, list)) else default
     except Exception:
         return default
+
+
+def _provider_routes_file(provider_dir: Path) -> Path:
+    if DATA_DIR == BASE_DIR:
+        return provider_dir / "routes.json"
+    return DATA_DIR / "extensions" / "enabled" / provider_dir.name / "routes.json"
 
 
 def _route_url(route: object) -> str:
@@ -197,7 +204,7 @@ def _load_providers() -> dict:
         pid = provider_dir.name
 
         ext = _read_json(provider_dir / "extension.json", {})
-        routes = _read_json(provider_dir / "routes.json", {})
+        routes = _read_json(_provider_routes_file(provider_dir), {})
 
         label = str(routes.get("label") or ext.get("label") or pid.capitalize())
 
