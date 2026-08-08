@@ -1,0 +1,59 @@
+# Source of truth: SCRIPTS/githubactions. Generated copies are overwritten.
+name: Example files release
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "**/*example*"
+      - "**/config*.container"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: examplefiles-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build example-files archive
+        run: python3 .github/scripts/examplefiles-githubaction.py
+
+      - name: Publish latest release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repository="${GITHUB_REPOSITORY#*/}"
+          asset="${repository}-examplefiles.zip"
+          if [[ ! -f "$asset" ]]; then
+            if gh release view latest >/dev/null 2>&1 &&
+              gh release view latest --json assets --jq '.assets[].name' |
+                grep -Fxq "$asset"; then
+              gh release delete-asset latest "$asset" --yes
+            fi
+            echo "No configuration example files; skipping release asset."
+            exit 0
+          fi
+          if gh release view latest >/dev/null 2>&1; then
+            gh release upload latest "$asset" --clobber
+          else
+            gh release create latest "$asset" \
+              --target "$GITHUB_SHA" \
+              --title latest \
+              --notes "Latest example files for ${repository}."
+          fi
