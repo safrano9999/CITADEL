@@ -46,7 +46,9 @@ CLOUDFLARE_EMAIL=admin@example.com
 
 Read `CLOUDFLARE_API_TOKEN` from `.env` and verify that the token can see the Cloudflare account. Ask the user for the domain or domains that should be managed by CITADEL.
 
-For each domain, create or reuse a Cloudflare zone and print the Cloudflare nameservers that must be configured at the current domain provider.
+For each domain, create or reuse a Cloudflare zone. Before asking the user to change the authoritative nameservers, read the existing authoritative DNS zone and copy every mail-related record into Cloudflare. Preserve at least MX records and all related SPF, DKIM, DMARC, and provider-verification TXT records. Verify that the assigned Cloudflare nameservers return those records; working Webmail or IMAP access alone does not prove that new inbound mail, including Cloudflare Access One-time PIN messages, can be delivered.
+
+Only after that verification, print the Cloudflare nameservers that must be configured at the current domain provider.
 
 ### User
 
