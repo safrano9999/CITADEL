@@ -41,7 +41,7 @@ python3 skills/citadel-cloudflare/scripts/discover.py \
 
 Do not commit either token.
 
-When `CITADEL_CLOUDFLARE=1`, the Tunnel configuration is complete, and `TUNNEL_TOKEN` exists, CITADEL checks the existing `cloudflared.service` and starts it when inactive. CITADEL does not install cloudflared or create an ad-hoc connector process.
+When `CITADEL_CLOUDFLARE=1`, CITADEL reconciles the configured Cloudflare routes. The container's systemd configuration exclusively owns `cloudflared.service`; CITADEL never starts, stops, or installs the connector.
 
 After the provider nameserver change, the agent owns every remaining setup action: account/zone/Tunnel discovery, Access initialization, One-time PIN, DNS records, Tunnel ingress, configuration files, connector token, and verification. Do not send the user through Cloudflare dashboard pages for resources the API token can manage.
 

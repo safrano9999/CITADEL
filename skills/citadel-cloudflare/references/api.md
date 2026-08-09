@@ -53,4 +53,4 @@ CLOUDFLARE_API_TOKEN=
 TUNNEL_TOKEN=
 ```
 
-`TUNNEL_TOKEN` belongs to the systemd-managed cloudflared service. When Cloudflare is enabled and the Tunnel values and token are present, CITADEL starts an installed but inactive `cloudflared.service`; it does not install cloudflared or launch an ad-hoc connector.
+`TUNNEL_TOKEN` belongs to the systemd-managed `cloudflared.service`. CITADEL reconciles routes but never starts, stops, installs, or otherwise owns the connector service.

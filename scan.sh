@@ -40,7 +40,6 @@ done
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 CACHE_DIR="$SCRIPT_DIR/cache"
 ICONS_DIR="$SCRIPT_DIR/icons"
 FUNCTIONS_DIR="$SCRIPT_DIR/functions"
@@ -60,23 +59,20 @@ PROVIDERS_STATE_FILE="$SCRIPT_DIR/extensions/providers_state.json"
 TIMESTAMP_FILE="$SCRIPT_DIR/last_scan.txt"
 RUNTIME_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
 SCAN_LOCK_FILE="${CITADEL_SCAN_LOCK_FILE:-$RUNTIME_DIR/citadel-scan-${UID}.lock}"
-SCAN_LOCK_TIMEOUT="${CITADEL_SCAN_LOCK_TIMEOUT:-300}"
 MAX_FETCH_BYTES=1048576
 
-if [[ "${CITADEL_SCAN_LOCK_HELD:-0}" != "1" ]]; then
-    [[ "$SCAN_LOCK_TIMEOUT" =~ ^[0-9]+$ ]] || {
-        echo "CITADEL_SCAN_LOCK_TIMEOUT must be a non-negative integer" >&2
-        exit 2
-    }
-    mkdir -p "$(dirname "$SCAN_LOCK_FILE")"
-    scan_arguments=()
-    [[ -z "$PROVIDER_FILTER" ]] ||
-        scan_arguments=(--provider "$PROVIDER_FILTER")
-    exec flock \
-        --wait "$SCAN_LOCK_TIMEOUT" \
-        "$SCAN_LOCK_FILE" \
-        env CITADEL_SCAN_LOCK_HELD=1 "$SCRIPT_PATH" \
-        "${scan_arguments[@]}"
+mkdir -p "$(dirname "$SCAN_LOCK_FILE")"
+exec {SCAN_LOCK_FD}>"$SCAN_LOCK_FILE"
+if flock --nonblock "$SCAN_LOCK_FD"; then
+    :
+else
+    lock_status=$?
+    if [[ "$lock_status" -eq 1 ]]; then
+        echo "CITADEL scan already running; skipping duplicate request"
+        exit 0
+    fi
+    echo "CITADEL scan lock failed (status=$lock_status)" >&2
+    exit "$lock_status"
 fi
 
 mkdir -p \

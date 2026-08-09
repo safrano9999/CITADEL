@@ -6,7 +6,6 @@ import sys
 import threading
 import time
 from collections import OrderedDict, deque
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "functions"))
@@ -20,7 +19,6 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from python_header import get, get_port  # noqa: F401
 
 import core
-from cloudflared_service import ensure_cloudflared_service
 
 
 class EditTokenGuard:
@@ -115,14 +113,7 @@ def _require_edit_token(request: Request, supplied: str) -> None:
     raise HTTPException(status_code=401, detail="Invalid token.")
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    result = ensure_cloudflared_service(get)
-    print(f"[citadel] cloudflared: {result}", flush=True)
-    yield
-
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 _jinja = Environment(
     loader=FileSystemLoader(str(core.BASE_DIR / "templates")),
     autoescape=select_autoescape(["html", "xml"]),

@@ -84,7 +84,7 @@ Initialize Cloudflare Access through the API before applying any email whitelist
 
 This requires `Account -> Access: Organizations, Identity Providers, and Groups -> Edit` for the selected account. Cloudflare error code `9999` from the organization lookup means Access has not been initialized and the agent should create the organization. If creation or reconciliation returns HTTP 403 with error code `10000`, stop and ask the user to edit or replace the API token with that permission. Never fall back to exposing routes without Access after an email whitelist is configured.
 
-When `CITADEL_CLOUDFLARE=1`, the Tunnel identifiers and `TUNNEL_TOKEN` are present, and `cloudflared.service` is installed, CITADEL starts that service if it is inactive. It does not install cloudflared or create a separate connector process.
+`cloudflared.service` is owned and started by the container's systemd configuration. CITADEL only reconciles Cloudflare routes when `CITADEL_CLOUDFLARE=1`; it never starts or stops the connector service.
 
 ## 2. Conservative Cloudflare Mapping Defaults
 
