@@ -19,8 +19,7 @@ class PersistenceExampleTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (config_dir / "citadel-test_config.conf").write_text(
-                f"CITADEL_PERSISTENT={value}\n"
-                "CITADEL_DATA_DIR=/named_volumes/CITADEL\n",
+                f"CITADEL_PERSISTENT={value}\n",
                 encoding="utf-8",
             )
             environment = os.environ.copy()

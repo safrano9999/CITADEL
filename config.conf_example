@@ -12,10 +12,6 @@ CITADEL_WEBUI_PORT=11000
 #default-preset: 1
 CITADEL_PERSISTENT=1
 
-#when: CITADEL_PERSISTENT=1
-#default-preset: /named_volumes/CITADEL
-CITADEL_DATA_DIR=/named_volumes/CITADEL
-
 #default-preset: insert later
 CITADEL_SUBNET_IP=
 

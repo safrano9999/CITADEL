@@ -288,7 +288,6 @@ def main() -> int:
     args = parser.parse_args()
 
     root = Path(args.provider_dir).resolve().parents[2]
-    data_root = Path(os.environ.get("CITADEL_DATA_DIR") or root).expanduser()
     functions_dir = root / "functions"
     sys.path.insert(0, str(functions_dir))
     from cloudflare_policy import cloudflare_rules, resolve_hostname
@@ -364,7 +363,7 @@ def main() -> int:
                     f"CITADEL_CLOUDFLARE_DOMAIN={domain} is outside zone {zone_domain}"
                 )
 
-            policy = cloudflare_rules(data_root / "ports.filter.json", strict=True)
+            policy = cloudflare_rules(root / "ports.filter.json", strict=True)
             desired: dict[str, dict[str, Any]] = {}
             hostnames_seen: set[str] = set()
             all_services = list(services.get("http_services", []))

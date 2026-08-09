@@ -235,13 +235,12 @@ A non-empty whitelist takes precedence. Otherwise the blacklist is applied.
 
 The merged Fedora container setup asks for `CITADEL_PERSISTENT` and enables it
 by default. When enabled, the generated container mounts the instance-specific
-named volume `<container>-citadel` at `/named_volumes/CITADEL` and sets
-`CITADEL_DATA_DIR` to that path.
+named volume `<container>-citadel` at `/named_volumes/CITADEL`.
 
 The volume stores only mutable runtime state. Provider code and configuration
-remain in `/opt/safrano9999/CITADEL`, so image updates are never hidden by the
-volume. The compatibility links generated during container initialization
-migrate existing files once and are safe to recreate:
+remain in the installed plugin directory, so image updates are never hidden by
+the volume. Links generated during container initialization migrate existing
+files once and are safe to recreate:
 
 ```text
 ports.filter.json
@@ -249,9 +248,9 @@ extensions/providers_state.json
 extensions/enabled/cloudflare/routes.json
 ```
 
-All enabled providers write their generated `routes.json` below the same data
-root. Atomic replacements therefore stay inside the volume instead of
-replacing a persistence symlink.
+Without persistence, CITADEL reads and writes these paths directly below its
+own plugin directory. With persistence, atomic replacements resolve the link
+target and stay inside the named volume.
 
 ## Providers
 

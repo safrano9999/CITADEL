@@ -16,6 +16,8 @@ def atomic_write_json(
 ) -> None:
     """Durably replace a JSON file without exposing a partial write."""
     path = Path(path_value)
+    if path.is_symlink():
+        path = path.resolve(strict=False)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         target_mode = path.stat().st_mode & 0o777

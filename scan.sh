@@ -41,18 +41,13 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
-DATA_DIR="${CITADEL_DATA_DIR:-$SCRIPT_DIR}"
-if [[ "$DATA_DIR" != /* ]]; then
-    echo "CITADEL_DATA_DIR must be an absolute path" >&2
-    exit 2
-fi
 CACHE_DIR="$SCRIPT_DIR/cache"
 ICONS_DIR="$SCRIPT_DIR/icons"
 FUNCTIONS_DIR="$SCRIPT_DIR/functions"
 PROVIDERS_DIR="$FUNCTIONS_DIR/providers"
 EXTENSIONS_DIR="$SCRIPT_DIR/extensions"
 ENABLED_EXT_DIR="$EXTENSIONS_DIR/enabled"
-PROVIDER_ROUTES_DIR="$DATA_DIR/extensions/enabled"
+PROVIDER_ROUTES_DIR="$SCRIPT_DIR/extensions/enabled"
 CONFIG="$SCRIPT_DIR/config.ini"
 SS_FILE="$SCRIPT_DIR/ss.json"
 HOST_SS_FILE="$SCRIPT_DIR/host_ss.json"
@@ -60,8 +55,8 @@ HOST_SERVICES_FILE="$SCRIPT_DIR/host_services.json"
 SERVICES_FILE="$SCRIPT_DIR/services.json"
 TAILSCALE_FILE="$SCRIPT_DIR/tailscale.json"
 CONTAINER_ROUTES_FILE="$SCRIPT_DIR/container_routes.json"
-PORT_FILTER_FILE="$DATA_DIR/ports.filter.json"
-PROVIDERS_STATE_FILE="$DATA_DIR/extensions/providers_state.json"
+PORT_FILTER_FILE="$SCRIPT_DIR/ports.filter.json"
+PROVIDERS_STATE_FILE="$SCRIPT_DIR/extensions/providers_state.json"
 TIMESTAMP_FILE="$SCRIPT_DIR/last_scan.txt"
 RUNTIME_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
 SCAN_LOCK_FILE="${CITADEL_SCAN_LOCK_FILE:-$RUNTIME_DIR/citadel-scan-${UID}.lock}"
