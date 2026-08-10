@@ -12,7 +12,7 @@ CITADEL_WEBUI_PORT=11000
 #default-preset: 1
 CITADEL_PERSISTENT=1
 
-#default-preset: insert later
+# Optional: leave empty to disable subnet routes.
 CITADEL_SUBNET_IP=
 
 #default-preset: 0

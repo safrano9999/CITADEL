@@ -27,15 +27,13 @@ def main() -> int:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
     header = importlib.import_module("python_header")
-    subnet_ip = header.get("CITADEL_SUBNET_IP", "")
+    subnet_ip = header.get("CITADEL_SUBNET_IP", "").strip()
+    if subnet_ip.casefold() == "blank":
+        subnet_ip = ""
 
     routes: dict[str, dict[str, Any]] = {}
-    errors: list[str] = []
 
     http_services = services_payload.get("http_services", []) if isinstance(services_payload, dict) else []
-
-    if not subnet_ip:
-        errors.append("Missing CITADEL_SUBNET_IP")
 
     for svc in http_services if subnet_ip else []:
         port = int(svc.get("port", 0))
@@ -62,14 +60,14 @@ def main() -> int:
     payload = {
         "provider_id": "subnet",
         "label": label,
-        "considered": True,
+        "considered": bool(subnet_ip),
         "available": bool(routes),
         "generated_at": now_iso(),
-        "default_candidate": True,
+        "default_candidate": bool(subnet_ip),
         "route_schema": ROUTE_SCHEMA_VERSION,
         "subnet_ip": subnet_ip,
         "services": routes,
-        "errors": errors,
+        "errors": [],
     }
     write_json(args.routes_out, payload)
     return 0

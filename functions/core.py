@@ -62,6 +62,11 @@ def _enabled(value: object) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _configured_subnet_ip() -> str:
+    value = os.environ.get("CITADEL_SUBNET_IP", "").strip()
+    return "" if value.casefold() == "blank" else value
+
+
 def _safe_discovery_url(value: object) -> str:
     url = str(value or "").strip()
     try:
@@ -199,6 +204,8 @@ def _load_providers() -> dict:
 
     for provider_dir in enabled_dirs:
         pid = provider_dir.name
+        if pid == "subnet" and not _configured_subnet_ip():
+            continue
 
         ext = _read_json(provider_dir / "extension.json", {})
         routes = _read_json(_provider_routes_file(provider_dir), {})

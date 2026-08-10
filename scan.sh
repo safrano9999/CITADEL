@@ -85,6 +85,11 @@ if [[ -f "$CONFIG" ]]; then
 fi
 
 HOST_IP="${CITADEL_SUBNET_IP:-}"
+HOST_IP="${HOST_IP#"${HOST_IP%%[![:space:]]*}"}"
+HOST_IP="${HOST_IP%"${HOST_IP##*[![:space:]]}"}"
+case "${HOST_IP,,}" in
+    ""|blank|null) HOST_IP="" ;;
+esac
 CONTAINER_MODE="${CITADEL_CONTAINER:-0}"
 CONTAINER_MAP="${CITADEL_CONTAINER_MAP:-0}"
 DEDUPE_PORT="${CITADEL_DEDUPE_PORT:-}"
