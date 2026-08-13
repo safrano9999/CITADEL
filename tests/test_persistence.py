@@ -41,7 +41,7 @@ class PersistenceExampleTests(unittest.TestCase):
             )
             return result.stdout.splitlines()
 
-    def test_enabled_persistence_emits_one_volume_and_three_file_links(self) -> None:
+    def test_enabled_persistence_emits_one_volume_and_four_file_links(self) -> None:
         self.assertEqual(
             self.run_helper("mounts", "1"),
             ["citadel-test-citadel:/named_volumes/CITADEL:Z"],
@@ -53,6 +53,7 @@ class PersistenceExampleTests(unittest.TestCase):
             "ports.filter.json",
             "extensions/providers_state.json",
             "extensions/enabled/cloudflare/routes.json",
+            "tailscale.json",
         ):
             self.assertIn(
                 f"/named_volumes/CITADEL/{relative}"

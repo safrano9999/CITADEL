@@ -9,6 +9,19 @@ UNIT_DIR = ROOT / "image/runtime/etc/systemd/system"
 
 
 class CitadelSystemdRuntimeTests(unittest.TestCase):
+    def test_tailscale_allocator_environment_reaches_runtime_units(self) -> None:
+        expected = {
+            "CITADEL_TAILSCALE_HTTP_START",
+            "CITADEL_TAILSCALE_HTTPS_START",
+            "CITADEL_TAILSCALE_RANGE",
+        }
+        for name in ("citadel.service", "citadel-scan.service"):
+            unit = (UNIT_DIR / name).read_text(encoding="utf-8")
+            pass_environment = next(
+                line for line in unit.splitlines() if line.startswith("PassEnvironment=")
+            )
+            self.assertTrue(expected.issubset(set(pass_environment.split("=")[1].split())))
+
     def test_scan_coalesces_duplicate_requests_without_waiting(self) -> None:
         scan = (ROOT / "scan.sh").read_text(encoding="utf-8")
         self.assertIn("flock --nonblock", scan)

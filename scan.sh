@@ -124,6 +124,7 @@ import socket
 import sys
 
 old_procs = {}
+old_pids = {}
 ss_file, providers_dir = sys.argv[1:3]
 sys.path.insert(0, providers_dir)
 from atomic_io import atomic_write_json
@@ -131,6 +132,7 @@ if os.path.exists(ss_file):
     try:
         old = json.load(open(ss_file))
         old_procs = {p['port']: p.get('process') for p in old if p.get('process')}
+        old_pids = {p['port']: p.get('pid') for p in old if p.get('pid')}
     except Exception:
         pass
 
@@ -151,12 +153,18 @@ for line in sys.stdin:
     port = int(m.group(1))
     addr = local[:local.rfind(':')]
     process = None
+    pid = None
     rest = ' '.join(parts[4:])
     pm = re.search(r'users:\\(\\(\\\"([^\\\"]+)\\\"', rest)
     if pm:
         process = pm.group(1)
+    pid_match = re.search(r'\bpid=(\d+)', rest)
+    if pid_match:
+        pid = int(pid_match.group(1))
     if not process and port in old_procs:
         process = old_procs[port]
+    if not pid and port in old_pids:
+        pid = old_pids[port]
 
     try:
         service = socket.getservbyport(port, 'tcp')
@@ -169,11 +177,12 @@ for line in sys.stdin:
         'addrs': [],
         'listeners': [],
         'process': process,
+        'pid': pid,
         'service': service,
     })
     if addr not in entry['addrs']:
         entry['addrs'].append(addr)
-    listener = {'addr': addr, 'process': process}
+    listener = {'addr': addr, 'process': process, 'pid': pid}
     if listener not in entry['listeners']:
         entry['listeners'].append(listener)
     if entry.get('process') == 'tailscaled' and process and process != 'tailscaled':
@@ -181,6 +190,8 @@ for line in sys.stdin:
         entry['process'] = process
     if not entry.get('process') and process:
         entry['process'] = process
+    if not entry.get('pid') and pid:
+        entry['pid'] = pid
 
 atomic_write_json(ss_file, [ports[port] for port in sorted(ports)])
 " "$SS_FILE" "$PROVIDERS_DIR"

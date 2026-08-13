@@ -8,7 +8,15 @@ const defaultServicesPath = path.join(pluginRoot, "services.json");
 const defaultPolicyPath = path.join(pluginRoot, "ports.filter.json");
 const defaultScanScript = path.join(pluginRoot, "scan.sh");
 const coreBridge = path.join(pluginRoot, "functions", "plugin_bridge.py");
-const providerNames = new Set(["localhost", "subnet", "tailscale", "cloudflare", "other"]);
+const providerNames = new Set([
+  "localhost",
+  "subnet",
+  "tailscale-default",
+  "tailscale-http",
+  "tailscale-https",
+  "cloudflare",
+  "other",
+]);
 let activeScan;
 
 const configSchema = {
@@ -154,13 +162,21 @@ function commandButton(label, command, style) {
   };
 }
 
-function navigationBlocks(activeProvider) {
-  const providers = ["localhost", "subnet", "tailscale", "cloudflare", "other"];
+function providerLabel(data, provider) {
+  if (provider === "other") {
+    return "Other";
+  }
+  return readString(data?.provider_options?.[provider])
+    ?? provider.split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join(" ");
+}
+
+function navigationBlocks(activeProvider, data) {
+  const providers = [...Object.keys(data?.provider_options ?? {}), "other"];
   const blocks = [
     {
       type: "buttons",
       buttons: providers.map((provider) => commandButton(
-        provider[0].toUpperCase() + provider.slice(1),
+        providerLabel(data, provider),
         `/citadel ${provider}`,
         provider === activeProvider ? "primary" : "secondary",
       )),
@@ -208,7 +224,7 @@ function createOtherReply(data, selectedPort) {
       .join(" | ");
     return {
       text: `CITADEL - Other :${selectedPort}${details ? `\n${details}` : ""}`,
-      presentation: { tone: "neutral", blocks: navigationBlocks("other") },
+      presentation: { tone: "neutral", blocks: navigationBlocks("other", data) },
     };
   }
 
@@ -226,7 +242,7 @@ function createOtherReply(data, selectedPort) {
     text: "CITADEL - Other",
     presentation: {
       tone: "neutral",
-      blocks: [...portBlocks, ...navigationBlocks("other")],
+      blocks: [...portBlocks, ...navigationBlocks("other", data)],
     },
   };
 }
@@ -241,10 +257,10 @@ function createProviderReply(data, provider) {
     buttons: [{ label: serviceLabel(service), url, priority: service.featured ? 100 : 0 }],
   }));
   return {
-    text: `CITADEL - ${provider[0].toUpperCase() + provider.slice(1)}`,
+    text: `CITADEL - ${providerLabel(data, provider)}`,
     presentation: {
       tone: "neutral",
-      blocks: [...serviceBlocks, ...navigationBlocks(provider)],
+      blocks: [...serviceBlocks, ...navigationBlocks(provider, data)],
     },
   };
 }
@@ -498,8 +514,9 @@ async function handleCommand(ctx, api) {
     const provider = providerNames.has(parts[1]?.toLowerCase())
       ? parts[1].toLowerCase()
       : "localhost";
-    const reply = createProviderReply(await readDashboard(api), provider);
-    reply.text = `CITADEL scan completed - ${provider[0].toUpperCase() + provider.slice(1)}`;
+    const scannedData = await readDashboard(api);
+    const reply = createProviderReply(scannedData, provider);
+    reply.text = `CITADEL scan completed - ${providerLabel(scannedData, provider)}`;
     return reply;
   }
 
@@ -512,7 +529,7 @@ async function handleCommand(ctx, api) {
   }
   if (!providerNames.has(action)) {
     return {
-      text: "Usage: /citadel [localhost|subnet|tailscale|cloudflare|other|scan]",
+      text: "Usage: /citadel [localhost|subnet|tailscale-default|tailscale-http|tailscale-https|cloudflare|other|scan]",
     };
   }
   return createProviderReply(data, action);

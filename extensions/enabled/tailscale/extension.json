@@ -3,5 +3,5 @@
   "label": "Tailscale",
   "enabled": true,
   "provider": "tailscale",
-  "version": 1
+  "version": 2
 }

@@ -8,6 +8,7 @@ CITADEL_WEBUI_PORT=11000
 #named-volume: /named_volumes/CITADEL /named_volumes/CITADEL/ports.filter.json /opt/safrano9999/CITADEL/ports.filter.json file
 #named-volume: /named_volumes/CITADEL /named_volumes/CITADEL/extensions/providers_state.json /opt/safrano9999/CITADEL/extensions/providers_state.json file
 #named-volume: /named_volumes/CITADEL /named_volumes/CITADEL/extensions/enabled/cloudflare/routes.json /opt/safrano9999/CITADEL/extensions/enabled/cloudflare/routes.json file
+#named-volume: /named_volumes/CITADEL /named_volumes/CITADEL/tailscale.json /opt/safrano9999/CITADEL/tailscale.json file
 #choices: 0 1
 #default-preset: 1
 CITADEL_PERSISTENT=1
@@ -30,6 +31,23 @@ CITADEL_DEDUPE_PORT=65100
 
 #default-preset: insert later
 CITADEL_TAILSCALE=true
+
+#choices: 0 1
+#default-preset: 1
+CITADEL_TAILSCALE_DEFAULT=1
+
+# Optional first public port for CITADEL-managed Tailscale HTTP Serve routes.
+# Leave empty or set 0 to disable the Tailscale HTTP dropdown.
+CITADEL_TAILSCALE_HTTP_START=
+
+# Optional first public port for CITADEL-managed Tailscale HTTPS Serve routes.
+# Leave empty or set 0 to disable the Tailscale HTTPS dropdown.
+#default-preset: 35000
+CITADEL_TAILSCALE_HTTPS_START=35000
+
+#required: Stable spacing between initially allocated Tailscale ports
+#default-preset: 10
+CITADEL_TAILSCALE_RANGE=10
 
 #required: Enable Tailscale discovery (0/1)
 #default-preset: 0

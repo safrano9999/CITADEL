@@ -201,16 +201,31 @@ def main() -> int:
             state["errors"].append(f"Provider {provider_id} failed")
             print(f"    error: provider script failed (rc={run_res.returncode})")
 
+        route_warnings = routes_payload.get("warnings", [])
+        if isinstance(route_warnings, list):
+            for warning in route_warnings:
+                if warning:
+                    print(f"    warn: {provider_id}: {warning}")
+
         route_errors = routes_payload.get("errors", [])
         if isinstance(route_errors, list):
             for err in route_errors:
                 if err:
-                    print(f"    warn: {provider_id}: {err}")
+                    message = f"Provider {provider_id}: {err}"
+                    state["errors"].append(message)
+                    print(f"    error: {provider_id}: {err}")
 
         if run_res.stderr and run_res.returncode != 0:
-            tail = run_res.stderr.strip().splitlines()[-1] if run_res.stderr.strip() else ""
-            if tail:
-                print(f"    stderr: {tail}")
+            stderr_lines = [
+                line.strip()
+                for line in run_res.stderr.strip().splitlines()
+                if line.strip()
+            ]
+            for line in stderr_lines:
+                message = f"Provider {provider_id}: {line}"
+                if message not in state["errors"]:
+                    state["errors"].append(message)
+                print(f"    stderr: {line}")
 
     write_json(args.state_file, state)
     considered_count = len(state["considered_providers"])

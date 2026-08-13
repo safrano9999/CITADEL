@@ -1,5 +1,4 @@
 {
   "label": "Tailscale",
-  "fetch": true,
-  "route_mode": "auto"
+  "fetch": true
 }

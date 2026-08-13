@@ -215,6 +215,60 @@ def _load_providers() -> dict:
         is_considered = bool(routes.get("considered", pid in considered))
         is_available = bool(routes.get("available", pid in available))
 
+        # Tailscale is reconciled once, but exposes independent Default, HTTP,
+        # and HTTPS Serve choices in the dashboard. There is deliberately no
+        # Direct provider: wildcard-bound services remain reachable without
+        # CITADEL managing or advertising that path.
+        variants = routes.get("variants") if pid == "tailscale" else None
+        if isinstance(variants, dict):
+            variant_seen = False
+            for scheme, default_label in (
+                ("default", "Tailscale Default"),
+                ("http", "Tailscale HTTP"),
+                ("https", "Tailscale HTTPS"),
+            ):
+                variant = variants.get(scheme)
+                if not isinstance(variant, dict):
+                    continue
+                variant_id = f"tailscale-{scheme}"
+                variant_label = str(variant.get("label") or default_label)
+                variant_services = variant.get("services")
+                if not isinstance(variant_services, dict):
+                    variant_services = {}
+                variant_considered = bool(
+                    variant.get("considered", bool(variant_services))
+                )
+                variant_available = bool(
+                    variant.get("available", bool(variant_services))
+                )
+                if variant_considered:
+                    provider_options[variant_id] = variant_label
+                    variant_seen = True
+                for port_str, route in variant_services.items():
+                    url = _route_url(route)
+                    if url:
+                        provider_urls_by_port.setdefault(variant_id, {})[
+                            str(port_str)
+                        ] = url
+                for err in variant.get("errors") or []:
+                    if err:
+                        alerts.append(f"[{variant_id}] {err}")
+                if variant_considered and not variant_available:
+                    alerts.append(
+                        f"[{variant_id}] beim letzten Scan beruecksichtigt, "
+                        "aber ohne aktive Routen."
+                    )
+
+            domain = str(routes.get("domain") or "")
+            if variant_seen and domain:
+                provider_header_meta.append(
+                    {"label": "Tailscale", "value": domain}
+                )
+            for err in routes.get("errors") or []:
+                if err:
+                    alerts.append(f"[tailscale] {err}")
+            continue
+
         # Header meta (IP / domain display)
         header_value = ""
         if pid == "localhost":

@@ -134,7 +134,9 @@ Available commands:
 /citadel
 /citadel localhost
 /citadel subnet
-/citadel tailscale
+/citadel tailscale-default
+/citadel tailscale-http
+/citadel tailscale-https
 /citadel cloudflare
 /citadel other
 /citadel scan
@@ -158,6 +160,10 @@ renders provider buttons, and can run the configured scanner.
 | `CITADEL_DEDUPE_PORT` | `65100` | First replacement port when a mapped host service duplicates a container port |
 | `CITADEL_SUBNET_IP` | empty | Address used for subnet routes and the Cloudflare origin |
 | `CITADEL_TAILSCALE` | `true` | Enable Tailscale route reconciliation |
+| `CITADEL_TAILSCALE_DEFAULT` | `1` | Enable (`1`) or disable (`0`) the `Tailscale Default` Serve route, which keeps the discovered service port unchanged |
+| `CITADEL_TAILSCALE_HTTP_START` | empty | First public port for stable Tailscale HTTP Serve assignments; empty or `0` disables this dropdown |
+| `CITADEL_TAILSCALE_HTTPS_START` | `35000` | First public port for stable Tailscale HTTPS Serve assignments; empty or `0` disables this dropdown |
+| `CITADEL_TAILSCALE_RANGE` | `10` | Initial spacing between sorted Tailscale assignments |
 | `CITADEL_TS_DISCOVERY` | `0` | Show manually generated Tailnet discovery data in a separate view |
 | `CITADEL_CLOUDFLARE` | `1` | Enable Cloudflare reconciliation when all required values exist |
 | `CITADEL_CLOUDFLARE_DOMAIN` | empty | DNS suffix used for generated hostnames |
@@ -246,6 +252,7 @@ files once and are safe to recreate:
 ports.filter.json
 extensions/providers_state.json
 extensions/enabled/cloudflare/routes.json
+tailscale.json
 ```
 
 Without persistence, CITADEL reads and writes these paths directly below its
@@ -271,23 +278,50 @@ is active.
 
 ### Tailscale
 
-CITADEL never installs, authenticates, or starts Tailscale. For every new or
-changed web service, automatic mode:
+CITADEL never installs, authenticates, or starts Tailscale. For every
+discovered HTTP service it can publish a one-to-one Serve route plus two
+independently allocated variants:
 
-1. tries an HTTPS Tailscale Serve listener;
-2. falls back to HTTP Serve;
-3. uses a direct Tailnet URL only when the service already listens on a
-   wildcard or Tailscale address.
+- `Tailscale Default`, enabled with `CITADEL_TAILSCALE_DEFAULT=1`, keeps the
+  discovered service port unchanged;
+- `Tailscale HTTP`, beginning at `CITADEL_TAILSCALE_HTTP_START`;
+- `Tailscale HTTPS`, beginning at `CITADEL_TAILSCALE_HTTPS_START`.
 
-`scan.sh --provider tailscale` performs the same listener discovery and
-HTTPS-before-HTTP probing while reconciling only the enabled Tailscale
-provider. It does not call the Cloudflare or subnet providers. The Fedora
-container runs one complete scan during initialization. Further scans run
-only when explicitly requested through the CLI.
+The example configuration enables `Tailscale Default`, disables the allocated
+HTTP variant with an empty start, and begins allocated HTTPS routes at `35000`.
+Set `CITADEL_TAILSCALE_DEFAULT=0` to disable only the one-to-one variant. An
+empty or `0` start value disables only the corresponding allocated variant.
+Direct Tailnet access to applications bound to a wildcard or Tailscale address
+remains technically available, but CITADEL neither creates, removes, nor
+displays a separate Tailscale Direct route.
 
-Route decisions are persisted in `tailscale.json`, so unchanged services are
-not reconfigured on every scan. Foreign or manually changed listeners are not
-claimed.
+On the first allocation, services are sorted by their origin port and spaced
+by `CITADEL_TAILSCALE_RANGE`, for example `35000`, `35010`, `35020`. A service
+discovered later is inserted into the available numeric gap without changing
+existing public ports. A collision during a new assignment advances the
+candidate by one until a free port inside that gap is found. Existing
+assignments never move automatically: if another listener later occupies a
+persisted port, the scan reports its address, process/PID or Tailscale handler
+and leaves both the foreign listener and the stored assignment untouched.
+
+Choose dedicated non-overlapping HTTP and HTTPS port blocks that do not overlap
+application, container-publish, or raw-TCP ranges. CITADEL also checks current
+local sockets, every live Tailscale listener, and all stored assignments before
+claiming a new port. Missing services retain their assignments so that an old
+URL is never silently reused for a different service. Raw TCP services such as
+PostgreSQL participate only in collision detection; they do not receive HTTP or
+HTTPS tiles.
+
+`scan.sh --provider tailscale` performs the same listener discovery while
+reconciling only the enabled Tailscale provider and its configured Default,
+HTTP, and HTTPS variants. It does not call the Cloudflare or subnet providers.
+The Fedora container runs one complete scan during initialization. Further
+scans run only when explicitly requested through the CLI.
+
+Route decisions and stable port assignments are persisted in `tailscale.json`,
+so unchanged services are not reconfigured on every scan. In the Fedora setup
+this file uses the existing CITADEL named volume; no additional volume is
+created. Foreign or manually changed listeners are never claimed.
 
 Allow the scanning user to manage Tailscale without running every scan as root:
 
