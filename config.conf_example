@@ -45,7 +45,8 @@ CITADEL_TAILSCALE_HTTP_START=
 #default-preset: 35000
 CITADEL_TAILSCALE_HTTPS_START=35000
 
-#required: Stable spacing between initially allocated Tailscale ports
+# Optional spacing between initially allocated Tailscale ports.
+# When omitted, CITADEL uses 10.
 #default-preset: 10
 CITADEL_TAILSCALE_RANGE=10
 
