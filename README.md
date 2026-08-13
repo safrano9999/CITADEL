@@ -246,7 +246,9 @@ named volume `<container>-citadel` at `/named_volumes/CITADEL`.
 The volume stores only mutable runtime state. Provider code and configuration
 remain in the installed plugin directory, so image updates are never hidden by
 the volume. Links generated during container initialization migrate existing
-files once and are safe to recreate:
+files once where present and are safe to recreate. The initially absent
+`tailscale.json` uses a direct link so its first atomic write creates valid JSON
+instead of an empty placeholder:
 
 ```text
 ports.filter.json
