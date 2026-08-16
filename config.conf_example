@@ -24,6 +24,11 @@ CITADEL_PERSISTENT=1
 # Optional: leave empty to disable subnet routes.
 CITADEL_SUBNET_IP=
 
+#choices: 0 1
+#default-preset: 0
+# HTTP services remain visible but are not exposed through providers when enabled.
+CITADEL_HTTPS_ONLY=0
+
 #default-preset: 0
 #choices: 0 1
 CITADEL_CONTAINER=0

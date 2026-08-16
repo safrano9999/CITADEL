@@ -13,6 +13,10 @@ from typing import Any
 from cloudflare_policy import normalize_rule
 from providers.atomic_io import atomic_write_json
 
+PROVIDERS_DIR = Path(__file__).resolve().parent / "providers"
+sys.path.insert(0, str(PROVIDERS_DIR))
+from common import routable_services
+
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
@@ -77,9 +81,8 @@ def normalize_emails_csv(value: str) -> list[str]:
 
 def http_ports(services_file: Path) -> list[str]:
     services = read_json(services_file, {"http_services": []})
-    rows = list(services.get("http_services", [])) if isinstance(services, dict) else []
-    if isinstance(services, dict):
-        rows.extend(services.get("host_http_services", []))
+    rows = routable_services(services)
+    rows.extend(routable_services(services, "host_http_services"))
     ports: list[str] = []
     for row in rows:
         if not isinstance(row, dict):

@@ -41,6 +41,22 @@ def parse_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def routable_services(payload: Any, key: str = "http_services") -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    rows = payload.get(key, [])
+    if not isinstance(rows, list):
+        return []
+    services = [row for row in rows if isinstance(row, dict)]
+    if not parse_bool(payload.get("https_only")):
+        return services
+    return [
+        row
+        for row in services
+        if str(row.get("scheme") or "").strip().lower() == "https"
+    ]
+
+
 def read_key_value(path: str, key: str) -> str:
     if not os.path.exists(path):
         return ""

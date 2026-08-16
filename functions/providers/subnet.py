@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from common import ROUTE_SCHEMA_VERSION, now_iso, read_json, route_record, write_json
+from common import ROUTE_SCHEMA_VERSION, now_iso, read_json, routable_services, route_record, write_json
 
 
 def main() -> int:
@@ -33,7 +33,7 @@ def main() -> int:
 
     routes: dict[str, dict[str, Any]] = {}
 
-    http_services = services_payload.get("http_services", []) if isinstance(services_payload, dict) else []
+    http_services = routable_services(services_payload)
 
     for svc in http_services if subnet_ip else []:
         port = int(svc.get("port", 0))

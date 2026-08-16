@@ -24,6 +24,11 @@ class CitadelSystemdRuntimeTests(unittest.TestCase):
 
     def test_scan_coalesces_duplicate_requests_without_waiting(self) -> None:
         scan = (ROOT / "scan.sh").read_text(encoding="utf-8")
+        example = (ROOT / "config.conf_example").read_text(encoding="utf-8")
+        scan_unit = (UNIT_DIR / "citadel-scan.service").read_text(encoding="utf-8")
+        self.assertIn("CITADEL_HTTPS_ONLY=0", example)
+        self.assertIn("CITADEL_HTTPS_ONLY", scan_unit)
+        self.assertIn("if https_only_raw != 'true' or scheme == 'https'", scan)
         self.assertIn("flock --nonblock", scan)
         self.assertNotIn("CITADEL_SCAN_LOCK_TIMEOUT", scan)
         self.assertNotIn("flock --wait", scan)

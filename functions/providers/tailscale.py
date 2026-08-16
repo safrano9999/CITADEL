@@ -18,6 +18,7 @@ from common import (
     now_iso,
     parse_bool,
     read_json,
+    routable_services,
     route_record,
     run,
     set_ini_value,
@@ -853,10 +854,10 @@ def main() -> int:
     all_services = [
         service
         for service in (
-            list(services_payload.get("http_services", []))
-            + list(services_payload.get("host_http_services", []))
+            routable_services(services_payload)
+            + routable_services(services_payload, "host_http_services")
         )
-        if isinstance(service, dict) and service_scheme(service) in set(PUBLIC_SCHEMES)
+        if service_scheme(service) in set(PUBLIC_SCHEMES)
     ]
     services_by_key: dict[str, dict[str, Any]] = {}
     for service in all_services:

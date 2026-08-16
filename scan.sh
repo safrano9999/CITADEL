@@ -84,6 +84,13 @@ if [[ -f "$CONFIG" ]]; then
     CA_CERT="$(grep '^ca_cert' "$CONFIG" 2>/dev/null | cut -d= -f2 | xargs 2>/dev/null || true)"
 fi
 
+HTTPS_ONLY_VALUE="$(PYTHONPATH="$SCRIPT_DIR" python3 -c \
+    'from python_header import get; print(get("CITADEL_HTTPS_ONLY", "0"))')"
+case "${HTTPS_ONLY_VALUE,,}" in
+    1|true|yes|on) HTTPS_ONLY=true ;;
+    *) HTTPS_ONLY=false ;;
+esac
+
 HOST_IP="${CITADEL_SUBNET_IP:-}"
 HOST_IP="${HOST_IP#"${HOST_IP%%[![:space:]]*}"}"
 HOST_IP="${HOST_IP%"${HOST_IP##*[![:space:]]}"}"
@@ -670,7 +677,8 @@ import sys
     dedupe_raw,
     container_routes_file,
     host_services_file,
-) = sys.argv[1:13]
+    https_only_raw,
+) = sys.argv[1:14]
 sys.path.insert(0, providers_dir)
 from atomic_io import atomic_write_json
 sys.path.insert(0, os.path.dirname(providers_dir))
@@ -750,9 +758,11 @@ for p in ss_raw:
             'icon': icon,
             'scheme': scheme,
             'network_ip': c.get('network_ip'),
-            'urls': {
-                'localhost': f'{scheme}://127.0.0.1:{publish_port}',
-            },
+            'urls': (
+                {'localhost': f'{scheme}://127.0.0.1:{publish_port}'}
+                if https_only_raw != 'true' or scheme == 'https'
+                else {}
+            ),
         })
     else:
         other_ports.append({
@@ -766,6 +776,7 @@ for p in ss_raw:
 
 payload = {
     'generated_at': datetime.datetime.now().isoformat(timespec='seconds'),
+    'https_only': https_only_raw == 'true',
     'http_services': http_services,
     'other_ports': other_ports,
     'host_http_services': [],
@@ -860,7 +871,7 @@ atomic_write_json(host_services_file, host_payload)
 atomic_write_json(out_file, payload, indent=None)
 " "$SS_FILE" "$CACHE_DIR" "$ICONS_DIR" "$SERVICES_FILE" "$PROVIDERS_DIR" \
     "$CONTAINER_MODE" "$HOST_SS_FILE" "$HOST_RESULTS_FILE" "$CONTAINER_MAP" "$DEDUPE_PORT" "$CONTAINER_ROUTES_FILE" \
-    "$HOST_SERVICES_FILE"
+    "$HOST_SERVICES_FILE" "$HTTPS_ONLY"
 [[ -z "$HOST_RESULTS_FILE" ]] || rm -f "$HOST_RESULTS_FILE"
 echo "services.json written"
 echo

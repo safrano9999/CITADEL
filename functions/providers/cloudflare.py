@@ -15,6 +15,7 @@ from common import (
     now_iso,
     parse_bool,
     read_json,
+    routable_services,
     route_record,
     write_json,
 )
@@ -366,8 +367,8 @@ def main() -> int:
             policy = cloudflare_rules(root / "ports.filter.json", strict=True)
             desired: dict[str, dict[str, Any]] = {}
             hostnames_seen: set[str] = set()
-            all_services = list(services.get("http_services", []))
-            all_services.extend(services.get("host_http_services", []))
+            all_services = routable_services(services)
+            all_services.extend(routable_services(services, "host_http_services"))
             for item in all_services:
                 if not isinstance(item, dict):
                     continue

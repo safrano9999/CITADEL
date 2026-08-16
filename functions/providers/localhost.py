@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
-from common import ROUTE_SCHEMA_VERSION, now_iso, read_json, route_record, write_json
+from common import ROUTE_SCHEMA_VERSION, now_iso, read_json, routable_services, route_record, write_json
 
 
 def main() -> int:
@@ -23,7 +23,7 @@ def main() -> int:
     label = str(ext_cfg.get("label") or "Localhost")
 
     routes: dict[str, dict[str, Any]] = {}
-    http_services = services_payload.get("http_services", []) if isinstance(services_payload, dict) else []
+    http_services = routable_services(services_payload)
 
     for svc in http_services:
         port = int(svc.get("port", 0))

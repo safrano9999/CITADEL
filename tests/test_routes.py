@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PROVIDERS_DIR = ROOT / "functions" / "providers"
 sys.path.insert(0, str(PROVIDERS_DIR))
 
-from common import route_record  # noqa: E402
+from common import routable_services, route_record  # noqa: E402
 
 
 def load_tailscale_provider():
@@ -46,6 +46,19 @@ def exact_route_payload(
 
 
 class RouteHelperTests(unittest.TestCase):
+    def test_https_only_filters_routes_without_removing_discovered_http(self) -> None:
+        payload = {
+            "https_only": False,
+            "http_services": [
+                {"port": 8000, "scheme": "http"},
+                {"port": 8443, "scheme": "https"},
+            ],
+        }
+        self.assertEqual([row["port"] for row in routable_services(payload)], [8000, 8443])
+        payload["https_only"] = True
+        self.assertEqual([row["port"] for row in routable_services(payload)], [8443])
+        self.assertEqual(len(payload["http_services"]), 2)
+
     def test_serve_target_uses_origin_port_with_public_port_fallback(self) -> None:
         self.assertEqual(
             tailscale.serve_target(8443, "https"),

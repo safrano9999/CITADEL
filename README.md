@@ -159,6 +159,7 @@ renders provider buttons, and can run the configured scanner.
 | `CITADEL_CONTAINER_MAP` | `0` | Route discovered host HTTP services through Tailscale and Cloudflare |
 | `CITADEL_DEDUPE_PORT` | `65100` | First replacement port when a mapped host service duplicates a container port |
 | `CITADEL_SUBNET_IP` | empty | Address used for subnet routes and the Cloudflare origin |
+| `CITADEL_HTTPS_ONLY` | `0` | When enabled, route only services that already speak HTTPS on localhost; HTTP services remain visible |
 | `CITADEL_TAILSCALE` | `true` | Enable Tailscale route reconciliation |
 | `CITADEL_TAILSCALE_DEFAULT` | `1` | Enable (`1`) or disable (`0`) the `Tailscale Default` Serve route, which keeps the discovered service port unchanged |
 | `CITADEL_TAILSCALE_HTTP_START` | empty | First public port for stable Tailscale HTTP Serve assignments; empty or `0` disables this dropdown |
