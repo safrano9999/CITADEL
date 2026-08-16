@@ -20,6 +20,21 @@ LOCAL_UNIT="$LOCAL_UNIT_DIR/$UNIT_NAME"
 USER_UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 USER_UNIT="$USER_UNIT_DIR/$UNIT_NAME"
 PYTHON_BIN="${PYTHON_BIN:-$(command -v python3)}"
+CONFIG_FILE="$SCRIPT_DIR/config.conf"
+[ -f "$CONFIG_FILE" ] || CONFIG_FILE="$SCRIPT_DIR/config.conf_example"
+TRANSPORT="$(sed -n 's/^CITADEL_WEBUI_TRANSPORT=//p' "$CONFIG_FILE" | tail -n 1)"
+SOCKET="$(sed -n 's/^CITADEL_WEBUI_SOCKET=//p' "$CONFIG_FILE" | tail -n 1)"
+RUNTIME_DIRECTORY=""
+
+case "${TRANSPORT:-tcp}" in
+    tcp) EXEC_START="$PYTHON_BIN $SCRIPT_DIR/webui.py" ;;
+    unix)
+        case "$SOCKET" in /*|%t/*) ;; *) echo "Invalid CITADEL_WEBUI_SOCKET: $SOCKET" >&2; exit 1 ;; esac
+        EXEC_START="$PYTHON_BIN -m uvicorn webui:app --uds $SOCKET --proxy-headers --forwarded-allow-ips=*"
+        RUNTIME_DIRECTORY="RuntimeDirectory=citadel"
+        ;;
+    *) echo "Invalid CITADEL_WEBUI_TRANSPORT: $TRANSPORT" >&2; exit 1 ;;
+esac
 
 mkdir -p "$LOCAL_UNIT_DIR"
 
@@ -32,7 +47,8 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=$SCRIPT_DIR
-ExecStart=$PYTHON_BIN $SCRIPT_DIR/webui.py
+$RUNTIME_DIRECTORY
+ExecStart=$EXEC_START
 Restart=always
 RestartSec=5
 

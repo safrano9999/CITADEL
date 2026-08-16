@@ -4,6 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 USER_UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
+if [ "$(basename "$(cd "$SCRIPT_DIR/.." && pwd -P)")" = "CONTAINER" ]; then
+    exec "$SCRIPT_DIR/config.sh" "$@"
+fi
+
 "$SCRIPT_DIR/config.sh" --no-container "$@"
 "$SCRIPT_DIR/set_daemon.sh" --render-only
 

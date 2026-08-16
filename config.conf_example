@@ -1,9 +1,17 @@
+#choices: tcp unix
+#required: CITADEL web UI transport
+CITADEL_WEBUI_TRANSPORT=tcp
+
 #publish-host: FASTAPI_HOST
 #required: FastAPI bind host
 FASTAPI_HOST=127.0.0.1
 
 #required: CITADEL internal web UI port
 CITADEL_WEBUI_PORT=11000
+
+# Bare-metal only; containers keep using TCP.
+#required: CITADEL Unix socket path
+CITADEL_WEBUI_SOCKET=%t/citadel/citadel.sock
 
 #named-volume: /named_volumes/CITADEL /named_volumes/CITADEL/ports.filter.json /opt/safrano9999/CITADEL/ports.filter.json file
 #named-volume: /named_volumes/CITADEL /named_volumes/CITADEL/extensions/providers_state.json /opt/safrano9999/CITADEL/extensions/providers_state.json file
