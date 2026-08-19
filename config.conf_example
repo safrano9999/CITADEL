@@ -17,6 +17,7 @@ CITADEL_WEBUI_SOCKET=%t/citadel/citadel.sock
 #named-volume: /named_volumes/CITADEL /named_volumes/CITADEL/extensions/providers_state.json /opt/safrano9999/CITADEL/extensions/providers_state.json file
 #named-volume: /named_volumes/CITADEL /named_volumes/CITADEL/extensions/enabled/cloudflare/routes.json /opt/safrano9999/CITADEL/extensions/enabled/cloudflare/routes.json file
 #named-volume: /named_volumes/CITADEL /named_volumes/CITADEL/tailscale.json /opt/safrano9999/CITADEL/tailscale.json link
+#named-volume: /named_volumes/CITADEL /named_volumes/CITADEL/CADDYFILES /opt/safrano9999/CITADEL/CADDYFILES dir
 #choices: 0 1
 #default-preset: 1
 CITADEL_PERSISTENT=1
@@ -28,6 +29,15 @@ CITADEL_SUBNET_IP=
 #default-preset: 0
 # HTTP services remain visible but are not exposed through providers when enabled.
 CITADEL_HTTPS_ONLY=0
+
+# Optional HTTP User-Agent for service discovery; leave empty to use curl's default.
+#default-preset: Mozilla/5.0 (compatible; CITADEL/1.0)
+CITADEL_USER_AGENT=Mozilla/5.0 (compatible; CITADEL/1.0)
+
+# Destructive: clear every Tailscale Serve/Funnel route before each scan and rebuild from scratch.
+#choices: 0 1
+#default-preset: 0
+CITADEL_CLEAR_TAILSCALE=0
 
 #default-preset: 0
 #choices: 0 1
@@ -51,17 +61,30 @@ CITADEL_TAILSCALE_DEFAULT=1
 
 # Optional first public port for CITADEL-managed Tailscale HTTP Serve routes.
 # Leave empty or set 0 to disable the Tailscale HTTP dropdown.
+#default-preset: 0
 CITADEL_TAILSCALE_HTTP_START=
 
 # Optional first public port for CITADEL-managed Tailscale HTTPS Serve routes.
 # Leave empty or set 0 to disable the Tailscale HTTPS dropdown.
-#default-preset: 35000
-CITADEL_TAILSCALE_HTTPS_START=35000
+#default-preset: 0
+CITADEL_TAILSCALE_HTTPS_START=0
 
 # Optional spacing between initially allocated Tailscale ports.
 # When omitted, CITADEL uses 10.
 #default-preset: 10
 CITADEL_TAILSCALE_RANGE=10
+
+# Optional central-Caddy export. Start 0 disables the generated Caddyfile.
+#default-preset: 0
+CITADEL_CADDY_HTTPS_START=0
+
+# Stable increment between generated central-Caddy HTTPS ports.
+#default-preset: 1
+CITADEL_CADDY_RANGE=1
+
+# Container DNS backend and central Tailscale hostname; required when enabled.
+CITADEL_CADDY_BACKEND=
+CITADEL_CADDY_HOST=
 
 #required: Enable Tailscale discovery (0/1)
 #default-preset: 0

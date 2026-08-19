@@ -160,11 +160,16 @@ renders provider buttons, and can run the configured scanner.
 | `CITADEL_DEDUPE_PORT` | `65100` | First replacement port when a mapped host service duplicates a container port |
 | `CITADEL_SUBNET_IP` | empty | Address used for subnet routes and the Cloudflare origin |
 | `CITADEL_HTTPS_ONLY` | `0` | When enabled, route only services that already speak HTTPS on localhost; HTTP services remain visible |
+| `CITADEL_CLEAR_TAILSCALE` | `0` | At exactly `1`, delete all Tailscale Serve/Funnel routes and all saved CITADEL assignments before every scan, then rebuild them |
 | `CITADEL_TAILSCALE` | `true` | Enable Tailscale route reconciliation |
 | `CITADEL_TAILSCALE_DEFAULT` | `1` | Enable (`1`) or disable (`0`) the `Tailscale Default` Serve route, which keeps the discovered service port unchanged |
 | `CITADEL_TAILSCALE_HTTP_START` | empty | First public port for stable Tailscale HTTP Serve assignments; empty or `0` disables this dropdown |
-| `CITADEL_TAILSCALE_HTTPS_START` | `35000` | First public port for stable Tailscale HTTPS Serve assignments; empty or `0` disables this dropdown |
+| `CITADEL_TAILSCALE_HTTPS_START` | `0` | First public port for stable Tailscale HTTPS Serve assignments; empty or `0` disables this dropdown |
 | `CITADEL_TAILSCALE_RANGE` | `10` | Initial spacing between sorted Tailscale assignments |
+| `CITADEL_CADDY_HTTPS_START` | `0` | First HTTPS port in the generated central-Caddy export; `0` disables it |
+| `CITADEL_CADDY_RANGE` | `1` | Increment between generated central-Caddy ports |
+| `CITADEL_CADDY_BACKEND` | empty | Container DNS name used as the reverse-proxy backend |
+| `CITADEL_CADDY_HOST` | empty | Central Tailscale hostname included beside localhost and `127.0.0.1` |
 | `CITADEL_TS_DISCOVERY` | `0` | Show manually generated Tailnet discovery data in a separate view |
 | `CITADEL_CLOUDFLARE` | `1` | Enable Cloudflare reconciliation when all required values exist |
 | `CITADEL_CLOUDFLARE_DOMAIN` | empty | DNS suffix used for generated hostnames |
@@ -290,8 +295,8 @@ independently allocated variants:
 - `Tailscale HTTP`, beginning at `CITADEL_TAILSCALE_HTTP_START`;
 - `Tailscale HTTPS`, beginning at `CITADEL_TAILSCALE_HTTPS_START`.
 
-The example configuration enables `Tailscale Default`, disables the allocated
-HTTP variant with an empty start, and begins allocated HTTPS routes at `35000`.
+The example configuration enables `Tailscale Default` and disables both
+allocated variants with an empty or `0` start.
 Set `CITADEL_TAILSCALE_DEFAULT=0` to disable only the one-to-one variant. An
 empty or `0` start value disables only the corresponding allocated variant.
 Direct Tailnet access to applications bound to a wildcard or Tailscale address
@@ -325,6 +330,29 @@ Route decisions and stable port assignments are persisted in `tailscale.json`,
 so unchanged services are not reconfigured on every scan. In the Fedora setup
 this file uses the existing CITADEL named volume; no additional volume is
 created. Foreign or manually changed listeners are never claimed.
+
+### Central Caddy export
+
+Set `CITADEL_CADDY_HTTPS_START`, `CITADEL_CADDY_RANGE`,
+`CITADEL_CADDY_BACKEND`, and `CITADEL_CADDY_HOST` to export the latest detected
+container services as one deterministic `CADDYFILES/Caddyfile`. CITADEL is
+placed first; the remaining services follow by internal port. Every frontend
+contains only the configured Tailscale hostname, `localhost`, and `127.0.0.1`.
+The generated routes never include `CITADEL_SUBNET_IP` and never open a port by
+themselves.
+
+With `CITADEL_PERSISTENT=1`, `CADDYFILES` is stored in the existing CITADEL
+named volume. Mount that volume read-only at `/etc/caddy/<instance>` in the
+central Caddy container and add one import to the main Caddyfile, for example:
+
+```text
+import fedora44-ai-safrano9999-ucore/CADDYFILES/Caddyfile
+```
+
+The central Caddy Quadlet remains responsible for publishing the generated
+HTTPS range. A start value of `0` writes a valid disabled file and creates no
+routes. Reload or restart central Caddy after a successful scan changes the
+imported file; Caddy does not watch imported files automatically.
 
 Allow the scanning user to manage Tailscale without running every scan as root:
 

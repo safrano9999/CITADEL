@@ -28,6 +28,26 @@ class CitadelSystemdRuntimeTests(unittest.TestCase):
         scan_unit = (UNIT_DIR / "citadel-scan.service").read_text(encoding="utf-8")
         self.assertIn("CITADEL_HTTPS_ONLY=0", example)
         self.assertIn("CITADEL_HTTPS_ONLY", scan_unit)
+        self.assertIn("CITADEL_USER_AGENT=Mozilla/5.0 (compatible; CITADEL/1.0)", example)
+        self.assertIn("CITADEL_USER_AGENT", scan_unit)
+        self.assertIn('get("CITADEL_USER_AGENT", "")', scan)
+        self.assertIn('CURL_USER_AGENT_ARGS=(--user-agent "$CITADEL_USER_AGENT_VALUE")', scan)
+        self.assertGreaterEqual(scan.count('"${CURL_USER_AGENT_ARGS[@]}"'), 6)
+        self.assertIn("CITADEL_CLEAR_TAILSCALE=0", example)
+        self.assertIn("CITADEL_CLEAR_TAILSCALE", scan_unit)
+        self.assertIn('[[ "$CLEAR_TAILSCALE_VALUE" == "1" ]]', scan)
+        self.assertIn("tailscale serve reset", scan)
+        self.assertIn('atomic_write_json(path, {})', scan)
+        self.assertIn('DISPATCH_STRICT=(--strict)', scan)
+        for key in (
+            "CITADEL_CADDY_HTTPS_START",
+            "CITADEL_CADDY_RANGE",
+            "CITADEL_CADDY_BACKEND",
+            "CITADEL_CADDY_HOST",
+        ):
+            self.assertIn(key, example)
+            self.assertIn(key, scan_unit)
+        self.assertIn('"$FUNCTIONS_DIR/caddy_export.py"', scan)
         self.assertIn("if https_only_raw != 'true' or scheme == 'https'", scan)
         self.assertIn("flock --nonblock", scan)
         self.assertNotIn("CITADEL_SCAN_LOCK_TIMEOUT", scan)

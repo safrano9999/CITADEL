@@ -89,7 +89,7 @@
 
             <span class="tile-name">{{ svc.display_name|default(svc.name|default('Port ' ~ port))|e }}</span>
             <span class="tile-port">
-                {{ '&#128274; ' if scheme == 'https' else '' }}:{{ svc.origin_port|default(svc.port)|int }}
+                {{ '🔒 ' if scheme == 'https' else '' }}:{{ svc.origin_port|default(svc.port)|int }}
                 {% if svc.origin|default('localhost') == 'host' and svc.route_port|default(0)|int != svc.origin_port|default(svc.port)|int %}
                 → :{{ svc.route_port|int }}
                 {% endif %}

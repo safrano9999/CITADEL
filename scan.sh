@@ -57,6 +57,7 @@ CONTAINER_ROUTES_FILE="$SCRIPT_DIR/container_routes.json"
 PORT_FILTER_FILE="$SCRIPT_DIR/ports.filter.json"
 PROVIDERS_STATE_FILE="$SCRIPT_DIR/extensions/providers_state.json"
 TIMESTAMP_FILE="$SCRIPT_DIR/last_scan.txt"
+CADDY_OUTPUT_FILE="$SCRIPT_DIR/CADDYFILES/Caddyfile"
 RUNTIME_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
 SCAN_LOCK_FILE="${CITADEL_SCAN_LOCK_FILE:-$RUNTIME_DIR/citadel-scan-${UID}.lock}"
 MAX_FETCH_BYTES=1048576
@@ -90,6 +91,27 @@ case "${HTTPS_ONLY_VALUE,,}" in
     1|true|yes|on) HTTPS_ONLY=true ;;
     *) HTTPS_ONLY=false ;;
 esac
+CITADEL_USER_AGENT_VALUE="$(PYTHONPATH="$SCRIPT_DIR" python3 -c \
+    'from python_header import get; print(get("CITADEL_USER_AGENT", ""))')"
+case "${CITADEL_USER_AGENT_VALUE,,}" in
+    blank|null) CITADEL_USER_AGENT_VALUE="" ;;
+esac
+CURL_USER_AGENT_ARGS=()
+[[ -n "$CITADEL_USER_AGENT_VALUE" ]] && CURL_USER_AGENT_ARGS=(--user-agent "$CITADEL_USER_AGENT_VALUE")
+CLEAR_TAILSCALE_VALUE="$(PYTHONPATH="$SCRIPT_DIR" python3 -c \
+    'from python_header import get; print(get("CITADEL_CLEAR_TAILSCALE", "0"))')"
+CLEAR_TAILSCALE=false
+[[ "$CLEAR_TAILSCALE_VALUE" == "1" ]] && CLEAR_TAILSCALE=true
+CADDY_HTTPS_START="$(PYTHONPATH="$SCRIPT_DIR" python3 -c \
+    'from python_header import get; print(get("CITADEL_CADDY_HTTPS_START", "0"))')"
+CADDY_RANGE="$(PYTHONPATH="$SCRIPT_DIR" python3 -c \
+    'from python_header import get; print(get("CITADEL_CADDY_RANGE", "1"))')"
+CADDY_BACKEND="$(PYTHONPATH="$SCRIPT_DIR" python3 -c \
+    'from python_header import get; print(get("CITADEL_CADDY_BACKEND", ""))')"
+CADDY_HOST="$(PYTHONPATH="$SCRIPT_DIR" python3 -c \
+    'from python_header import get; print(get("CITADEL_CADDY_HOST", ""))')"
+CITADEL_PORT_VALUE="$(PYTHONPATH="$SCRIPT_DIR" python3 -c \
+    'from python_header import get; print(get("CITADEL_WEBUI_PORT", "11000"))')"
 
 HOST_IP="${CITADEL_SUBNET_IP:-}"
 HOST_IP="${HOST_IP#"${HOST_IP%%[![:space:]]*}"}"
@@ -117,6 +139,53 @@ esac
 if "$CONTAINER_MAP" && [[ -n "$DEDUPE_PORT" ]] && { [[ ! "$DEDUPE_PORT" =~ ^[0-9]+$ ]] || (( DEDUPE_PORT < 1 || DEDUPE_PORT > 65535 )); }; then
     echo "CITADEL_DEDUPE_PORT must be blank or a port between 1 and 65535" >&2
     exit 2
+fi
+
+if "$CLEAR_TAILSCALE"; then
+    if [[ -n "$PROVIDER_FILTER" && "$PROVIDER_FILTER" != "tailscale" ]]; then
+        echo "CITADEL_CLEAR_TAILSCALE=1 requires a full scan or --provider tailscale" >&2
+        exit 2
+    fi
+    [[ -d "$ENABLED_EXT_DIR/tailscale" ]] || {
+        echo "CITADEL_CLEAR_TAILSCALE=1 requires the enabled Tailscale provider" >&2
+        exit 1
+    }
+    TAILSCALE_ENABLED_VALUE="$(PYTHONPATH="$SCRIPT_DIR" python3 -c \
+        'from python_header import get; print(get("CITADEL_TAILSCALE", "false"))')"
+    case "${TAILSCALE_ENABLED_VALUE,,}" in
+        1|true|yes|on) ;;
+        *)
+            echo "CITADEL_CLEAR_TAILSCALE=1 requires CITADEL_TAILSCALE to be enabled" >&2
+            exit 1
+            ;;
+    esac
+    command -v tailscale >/dev/null 2>&1 || {
+        echo "CITADEL_CLEAR_TAILSCALE=1 requires the tailscale CLI" >&2
+        exit 1
+    }
+
+    echo "=== Clearing all Tailscale Serve/Funnel routes ==="
+    tailscale serve reset
+    TAILSCALE_STATUS="$(tailscale serve status --json)"
+    printf '%s' "$TAILSCALE_STATUS" | python3 -c '
+import json, sys
+payload = json.load(sys.stdin)
+if not isinstance(payload, dict):
+    raise SystemExit("tailscale serve status did not return a JSON object")
+remaining = [key for key in ("TCP", "Web", "AllowFunnel", "Services", "Foreground") if payload.get(key)]
+if remaining:
+    raise SystemExit("tailscale serve reset left active state: " + ", ".join(remaining))
+'
+    PYTHONPATH="$PROVIDERS_DIR" python3 - \
+        "$TAILSCALE_FILE" "$PROVIDER_ROUTES_DIR/tailscale/routes.json" <<'PY'
+import sys
+from atomic_io import atomic_write_json
+
+for path in sys.argv[1:]:
+    atomic_write_json(path, {})
+PY
+    echo "Tailscale Serve state and CITADEL assignments cleared"
+    echo
 fi
 
 LOCAL_SSL="-k"
@@ -329,7 +398,7 @@ echo
 body_is_html() {
     local url="$1" ssl="$2"
     local body
-    body="$(curl -s $ssl --max-time 3 --location -o - "$url" 2>/dev/null | head -c 8192)" || true
+    body="$(curl -s "${CURL_USER_AGENT_ARGS[@]}" $ssl --max-time 3 --location -o - "$url" 2>/dev/null | head -c 8192)" || true
     if echo "$body" | grep -qi "<html" 2>/dev/null; then
         return 0
     fi
@@ -339,7 +408,7 @@ body_is_html() {
 is_openai_v1() {
     local url="$1" ssl="$2" body status
     body="$(mktemp)"
-    status="$(curl -s $ssl --max-time 3 -o "$body" -w "%{http_code}" "${url}/v1/models" 2>/dev/null || echo 000)"
+    status="$(curl -s "${CURL_USER_AGENT_ARGS[@]}" $ssl --max-time 3 -o "$body" -w "%{http_code}" "${url}/v1/models" 2>/dev/null || echo 000)"
     if [[ "$status" != "000" ]] && python3 - "$body" <<'PY'
 import json
 import sys
@@ -358,27 +427,39 @@ PY
     return 1
 }
 
-is_http_service() {
-    local url="$1" ssl="$2" status
-    status="$(curl -s $ssl --max-time 3 -o /dev/null -w "%{http_code}" "$url/" 2>/dev/null || true)"
-    [[ "$status" =~ ^[1-5][0-9][0-9]$ ]]
+root_http_status() {
+    local url="$1" ssl="$2"
+    curl -s "${CURL_USER_AGENT_ARGS[@]}" $ssl --max-time 3 --location \
+        -o /dev/null -w "%{http_code}" "$url/" 2>/dev/null || true
+}
+
+is_discoverable_status() {
+    [[ "$1" =~ ^[1-5][0-9][0-9]$ && "$1" != "404" ]]
 }
 
 probe_http() {
-    local host="$1" port="$2"
+    local host="$1" port="$2" https_status http_status https_ok=false http_ok=false
     local ssl
     [[ "$host" == "127.0.0.1" ]] && ssl="$LOCAL_SSL" || ssl="$NET_SSL"
-    if body_is_html "https://${host}:${port}/" "$ssl"; then
+    https_status="$(root_http_status "https://${host}:${port}" "$ssl")"
+    if [[ "$https_status" == "404" ]]; then
+        echo ""
+        return
+    fi
+    http_status="$(root_http_status "http://${host}:${port}" "$ssl")"
+    is_discoverable_status "$https_status" && https_ok=true
+    is_discoverable_status "$http_status" && http_ok=true
+    if $https_ok && body_is_html "https://${host}:${port}/" "$ssl"; then
         echo "https://${host}:${port}|html"
-    elif body_is_html "http://${host}:${port}/" "$ssl"; then
+    elif $http_ok && body_is_html "http://${host}:${port}/" "$ssl"; then
         echo "http://${host}:${port}|html"
-    elif is_openai_v1 "https://${host}:${port}" "$ssl"; then
+    elif $https_ok && is_openai_v1 "https://${host}:${port}" "$ssl"; then
         echo "https://${host}:${port}|openai-v1"
-    elif is_openai_v1 "http://${host}:${port}" "$ssl"; then
+    elif $http_ok && is_openai_v1 "http://${host}:${port}" "$ssl"; then
         echo "http://${host}:${port}|openai-v1"
-    elif is_http_service "https://${host}:${port}" "$ssl"; then
+    elif $https_ok; then
         echo "https://${host}:${port}|http-service"
-    elif is_http_service "http://${host}:${port}" "$ssl"; then
+    elif $http_ok; then
         echo "http://${host}:${port}|http-service"
     else
         echo ""
@@ -389,7 +470,7 @@ try_fetch_icon() {
     local url="$1" port="$2" ssl="$3"
     local tmp result status content_type ext size
     tmp="$(mktemp "$ICONS_DIR/${port}.XXXXXX")"
-    if ! result="$(curl -sS $ssl --max-time 5 --max-filesize "$MAX_FETCH_BYTES" \
+    if ! result="$(curl -sS "${CURL_USER_AGENT_ARGS[@]}" $ssl --max-time 5 --max-filesize "$MAX_FETCH_BYTES" \
         -o "$tmp" -w $'%{http_code}\t%{content_type}' "$url" 2>/dev/null)"; then
         rm -f "$tmp"
         echo ""
@@ -530,7 +611,7 @@ atomic_write_json(f, d)
     printf "%-8s fetching title+icons..." "$SCHEME"
 
     TMP_HTML="$(mktemp)"
-    if ! EFFECTIVE_URL="$(curl -sS $LOCAL_SSL --max-time 5 --max-filesize "$MAX_FETCH_BYTES" \
+    if ! EFFECTIVE_URL="$(curl -sS "${CURL_USER_AGENT_ARGS[@]}" $LOCAL_SSL --max-time 5 --max-filesize "$MAX_FETCH_BYTES" \
         --location "$LOCAL_URL/" -o "$TMP_HTML" -w "%{url_effective}" 2>/dev/null)"; then
         EFFECTIVE_URL="$LOCAL_URL/"
         : > "$TMP_HTML"
@@ -625,7 +706,7 @@ for row in json.load(open(sys.argv[1], encoding="utf-8")):
             elif [[ "$HOST_KIND" == "http-service" ]]; then
                 TITLE="HTTP Service"
             else
-                HOST_HTML="$(curl -sS $NET_SSL --max-time 5 --max-filesize "$MAX_FETCH_BYTES" \
+                HOST_HTML="$(curl -sS "${CURL_USER_AGENT_ARGS[@]}" $NET_SSL --max-time 5 --max-filesize "$MAX_FETCH_BYTES" \
                     --location "$HOST_URL/" 2>/dev/null || true)"
                 TITLE="$(printf '%s' "$HOST_HTML" | python3 -c '
 import re
@@ -876,6 +957,18 @@ atomic_write_json(out_file, payload, indent=None)
 echo "services.json written"
 echo
 
+echo "=== Rendering central Caddy routes ==="
+python3 "$FUNCTIONS_DIR/caddy_export.py" \
+    --services "$SERVICES_FILE" \
+    --output "$CADDY_OUTPUT_FILE" \
+    --https-start "$CADDY_HTTPS_START" \
+    --spacing "$CADDY_RANGE" \
+    --backend "$CADDY_BACKEND" \
+    --host "$CADDY_HOST" \
+    --preferred-port "$CITADEL_PORT_VALUE"
+echo "Caddyfile written: $CADDY_OUTPUT_FILE"
+echo
+
 if [[ -z "$PROVIDER_FILTER" ]]; then
     echo "=== Applying Cloudflare Defaults ==="
     if [[ -f "$FUNCTIONS_DIR/cloudflare_defaults.py" ]]; then
@@ -907,14 +1000,21 @@ if [[ -f "$PROVIDERS_DIR/dispatch.py" ]]; then
             --provider "$PROVIDER_FILTER" \
             --strict
     else
-        python3 "$PROVIDERS_DIR/dispatch.py" \
+        DISPATCH_STRICT=()
+        "$CLEAR_TAILSCALE" && DISPATCH_STRICT=(--strict)
+        if ! python3 "$PROVIDERS_DIR/dispatch.py" \
             --enabled-dir "$ENABLED_EXT_DIR" \
             --services-file "$SERVICES_FILE" \
             --cache-dir "$CACHE_DIR" \
             --config-ini "$CONFIG" \
             --state-file "$PROVIDERS_STATE_FILE" \
             --routes-dir "$PROVIDER_ROUTES_DIR" \
-            --tailscale-file "$TAILSCALE_FILE" || true
+            --tailscale-file "$TAILSCALE_FILE" \
+            "${DISPATCH_STRICT[@]}"; then
+            if "$CLEAR_TAILSCALE"; then
+                exit 1
+            fi
+        fi
     fi
 else
     echo "dispatch.py missing: $PROVIDERS_DIR/dispatch.py"

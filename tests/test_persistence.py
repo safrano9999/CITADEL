@@ -64,6 +64,11 @@ class PersistenceExampleTests(unittest.TestCase):
             "|/opt/safrano9999/CITADEL/tailscale.json|link",
             entries[0],
         )
+        self.assertIn(
+            "/named_volumes/CITADEL/CADDYFILES"
+            "|/opt/safrano9999/CITADEL/CADDYFILES|dir",
+            entries[0],
+        )
 
     def test_disabled_persistence_emits_no_volume_or_links(self) -> None:
         self.assertEqual(self.run_helper("mounts", "0"), [])

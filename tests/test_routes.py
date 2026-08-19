@@ -7,10 +7,13 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PROVIDERS_DIR = ROOT / "functions" / "providers"
+FUNCTIONS_DIR = ROOT / "functions"
+PROVIDERS_DIR = FUNCTIONS_DIR / "providers"
+sys.path.insert(0, str(FUNCTIONS_DIR))
 sys.path.insert(0, str(PROVIDERS_DIR))
 
 from common import routable_services, route_record  # noqa: E402
+from caddy_export import render_caddyfile  # noqa: E402
 
 
 def load_tailscale_provider():
@@ -46,6 +49,82 @@ def exact_route_payload(
 
 
 class RouteHelperTests(unittest.TestCase):
+    def test_caddy_export_is_deterministic_and_prioritizes_citadel(self) -> None:
+        rendered = render_caddyfile(
+            {
+                "http_services": [
+                    {"port": 9090, "scheme": "https", "title": "Cockpit"},
+                    {"port": 11000, "scheme": "http", "title": "CITADEL"},
+                    {"port": 8642, "scheme": "http", "title": "API"},
+                    {"port": 20241, "scheme": "http", "addrs": ["127.0.0.1"]},
+                    {"port": 11040, "scheme": "http", "addrs": ["10.89.3.34", "127.0.0.1"]},
+                    {"port": 9999, "scheme": "http", "origin": "host"},
+                ],
+            },
+            https_start="3000",
+            spacing="1",
+            backend="fedora44-ai-safrano9999-ucore",
+            host="ucore.tailb13f39.ts.net",
+            preferred_port="11000",
+        )
+        self.assertLess(rendered.index(":3000"), rendered.index(":3001"))
+        self.assertIn("3000 -> fedora44-ai-safrano9999-ucore:11000", rendered)
+        self.assertIn("3001 -> fedora44-ai-safrano9999-ucore:8642", rendered)
+        self.assertIn("3002 -> fedora44-ai-safrano9999-ucore:9090", rendered)
+        self.assertNotIn("192.168.11.55", rendered)
+        self.assertNotIn(":9999", rendered)
+        self.assertNotIn(":20241", rendered)
+        self.assertIn(":11040", rendered)
+        self.assertIn("tls_insecure_skip_verify", rendered)
+
+    def test_caddy_export_zero_is_disabled_and_invalid_inputs_fail(self) -> None:
+        self.assertEqual(
+            render_caddyfile(
+                {}, https_start="0", spacing="1", backend="", host="",
+            ),
+            "# CITADEL central Caddy export is disabled.\n",
+        )
+        with self.assertRaises(ValueError):
+            render_caddyfile(
+                {"http_services": []},
+                https_start="3000",
+                spacing="1",
+                backend="bad backend",
+                host="ucore.tailb13f39.ts.net",
+            )
+        with self.assertRaises(ValueError):
+            render_caddyfile(
+                {"http_services": []},
+                https_start="3000",
+                spacing="1",
+                backend="fedora44-ai-safrano9999-ucore",
+                host="192.168.11.55",
+            )
+        with self.assertRaises(ValueError):
+            render_caddyfile(
+                {"http_services": []},
+                https_start="3000",
+                spacing="1",
+                backend="192.168.11.55",
+                host="ucore.tailb13f39.ts.net",
+            )
+
+    def test_caddy_export_respects_https_only_policy(self) -> None:
+        rendered = render_caddyfile(
+            {
+                "https_only": True,
+                "http_services": [
+                    {"port": 4000, "scheme": "http"},
+                    {"port": 4001, "scheme": "https"},
+                ],
+            },
+            https_start="3000",
+            spacing="1",
+            backend="fedora44-ai-safrano9999-ucore",
+            host="ucore.tailb13f39.ts.net",
+        )
+        self.assertNotIn(":4000", rendered)
+        self.assertIn(":4001", rendered)
     def test_https_only_filters_routes_without_removing_discovered_http(self) -> None:
         payload = {
             "https_only": False,
