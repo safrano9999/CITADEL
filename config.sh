@@ -1395,7 +1395,7 @@ configure_from_example() {
         local group="$1"
         local style="${repeat_group_styles[$group]}"
         local fields="${repeat_group_fields[$group]}"
-        local index field mapped value all complete=false slot_found=false next_index=1
+        local index field mapped value all complete=false has_value=false slot_found=false next_index=1
         local mode default_mode
 
         [ -z "${REPEAT_GROUP_MODES[$group]+x}" ] || return 0
@@ -1406,13 +1406,19 @@ configure_from_example() {
                 mapped="$(repeat_group_key "$group" "$style" "$field" "$index")"
                 value="$(read_kv_file "$target" "$mapped" || true)"
                 case "${value,,}" in ""|blank|null) value="" ;; esac
-                if [ -z "$value" ] && [[ -z "${repeat_optional_complete[$field]+x}" ]]; then
-                    all=false
+                if [ -z "$value" ]; then
+                    [[ -n "${repeat_optional_complete[$field]+x}" ]] || all=false
+                else
+                    has_value=true
                 fi
             done
             if [ "$all" = "true" ]; then
-                complete=true
-                continue
+                if [ "$has_value" = "true" ]; then
+                    complete=true
+                    continue
+                fi
+                slot_found=true
+                break
             fi
             next_index="$index"
             slot_found=true
