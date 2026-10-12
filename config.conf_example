@@ -89,6 +89,12 @@ CITADEL_CLOUDFLARE_WWW443=0
 #default-preset: 0
 CITADEL_CLOUDFLARE_DOMAIN443=0
 
+# Redirect the bare domain to https://www.<domain> (301, path/query preserved).
+# Requires WWW443=1, DOMAIN443=1 and Cloudflare Dynamic URL Redirects Edit.
+# Set 0 to remove this tunnel's redirect; unrelated rules are preserved.
+#default-preset: 0
+CITADEL_CLOUDFLARE_REDIRECT_TO_WWW=0
+
 #default-preset: insert later
 CITADEL_CLOUDFLARE_ACCOUNT_ID=
 #default-preset: insert later

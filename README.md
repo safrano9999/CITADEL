@@ -290,6 +290,7 @@ renders provider buttons, and can run the configured scanner.
 | `CITADEL_CLOUDFLARE_SERVERSIDE_PERSISTENCE` | `1` | Keep unchanged Cloudflare bindings; 0 deletes/rebuilds all managed bindings each scan. Local CF output remains ephemeral. |
 | `CITADEL_CLOUDFLARE_WWW443` | `0` | Add `www.<domain>` for Cloudflare port 443 |
 | `CITADEL_CLOUDFLARE_DOMAIN443` | `0` | Add the bare domain for Cloudflare port 443 |
+| `CITADEL_CLOUDFLARE_REDIRECT_TO_WWW` | `0` | Redirect the bare domain to HTTPS www with HTTP 301; requires both 443 hostname flags and Dynamic URL Redirects Edit |
 | `CITADEL_CLOUDFLARE_ACCOUNT_ID` | empty | Existing Cloudflare account ID |
 | `CITADEL_CLOUDFLARE_ZONE_ID` | empty | Existing Cloudflare zone ID |
 | `CITADEL_CLOUDFLARE_TUNNEL_ID` | empty | Existing named Tunnel ID |
@@ -636,6 +637,19 @@ permissions and provider-specific setup.
 For port 443, the local Caddy site block must include both `<domain>:443` and
 `www.<domain>:443` when both hostname flags are enabled. Reload or restart Caddy
 after changing the site block; CITADEL manages the Cloudflare DNS and Tunnel routes.
+
+Set `CITADEL_CLOUDFLARE_REDIRECT_TO_WWW=1` together with `WWW443=1` and
+`DOMAIN443=1` to redirect the bare domain to `https://www.<domain>` at Cloudflare.
+Paths and query strings are preserved. The Cloudflare token needs the zone-scoped
+**Dynamic URL Redirects → Edit** permission. No Caddy restart is required for
+this edge redirect. A scan installs or reconciles one rule identified by the
+configured Tunnel; unchanged rules cause no write. Setting the flag to `0`
+removes only this Tunnel's rule, retaining all unrelated rules. Removing port
+443 from a full scan also removes its redirect. Add mode never replaces or
+removes an existing rule. Existing installations without the variable do not
+query the Rulesets API. With explicit `0` and a token lacking read permission,
+normal routing continues, but the provider reports that redirect removal could
+not be verified; retain the permission when switching an enabled redirect off.
 
 ## Operations
 

@@ -328,6 +328,35 @@ class CloudflareDefaultsTests(unittest.TestCase):
 
 
 class CloudflareActivationTests(unittest.TestCase):
+    def test_redirect_permission_failure_precedes_tunnel_changes(self):
+        self.settings['CITADEL_CLOUDFLARE_REDIRECT_TO_WWW'] = '1'
+        self.write('CITADEL_DATA/services.json', {'http_services': [{'port': 443, 'scheme': 'https'}]})
+        self.write('CITADEL_DATA/ports.filter.json', {'cloudflare': {'443': {
+            'subdomains': ['www', 'domain'], 'whitelist': False, 'emails': []}}})
+        self.api.request.side_effect = CloudflareAPIError('forbidden', 403)
+        with patch.dict(os.environ, {'CITADEL_CLOUDFLARE_WWW443': '1',
+                                     'CITADEL_CLOUDFLARE_DOMAIN443': '1'}):
+            code, payload = self.run_provider()
+        self.assertEqual(code, 1)
+        self.assertIn('Dynamic URL Redirects', payload['errors'][0])
+        self.api.tunnel_configuration.assert_not_called()
+        self.assert_no_remote_mutations()
+
+    def test_redirect_created_after_target_tunnel_routes(self):
+        self.settings['CITADEL_CLOUDFLARE_REDIRECT_TO_WWW'] = '1'
+        self.write('CITADEL_DATA/services.json', {'http_services': [{'port': 443, 'scheme': 'https'}]})
+        self.write('CITADEL_DATA/ports.filter.json', {'cloudflare': {'443': {
+            'subdomains': ['www', 'domain'], 'whitelist': False, 'emails': []}}})
+        self.api.request.return_value = None
+        with patch.dict(os.environ, {'CITADEL_CLOUDFLARE_WWW443': '1',
+                                     'CITADEL_CLOUDFLARE_DOMAIN443': '1'}):
+            code, payload = self.run_provider()
+        self.assertEqual(code, 0, payload['errors'])
+        self.assertEqual(payload['redirect_to_www']['action'], 'create')
+        self.assertEqual(self.api.method_calls[-1][0], 'request')
+        self.assertEqual(self.api.method_calls[-1].args[:2], ('POST', '/zones/zone/rulesets'))
+        self.assertEqual(payload['services']['443']['url'], 'https://www.services.example.net')
+
     def test_add_keeps_remote_routes_access_and_dns_even_when_persistence_is_zero(self):
         self.existing_protected_route()
         self.settings["CITADEL_CLOUDFLARE_SERVERSIDE_PERSISTENCE"] = "0"

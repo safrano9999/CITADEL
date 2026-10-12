@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from cloudflare_api import CloudflareAPI, CloudflareAPIError
+from cloudflare_redirect import SETTING as WWW_REDIRECT_SETTING, prepare_redirect, apply_redirect
 from common import (
     ROUTE_SCHEMA_VERSION,
     now_iso,
@@ -304,6 +305,7 @@ def main() -> int:
     routes: dict[str, dict[str, Any]] = {}
     running = False
     authenticated = False
+    redirect_status: dict[str, Any] = {"action": "unmanaged"}
 
     required = {
         "CITADEL_CLOUDFLARE_DOMAIN": domain,
@@ -368,6 +370,11 @@ def main() -> int:
                         "whitelist": bool(rule["whitelist"]),
                         "emails": list(rule["emails"]),
                     }
+            redirect_plan = prepare_redirect(
+                api, zone_id, tunnel_id, domain, desired,
+                get(WWW_REDIRECT_SETTING, ""), add=adding())
+            redirect_status = {key: redirect_plan[key] for key in ("action", "warning")
+                               if key in redirect_plan}
             tunnel_config, dns, policies, apps = prepare_tunnel(
                 api, account_id, zone_id, tunnel_id, desired, persistent, adding())
             if any(route["whitelist"] for route in desired.values()):
@@ -408,6 +415,7 @@ def main() -> int:
             updated_config = {**tunnel_config, "ingress": ingress}
             if updated_config != tunnel_config:
                 api.update_tunnel_configuration(account_id, tunnel_id, updated_config)
+            apply_redirect(api, zone_id, redirect_plan)
     except (CloudflareAPIError, ValueError, OSError) as exc:
         errors.append(str(exc))
         routes = {}
@@ -439,6 +447,7 @@ def main() -> int:
         "authenticated": authenticated,
         "route_schema": ROUTE_SCHEMA_VERSION,
         "origin_host": origin_host,
+        "redirect_to_www": redirect_status,
         "services": routes,
         "errors": errors,
     }
