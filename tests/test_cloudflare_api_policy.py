@@ -144,6 +144,24 @@ class BrowserPlanTests(unittest.TestCase):
                     path.write_text(content)
                     cloudflare_rules(path, strict=True)
 
+    def test_browser_aliases_select_the_scanned_origin_host_after_access_login(self):
+        # Browser Access authenticates the user but does not rewrite the Host
+        # sent to Caddy. Both plain HTTP and HTTPS need the verified authority.
+        for port, scheme in ((8123, "http"), (8443, "https")):
+            with self.subTest(scheme=scheme):
+                desired, _ = browser_routes({"http_services": [{"port": port, "scheme": scheme}]},
+                    {str(port): {"whitelist": True, "emails": ["owner@example.com"],
+                                 "subdomains": [str(port), "dashboard"]}},
+                    "example.com", "example.com", [])
+                config = merge_ingress({}, desired)
+                for entry in config["ingress"][:-1]:
+                    self.assertEqual(entry["originRequest"]["httpHostHeader"], f"127.0.0.1:{port}")
+                    self.assertEqual(entry["service"], f"{scheme}://127.0.0.1:{port}")
+                    self.assertEqual(entry["originRequest"].get("noTLSVerify", False), scheme == "https")
+                    self.assertNotIn("access", entry["originRequest"])
+                self.assertTrue(all(row["whitelist"] for row in desired.values()))
+                self.assertEqual(merge_ingress(config, desired), config)
+
     def test_combined_plan_retains_siblings_and_add_is_append_only(self):
         browser, _ = self.plan({"3005": {"whitelist": False}})
         origin = {"origin-api-3005.example.com": {**browser["3005.example.com"], "whitelist": True}}

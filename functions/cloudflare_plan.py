@@ -54,14 +54,15 @@ def combine_routes(*groups: dict) -> dict:
 
 def ingress_entry(hostname: str, route: dict) -> dict:
     result = {"hostname": hostname,
-              "service": f"{route['scheme']}://{route['origin_host']}:{route['origin_port']}"}
+              "service": f"{route['scheme']}://{route['origin_host']}:{route['origin_port']}",
+              # Use the authority that discovery verified for every route.
+              # Public aliases can otherwise miss Caddy's local host matcher
+              # and return an empty 200, including after browser OTP login.
+              "originRequest": {"httpHostHeader": f"{route['origin_host']}:{route['origin_port']}"}}
     if route["scheme"] == "https":
-        result["originRequest"] = {"noTLSVerify": True}
+        result["originRequest"]["noTLSVerify"] = True
     if route.get("origin_access"):
-        result.setdefault("originRequest", {})["access"] = deepcopy(route["origin_access"])
-        # Discovery verified this local authority. Passing the public origin
-        # hostname instead can miss Caddy's host matcher and yield an empty 200.
-        result["originRequest"]["httpHostHeader"] = f"{route['origin_host']}:{route['origin_port']}"
+        result["originRequest"]["access"] = deepcopy(route["origin_access"])
     return result
 
 

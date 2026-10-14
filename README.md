@@ -893,7 +893,7 @@ The Worker authenticates the client, strips incoming authorization/identity
 headers, then injects the configured backend credential plus a separate origin
 service credential. `origin-api-<port>.<domain>` is a Tunnel hostname protected by
 Access Service Auth and cloudflared assertion validation. The original browser
-hostname retains its OTP policy. API-origin requests use the scanned local
+hostname retains its OTP policy. All Cloudflare-origin requests use the scanned local
 `Host` authority (`127.0.0.1:<port>`), so Caddy host matchers select the same
 backend as discovery. Backend redirects are refused. MCP responses
 stream without whole-response buffering; session IDs are encrypted and bound to
