@@ -201,6 +201,8 @@ def _load_providers() -> dict:
             for candidate in routes.get("diagnostics") or []:
                 if isinstance(candidate, dict):
                     alerts.append(f"[API :{candidate.get('port')}] {candidate.get('path')}: {candidate.get('status')}")
+            if routes.get("considered") and not routes.get("services"):
+                alerts.append(f"[{pid}] Beim letzten Scan keine API-Routen veroeffentlicht.")
             continue
 
         label = str(routes.get("label") or ext.get("label") or pid.capitalize())

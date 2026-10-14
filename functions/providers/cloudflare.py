@@ -222,7 +222,8 @@ def main() -> int:
         "warnings": warnings,
     }
     api_payload = api_output(api_table, considered=bool(api_config.modes or api_table["hosts"]),
-                             authenticated=api_verified, errors=api_errors, warnings=api_warnings,
+                             authenticated=api_verified, modes=api_config.modes,
+                             errors=api_errors, warnings=api_warnings,
                              diagnostics=api_diagnostics)
     api_payload["cleanup_pending"] = bool(api_hint and not api_verified)
     if api_payload["cleanup_pending"]:

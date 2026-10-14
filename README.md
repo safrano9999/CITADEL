@@ -711,6 +711,11 @@ OAuth-only URLs still use `oauth.api-<port>.<domain>`. OAuth also needs an
 allowed-email policy and client registration/callback settings; it does not
 need a fixed client bearer.
 
+Configured modes remain visible after a scan even if no eligible endpoints were
+found or Cloudflare rejected publication. Such menus contain no published API
+links; the dashboard reports the scan error or empty result. Inactive modes are
+hidden. A visible menu alone does not confirm a working connection.
+
 Activate the extension by moving the shipped directory from
 `extensions/disabled/CLOUDFLARE-API` to `extensions/enabled/CLOUDFLARE-API`.
 Use `./config.sh` to render the two settings; the existing secret prompt offers

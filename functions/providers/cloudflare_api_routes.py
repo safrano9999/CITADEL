@@ -46,11 +46,16 @@ def route_readiness(hostname):
         connection.close()
 
 
-def output(table, *, considered, authenticated, errors=(), warnings=(), diagnostics=(), verify=route_readiness):
+def output(table, *, considered, authenticated, modes=(), errors=(), warnings=(), diagnostics=(), verify=route_readiness):
     hosts = table.get("hosts", {})
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         readiness = dict(zip(hosts, pool.map(verify, hosts)))
-    views, services = {}, {}
+    # A configured mode remains visible when discovery is empty or publication
+    # fails. Only verified apply results supply URLs; an empty menu is not a
+    # successful connection and never advertises an unprovisioned endpoint.
+    views = {mode: {"label": MODE_LABELS[mode], "considered": True, "services": {}}
+             for mode in modes if considered and mode in MODE_LABELS}
+    services = {}
     for hostname, host in hosts.items():
         mode = host["mode"]
         view = views.setdefault(mode, {"label": MODE_LABELS[mode], "considered": True, "services": {}})

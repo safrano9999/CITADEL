@@ -539,7 +539,11 @@ class APIReconciler:
             self.state = initialize_private_state(self.owner)
             save_private_state(self.state_path, self.state)
         if self.plan["origins"] and not self.service:
-            self.service = self.api.create_service_token(self.account, resource_name(self.owner, "service"))
+            try:
+                self.service = self.api.create_service_token(self.account, resource_name(self.owner, "service"))
+            except CloudflareAPIError as exc:
+                raise CloudflareAPIError(f"Origin service-token creation failed: {exc}",
+                                         status_code=exc.status_code) from exc
             self.state["service"] = {key: self.service[key] for key in ("id", "client_id", "client_secret")}
             save_private_state(self.state_path, self.state)
         otp_error = None

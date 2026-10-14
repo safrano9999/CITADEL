@@ -111,6 +111,33 @@ class APIIntegrationTests(unittest.TestCase):
         self.assertNotIn("api-oauth", dashboard["provider_options"])
         self.assertTrue(any("cleanup is pending" in alert for alert in dashboard["alerts"]))
 
+    def test_configured_modes_remain_visible_without_published_routes(self):
+        for modes in ((), ("api-bearer",), ("api-oauth",), ("api-bearer", "api-oauth")):
+            for errors in ((), ("Cloudflare API HTTP 403 during POST",)):
+                with self.subTest(modes=modes, errors=errors):
+                    payload = output({"hosts": {}}, considered=bool(modes), authenticated=False,
+                                     modes=modes, errors=errors)
+                    self.write("cache/CLOUDFLARE-API-routes.json", payload)
+                    dashboard = self.dashboard()
+                    self.assertEqual(set(dashboard["provider_options"]), {"cloudflare", *modes})
+                    self.assertFalse(payload["available"])
+                    self.assertEqual(payload["services"], {})
+                    for view in payload["views"].values():
+                        self.assertFalse(view["available"])
+                        self.assertEqual(view["services"], {})
+                    urls = dashboard["http_tiles"][0]["provider_urls"]
+                    self.assertEqual({mode: url for mode, url in urls.items() if url},
+                                     {"cloudflare": "https://3070.example.com"})
+                    self.assertTrue(all(not urls.get(mode) for mode in modes))
+                    from jinja2 import Environment, FileSystemLoader
+                    page = Environment(loader=FileSystemLoader(ROOT / "templates"), autoescape=True).get_template("index.html").render(data=dashboard)
+                    for mode in ("api-bearer", "api-oauth"):
+                        self.assertEqual(f'value="{mode}"' in page, mode in modes)
+                    if modes:
+                        self.assertTrue(any("keine API-Routen" in alert for alert in dashboard["alerts"]))
+                    if errors:
+                        self.assertTrue(any("HTTP 403" in alert for alert in dashboard["alerts"]))
+
     def test_shared_entrypoint_applies_all_modes_then_reports_unverified_cleanup(self):
         self.write("CLOUDFLARE-API_ignore.json", {"ports": []})
         self.write("CITADEL_DATA/cloudflare-api/policy.json", {"oauth": {"allow_loopback": True}})
@@ -151,6 +178,19 @@ class APIIntegrationTests(unittest.TestCase):
             self.assertTrue(payload["cleanup_pending"])
             self.assertFalse(payload["remote_verified"])
             self.assertEqual(payload["views"], {})
+
+            # A failed management operation must preserve configured menu modes,
+            # while exposing neither stale routes nor a successful connection.
+            from cloudflare_api import CloudflareAPIError
+            values["CLOUDFLARE_API_TOKEN"] = "management"
+            values["CITADEL_CLOUDFLARE_API_BEARER"] = "a" * 64
+            values["CITADEL_CLOUDFLARE_API_OAUTH"] = "1"
+            with patch.object(cloudflare, "APIReconciler", side_effect=CloudflareAPIError("HTTP 403")):
+                self.assertEqual(cloudflare.main(), 1)
+            payload = json.loads((self.root / "cache/CLOUDFLARE-API-routes.json").read_text())
+            self.assertEqual(set(payload["views"]), {"api-bearer", "api-oauth"})
+            self.assertFalse(payload["available"])
+            self.assertEqual(payload["services"], {})
 
     def test_disabled_directories_still_run_cleanup_coordinator(self):
         self.write("CITADEL_DATA/cloudflare-api/runtime.json", {"owner": "fixture"})
