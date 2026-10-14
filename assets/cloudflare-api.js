@@ -23,6 +23,12 @@
     byId("access-editor").hidden = true;
     status("Gesperrt.");
   }
+  function filterRows() {
+    const query = byId("access-filter").value.trim().toLowerCase();
+    const candidates = byId("access-candidates").checked;
+    for (const row of rows) row.card.hidden = (!row.confirmed && !row.input.value.trim() && !candidates)
+      || (query && !row.search.includes(query));
+  }
   function render(data) {
     revision = data.revision;
     rows = [];
@@ -48,9 +54,12 @@
         reveal.textContent = input.type === "password" ? "Anzeigen" : "Verbergen";
       });
       card.append(heading, identity, evidence, label, input, reveal); list.append(card);
-      rows.push({ id: route.id, input });
+      rows.push({ id: route.id, input, card, confirmed: route.detected || route.status === "ready",
+        search: `${route.port || ""} ${route.protocol || ""} ${route.path || ""} ${route.id}`.toLowerCase() });
     }
     dirty = false;
+    byId("access-candidate-count").textContent = `(${rows.filter(row => !row.confirmed && !row.input.value.trim()).length})`;
+    filterRows();
     byId("access-empty").hidden = rows.length > 0;
     byId("access-login").hidden = true;
     byId("access-editor").hidden = false;
@@ -78,6 +87,8 @@
     if (dirty && !window.confirm("Ungespeicherte Änderungen verwerfen?")) return;
     try { render(await api("GET")); } catch (error) { if (error.name !== "AbortError") status(error.message); }
   });
+  byId("access-filter").addEventListener("input", filterRows);
+  byId("access-candidates").addEventListener("change", filterRows);
   byId("access-lock").addEventListener("click", lock);
   window.addEventListener("pagehide", lock);
   window.addEventListener("beforeunload", event => { if (dirty) { event.preventDefault(); event.returnValue = ""; } });

@@ -36,6 +36,12 @@
       <dt>Eine E-Mail</dt><dd>OAuth-Zugang ohne Backend-Bearer</dd>
     </dl>
     <p id="access-empty" hidden>Noch keine Routen vorhanden. Führe zuerst einen Scan mit aktivierter CLOUDFLARE-API-Erweiterung aus.</p>
+    <div class="access-filters">
+      <label for="access-filter">Port oder Pfad suchen</label>
+      <input id="access-filter" type="search" placeholder="z. B. 3005 oder /mcp" autocomplete="off">
+      <label><input id="access-candidates" type="checkbox"> Auch unbestätigte Kandidaten anzeigen <span id="access-candidate-count"></span></label>
+      <p>Ein Kandidat mit Anmeldepflicht ist noch kein API-Nachweis. Mit einem zugeordneten Backend-Bearer prüft der nächste Scan erneut.</p>
+    </div>
     <div id="access-routes"></div>
   </section>
 </main>

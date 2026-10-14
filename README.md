@@ -835,7 +835,10 @@ must mount this optional file at the repository root, alongside the ignore file.
 2. Open **API-Freigaben** in the dashboard (path `/cloudflare-api`) and enter the
    existing `CITADEL_TOKEN`. Reading and writing the registry require this token;
    leaving it unset disables management. The page does not store it in browser
-   storage. Each row shows its port, protocol, path and scan status.
+   storage. Each row shows its port, protocol, path and scan status. Confirmed
+   endpoints and configured rows appear first; unverified authentication
+   candidates are available through **Auch unbestätigte Kandidaten anzeigen**.
+   Use the port/path filter to locate the desired endpoint.
 3. Enter grants in that row and choose **Speichern für nächsten Scan**. This
    saves the private file only. It does not contact Cloudflare or start a scan.
 4. Run the next **full scan** to verify the endpoint and synchronize the grants
