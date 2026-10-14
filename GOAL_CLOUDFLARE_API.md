@@ -4,9 +4,9 @@ Status: implementation candidate on `codex/cloudflare-api`; live acceptance is
 pending. This goal remains the acceptance contract. It does not activate an
 extension, publish a Worker, run a scan, or change live routes by itself.
 
-The source suite and plugin packaging passed on GitHub Actions at `50cd517`:
-[validation run](https://github.com/safrano9999/CITADEL/actions/runs/38596492206).
-That run executed 368 Python tests (367 passed; the existing Caddy-binary test
+The source suite and plugin packaging passed on GitHub Actions at `d06a395`:
+[validation run](https://github.com/safrano9999/CITADEL/actions/runs/38602270082).
+That run executed 370 Python tests (369 passed; the existing Caddy-binary test
 was skipped) and 17 Worker tests. These use fixtures for Cloudflare and upstream
 protocol behavior. They are not evidence of a deployed OAuth flow. The
 Containerfile and build workflows are prepared in the matching SCRIPTS branch;
@@ -21,6 +21,19 @@ Cloudflare rejected origin service-token creation with HTTP 403; a subsequent
 provider reconciliation timed out. Public API publication and the OpenCode
 OAuth/OTP flow have therefore not been accepted. Existing planning documents
 and local configuration were preserved before adopting the preview.
+
+The follow-up isolated the Cloudflare rejection to the account's service-token
+creation endpoint: the management token verifies as active and can list service
+tokens, while creation returns HTTP 403 with API error code 1010. No origin
+service credentials have been created. Token permission inspection is also
+denied; the operator has been asked to check account-scoped
+`Access: Service Tokens Write` before further publication attempts.
+
+The existing backend MCP credential was verified through the normal local
+discovery implementation on port 3005 (`/api/v2/mcp`, initialize HTTP 200) and
+stored using the generic route credential registry with mode 0600. No tool was
+called. This establishes local backend readiness only, not public Bearer or
+OAuth connectivity.
 
 Remaining live acceptance on the authorized preview deployment includes real
 nested-domain TLS and Managed OAuth API behavior; a real
