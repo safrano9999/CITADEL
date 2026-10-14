@@ -187,20 +187,31 @@ def _load_providers() -> dict:
                 if mode not in {"api-bearer", "api-oauth"} or not isinstance(view, dict) or not view.get("considered"):
                     continue
                 provider_options[mode] = "API-Bearer" if mode == "api-bearer" else "API-OAuth"
+                detected = {}
+                for endpoint in routes.get("discovered") or []:
+                    if not isinstance(endpoint, dict):
+                        continue
+                    port = str(endpoint.get("port"))
+                    status = endpoint.get("status")
+                    detected.setdefault(port, {})[endpoint.get("id")] = {
+                        **{key: endpoint.get(key) for key in ("id", "protocol", "path")},
+                        "url": "", "status": "not-published" if status == "ready" else status,
+                    }
                 for port, route in (view.get("services") or {}).items():
                     if not isinstance(route, dict):
                         continue
                     endpoints = [{key: endpoint.get(key) for key in ("id", "protocol", "path", "url", "status")}
                                  for endpoint in route.get("endpoints", []) if isinstance(endpoint, dict)]
-                    provider_endpoints_by_port.setdefault(mode, {})[str(port)] = endpoints
-                    if endpoints:
-                        provider_urls_by_port.setdefault(mode, {})[str(port)] = endpoints[0]["url"]
+                    detected.setdefault(str(port), {}).update({endpoint["id"]: endpoint for endpoint in endpoints})
+                for port, endpoints in detected.items():
+                    values = sorted(endpoints.values(), key=lambda endpoint: (endpoint["protocol"], endpoint["path"]))
+                    provider_endpoints_by_port.setdefault(mode, {})[port] = values
+                    provider_urls_by_port.setdefault(mode, {})[port] = next((endpoint["url"] for endpoint in values if endpoint.get("url")), "")
             for message in [*(routes.get("errors") or []), *(routes.get("warnings") or [])]:
                 if message:
                     alerts.append(f"[{pid}] {message}")
-            for candidate in routes.get("diagnostics") or []:
-                if isinstance(candidate, dict):
-                    alerts.append(f"[API :{candidate.get('port')}] {candidate.get('path')}: {candidate.get('status')}")
+            # Unverified probes stay in the discovery inventory. A guessed path
+            # returning a login page/401 does not belong in the API service list.
             if routes.get("considered") and not routes.get("services"):
                 alerts.append(f"[{pid}] Beim letzten Scan keine API-Routen veroeffentlicht.")
             continue

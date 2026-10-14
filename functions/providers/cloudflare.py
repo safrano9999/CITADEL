@@ -89,6 +89,7 @@ def main() -> int:
     api_config = APISettings()
     api_table = {"schema": 1, "hosts": {}}
     api_errors, api_warnings, api_diagnostics = [], [], []
+    endpoints, credentials = [], {}
     api_verified = False
     api_hint = (root / "CITADEL_DATA/cloudflare-api/runtime.json").exists()
 
@@ -102,6 +103,14 @@ def main() -> int:
     try:
         api_config = api_settings(root, get)
         api_errors.extend(api_config.errors)
+        # Local detection is independent of remote publication. Keep the fresh
+        # inventory available to the API views even when Cloudflare is down.
+        if token and api_config.modes:
+            credentials = backend_credentials(root)
+            endpoints = discover_api(services, api_config, credentials, int(get("CITADEL_WEBUI_PORT", "11000") or "11000"))
+        write_json(root / "cache/cloudflare-api-inventory.json", {"generated_at": now_iso(), "endpoints": endpoints})
+        api_diagnostics = [{key: row.get(key) for key in ("id", "port", "path", "status", "http_status")}
+                           for row in endpoints if row.get("status") != "ready"]
         if token and (enabled or api_hint):
             raw = get("CITADEL_CLOUDFLARE_SERVERSIDE_PERSISTENCE", "1").lower().strip()
             raw = "1" if raw in ("", "blank") else raw
@@ -139,9 +148,6 @@ def main() -> int:
                 get(WWW_REDIRECT_SETTING, ""), add=adding())
             redirect_status = {key: redirect_plan[key] for key in ("action", "warning")
                                if key in redirect_plan}
-            credentials = backend_credentials(root) if api_config.modes else {}
-            endpoints = discover_api(services, api_config, credentials, int(get("CITADEL_WEBUI_PORT", "11000") or "11000"))
-            write_json(root / "cache/cloudflare-api-inventory.json", {"generated_at": now_iso(), "endpoints": endpoints})
             plan = api_routes(endpoints, api_config, domain)
             api_diagnostics = plan["diagnostics"]
             with reconciliation_lock(root):
@@ -223,6 +229,7 @@ def main() -> int:
     }
     api_payload = api_output(api_table, considered=bool((token and api_config.modes) or api_table["hosts"]),
                              authenticated=api_verified, modes=api_config.modes,
+                             inventory=endpoints,
                              errors=api_errors, warnings=api_warnings,
                              diagnostics=api_diagnostics)
     api_payload["cleanup_pending"] = bool(api_hint and not api_verified)

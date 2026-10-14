@@ -90,6 +90,13 @@ class APIIntegrationTests(unittest.TestCase):
         self.assertIn('value="api-oauth"', page)
         self.assertIn("oauth.api-3070.example.com/mcp", page)
         self.assertIn("oauth.api-3070.example.com/api/v1", page)
+        from dashboard_dom import simulate_dashboard
+        modes = simulate_dashboard(page)
+        for mode, host in (("api-bearer", "api-3070.example.com"), ("api-oauth", "oauth.api-3070.example.com")):
+            tiles = modes[mode]["visible"]
+            self.assertEqual([tile["port"] for tile in tiles], [3070])
+            self.assertEqual(set(tiles[0]["links"]), {f"https://{host}/mcp", f"https://{host}/api/v1"})
+            self.assertFalse(tiles[0]["grey"])
 
     def test_health_keeps_both_modes_and_does_not_claim_authenticated_protocol_success(self):
         result = snapshot(self.root, ["CLOUDFLARE-API"])
@@ -137,6 +144,44 @@ class APIIntegrationTests(unittest.TestCase):
                         self.assertTrue(any("keine API-Routen" in alert for alert in dashboard["alerts"]))
                     if errors:
                         self.assertTrue(any("HTTP 403" in alert for alert in dashboard["alerts"]))
+
+    def test_api_modes_only_show_detected_services_even_when_publication_fails(self):
+        self.write("CITADEL_DATA/services.json", {
+            "http_services": [{"port": port, "scheme": "https", "name": f"Service {port}"}
+                              for port in range(3070, 3075)],
+            "other_ports": [{"port": 5432}],
+        })
+        inventory = [
+            {"id": "mcp", "port": 3070, "protocol": "mcp", "path": "/mcp", "status": "ready"},
+            {"id": "rest", "port": 3072, "protocol": "rest", "path": "/api", "status": "authentication-required",
+             "operations": [{"path": "/api/items", "method": "GET"}]},
+            {"id": "guess", "port": 3073, "protocol": "mcp", "path": "/mcp", "status": "authentication-required"},
+            {"id": "graphql", "port": 3074, "protocol": "graphql", "path": "/graphql", "status": "ready"},
+        ]
+        self.write("cache/CLOUDFLARE-API-routes.json", output({"hosts": {}}, considered=True,
+            authenticated=False, modes=("api-bearer", "api-oauth"), inventory=inventory, errors=["Cloudflare unavailable"]))
+        dashboard = self.dashboard()
+        dashboard["default_mode"] = "api-oauth"
+        from jinja2 import Environment, FileSystemLoader
+        from dashboard_dom import simulate_dashboard
+        page = Environment(loader=FileSystemLoader(ROOT / "templates"), autoescape=True).get_template("index.html").render(data=dashboard)
+        modes = simulate_dashboard(page)
+        for mode in ("api-bearer", "api-oauth"):
+            self.assertEqual([tile["port"] for tile in modes[mode]["visible"]], [3070, 3072, 3074])
+            self.assertTrue(modes[mode]["otherHidden"])
+            self.assertFalse(modes[mode]["empty"])
+            self.assertTrue(all(not tile["grey"] and not tile["url"] and not tile["links"] for tile in modes[mode]["visible"]))
+            self.assertIn("Backend-Zugang erforderlich", modes[mode]["visible"][1]["details"][0])
+        self.assertEqual(len(modes["cloudflare"]["visible"]), 5)
+        self.assertFalse(modes["cloudflare"]["otherHidden"])
+
+        # A subsequent successful discovery with no APIs removes every API tile.
+        self.write("cache/CLOUDFLARE-API-routes.json", output({"hosts": {}}, considered=True,
+            authenticated=True, modes=("api-oauth",), inventory=[]))
+        page = Environment(loader=FileSystemLoader(ROOT / "templates"), autoescape=True).get_template("index.html").render(data=self.dashboard())
+        modes = simulate_dashboard(page)
+        self.assertEqual(modes["api-oauth"]["visible"], [])
+        self.assertTrue(modes["api-oauth"]["empty"])
 
     def test_shared_entrypoint_applies_all_modes_then_reports_unverified_cleanup(self):
         self.write("CLOUDFLARE-API_ignore.json", {"ports": []})
@@ -201,6 +246,8 @@ class APIIntegrationTests(unittest.TestCase):
             self.assertFalse(payload["authenticated"])
             self.assertFalse(payload["available"])
             self.assertEqual(payload["services"], {})
+            self.assertEqual([row["id"] for row in payload["discovered"]], [endpoint["id"]])
+            self.assertEqual(self.dashboard()["http_tiles"][0]["provider_endpoints"]["api-oauth"][0]["status"], "not-published")
 
             # A missing management token still skips publication and both modes,
             # even when client bearer/OAuth are configured.

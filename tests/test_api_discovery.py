@@ -42,6 +42,7 @@ class DiscoveryTests(unittest.TestCase):
                 self.assertEqual(len(rows), 1)
                 self.assertEqual(rows[0]["status"], "ready")
                 self.assertEqual(rows[0]["protocol"], "mcp")
+                self.assertTrue(rows[0]["detected"])
                 self.assertTrue(all(call[2]["method"] == "initialize" for call in self.calls if call[1] == "POST"))
                 self.assertLessEqual(len(self.calls), 20)
 
@@ -49,6 +50,7 @@ class DiscoveryTests(unittest.TestCase):
         rows = self.discover({"/mcp": Probe(200, {"content-type": "text/html"}, b"<html>Login</html>"),
                               "/api/mcp": reply({"error": "Unauthorized"}, 401)})
         self.assertFalse(any(row["status"] == "ready" for row in rows))
+        self.assertFalse(any(row["detected"] for row in rows))
         self.assertEqual(rows[0]["status"], "authentication-required")
 
     def test_legacy_sse_is_reported_unsupported_without_following_its_endpoint(self):
@@ -56,6 +58,7 @@ class DiscoveryTests(unittest.TestCase):
                          b"event: endpoint\ndata: https://other.example/messages\n\n")
         rows = self.discover({"/sse": response})
         self.assertEqual(rows[0]["status"], "unsupported")
+        self.assertTrue(rows[0]["detected"])
         self.assertFalse(any("other.example" in call[0] for call in self.calls))
         probe = LocalProbes("http", 3070)
         stream = Mock(code=200, headers=response.headers)
@@ -78,6 +81,7 @@ class DiscoveryTests(unittest.TestCase):
         rows = self.discover({"/openapi.json": reply(document)})
         api = next(row for row in rows if row["path"] == "/api/v1")
         self.assertEqual(api["status"], "authentication-required")
+        self.assertTrue(api["detected"])
         self.assertEqual(api["operations"][0], {"path": "/api/v1/tasks/{id}", "method": "GET", "requires_auth": True})
         key = api["id"]
         rows = self.discover({"/openapi.json": reply(document)}, {key: {"authorization": "Bearer test"}})
@@ -91,6 +95,17 @@ class DiscoveryTests(unittest.TestCase):
         ):
             with self.subTest(document=document), self.assertRaises(ValueError):
                 openapi_operations(document, "https://127.0.0.1:3070/openapi.json")
+
+    def test_unsupported_openapi_map_is_detected_without_publishing_operations(self):
+        document = {"openapi": "3.1.0", "paths": {
+            "/items": {"get": {}}, "/proxy/{path:path}": {"post": {}}}}
+        rows = self.discover({"/openapi.json": reply(document)})
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["detected"])
+        self.assertEqual(rows[0]["status"], "unsupported")
+        self.assertEqual(rows[0]["path"], "/openapi.json")
+        self.assertEqual(rows[0]["operations"], [])
+        self.assertFalse(any(row["detected"] for row in self.discover({"/api": reply({"status": "ok"})})))
 
     def test_multiple_documents_merge_operations_and_later_root_probe_does_not_erase_them(self):
         first = {"openapi": "3.1.0", "servers": [{"url": "/api"}],
@@ -141,6 +156,22 @@ class DiscoveryTests(unittest.TestCase):
             result = probe("/mcp", "POST", {"method": "initialize"})
         self.assertEqual(json_message(result)["id"], 1)
         response.close.assert_called_once()
+
+    def test_large_openapi_document_is_read_with_a_bounded_body(self):
+        import io
+        from api_discovery import MAX_BODY
+        body = json.dumps({"openapi": "3.1.0", "info": {"description": "x" * (600 * 1024)},
+                           "paths": {"/api/items": {"get": {}}}}).encode()
+        probe = LocalProbes("http", 3070)
+        response = Mock(code=200, headers={"content-type": "application/json"})
+        response.read1.side_effect = io.BytesIO(body).read1
+        with patch.object(probe.opener, "open", return_value=response):
+            result = probe("/openapi.json")
+        self.assertEqual(result.status, 200)
+        self.assertEqual(len(openapi_operations(json_message(result), probe.base)[1]), 1)
+        response.read1.side_effect = io.BytesIO(b"x" * (MAX_BODY + 1)).read1
+        with patch.object(probe.opener, "open", return_value=response):
+            self.assertEqual(probe("/openapi.json").status, 0)
 
 
 if __name__ == "__main__":

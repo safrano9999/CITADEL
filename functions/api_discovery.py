@@ -22,7 +22,7 @@ DOC_PATHS = ("/openapi.json", "/swagger.json", "/api/docs.json", "/api/openapi.j
 GRAPHQL_PATHS = ("/graphql", "/api/graphql")
 API_ROOTS = ("/api", "/api/v1", "/api/v2")
 METHODS = {"get", "head", "post", "put", "patch", "delete", "options"}
-MAX_BODY = 512 * 1024
+MAX_BODY = 4 * 1024 * 1024
 MAX_REQUESTS = 20
 MAX_OPERATIONS = 2000
 PROTOCOL_VERSION = "2025-06-18"
@@ -129,10 +129,15 @@ class LocalProbes:
                 response.close()
 
 
+def is_openapi_document(document: dict) -> bool:
+    version = str(document.get("openapi") or document.get("swagger") or "")
+    return version.startswith(("3.0.", "3.1.", "3.2.", "2.0")) and isinstance(document.get("paths"), dict)
+
+
 def openapi_operations(document: dict, base_url: str) -> tuple[str, list[dict]]:
     """Resolve only local OpenAPI/Swagger paths; never fetch external $refs."""
     version = str(document.get("openapi") or document.get("swagger") or "")
-    if not version.startswith(("3.0.", "3.1.", "3.2.", "2.0")) or not isinstance(document.get("paths"), dict):
+    if not is_openapi_document(document):
         raise ValueError("Not an OpenAPI document")
     if version.startswith("2."):
         base = endpoint_path(document.get("basePath", "/"))
@@ -208,7 +213,7 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
     probe = probe or LocalProbes(scheme, port)
     rows = {}
 
-    def record(path, protocol, response, status, evidence, operations=()):
+    def record(path, protocol, response, status, evidence, operations=(), *, detected=False):
         key = route_id(port, protocol, path)
         previous = rows.get(key, {})
         if protocol == "rest" and previous.get("operations"):
@@ -229,6 +234,7 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
             evidence = "Merged OpenAPI operations" + (" require backend credentials" if needs_auth else "")
         rows[key] = {"id": key, "port": port, "scheme": scheme, "path": path,
             "protocol": protocol, "status": status, "evidence": evidence,
+            "detected": detected or status == "ready" or bool(operations),
             "http_status": response.status, "operations": list(operations),
             "credential_ref": key if credentials.get(key) else None}
         return rows[key]
@@ -249,7 +255,8 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
         elif response.status in {401, 403}:
             record(path, "mcp", response, "authentication-required", "Credentials required; protocol unverified")
         elif response.status == 426 or legacy_sse(response):
-            record(path, "mcp", response, "unsupported", "WebSocket or legacy SSE transport requires a Streamable HTTP bridge")
+            record(path, "mcp", response, "unsupported", "WebSocket or legacy SSE transport requires a Streamable HTTP bridge",
+                   detected=legacy_sse(response))
         elif response.status not in {404, 405}:
             record(path, "mcp", response, "unknown", "No valid Streamable HTTP initialize result")
 
@@ -257,7 +264,7 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
     # event or advertising it as an HTTP MCP route. Keep the shared probe budget.
     response = probe("/sse", headers=credentials.get(route_id(port, "mcp", "/sse"), {}))
     if legacy_sse(response):
-        record("/sse", "mcp", response, "unsupported", "Legacy SSE requires a Streamable HTTP bridge")
+        record("/sse", "mcp", response, "unsupported", "Legacy SSE requires a Streamable HTTP bridge", detected=True)
 
     document_paths = list(DOC_PATHS + API_ROOTS)
     followed = 0
@@ -285,8 +292,16 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
             return []
         try:
             base, operations = openapi_operations(data, source_url)
-        except ValueError:
-            record(path, "rest", response, "unknown", "No supported local OpenAPI operation map")
+        except ValueError as exc:
+            # A documented API can still be recognized when its operation map
+            # cannot safely be published (e.g. framework-specific catchalls).
+            # Keep it visible without widening its scope or exposing any URL.
+            detected = is_openapi_document(data) and any(
+                isinstance(spec, dict) and any(method in METHODS for method in spec)
+                for spec in data["paths"].values())
+            record(path, "rest", response, "unsupported" if detected else "unknown",
+                   f"OpenAPI document detected; automatic publication unavailable: {exc}" if detected
+                   else "No supported local OpenAPI operation map", detected=detected)
             continue
         key = route_id(port, "rest", base)
         needs_auth = any(op["requires_auth"] for op in operations) and not credentials.get(key)

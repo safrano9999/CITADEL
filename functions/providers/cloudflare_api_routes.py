@@ -46,7 +46,7 @@ def route_readiness(hostname):
         connection.close()
 
 
-def output(table, *, considered, authenticated, modes=(), errors=(), warnings=(), diagnostics=(), verify=route_readiness):
+def output(table, *, considered, authenticated, modes=(), inventory=(), errors=(), warnings=(), diagnostics=(), verify=route_readiness):
     hosts = table.get("hosts", {})
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         readiness = dict(zip(hosts, pool.map(verify, hosts)))
@@ -72,10 +72,14 @@ def output(table, *, considered, authenticated, modes=(), errors=(), warnings=()
         services.setdefault(port, {"endpoints": []})["endpoints"].extend(endpoints)
     for view in views.values():
         view["available"] = any(route["status"] == "provisioned" for route in view["services"].values())
+    discovered = [{key: row.get(key) for key in ("id", "port", "protocol", "path", "status")}
+                  for row in inventory if row.get("detected") is True or row.get("status") == "ready"
+                  or (row.get("protocol") == "rest" and row.get("operations"))]
     return {"provider_id": "CLOUDFLARE-API", "label": "Cloudflare API", "generated_at": now_iso(),
             "route_schema": 2, "considered": considered, "authenticated": authenticated,
             "available": any(view["available"] for view in views.values()), "remote_verified": authenticated,
-            "views": views, "services": services, "errors": list(errors), "warnings": list(warnings),
+            "views": views, "services": services, "discovered": discovered,
+            "errors": list(errors), "warnings": list(warnings),
             "diagnostics": list(diagnostics)}
 
 

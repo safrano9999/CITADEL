@@ -712,9 +712,14 @@ allowed-email policy and client registration/callback settings; it does not
 need a fixed client bearer.
 
 Configured modes remain visible after a scan even if no eligible endpoints were
-found or Cloudflare rejected publication. Such menus contain no published API
-links; the dashboard reports the scan error or empty result. Inactive modes are
-hidden. A visible menu alone does not confirm a working connection.
+found or Cloudflare rejected publication. API modes list only services with
+detected REST, GraphQL or MCP endpoints; ordinary browser-only tiles and other
+listening ports are hidden. Discovery runs before Cloudflare management calls,
+so detected endpoints remain visible during a Cloudflare failure, with an
+explicit unpublished or backend-authentication status and no public link.
+An OpenAPI document proves an API exists even when its operations require a
+backend credential. A guessed path, HTML login or bare 401 does not. Inactive
+modes are hidden. A visible tile alone does not confirm a working connection.
 
 Activate the extension by moving the shipped directory from
 `extensions/disabled/CLOUDFLARE-API` to `extensions/enabled/CLOUDFLARE-API`.
