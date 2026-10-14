@@ -196,9 +196,11 @@ class APIIntegrationTests(unittest.TestCase):
         values = {"CLOUDFLARE_API_TOKEN": "management", "CITADEL_CLOUDFLARE_ACCOUNT_ID": "account",
             "CITADEL_CLOUDFLARE_ZONE_ID": "zone", "CITADEL_CLOUDFLARE_TUNNEL_ID": "tunnel",
             "CITADEL_CLOUDFLARE_DOMAIN": "example.com", "CLOUDFLARE_EMAIL": "owner@example.com",
-            "CITADEL_CLOUDFLARE_API_BEARER": "a" * 64, "CITADEL_CLOUDFLARE_API_OAUTH": "1"}
+            "CITADEL_CLOUDFLARE_API_OAUTH": "1"}
         endpoint = {"id": route_id(3070, "mcp", "/mcp"), "port": 3070, "scheme": "https", "path": "/mcp",
             "protocol": "mcp", "status": "ready", "operations": [{"path": "/mcp", "method": "POST"}]}
+        self.write("CLOUDFLARE-API_access.json", {"routes": {endpoint["id"]: "client;backend,owner@example.com;backend"}})
+        (self.root / "CLOUDFLARE-API_access.json").chmod(0o600)
         args = ["cloudflare.py", "--provider-dir", str(self.root / "extensions/enabled/cloudflare"),
                 "--routes-out", str(self.root / "cache/cloudflare-routes.json"),
                 "--services-file", str(self.root / "CITADEL_DATA/services.json")]
@@ -215,7 +217,6 @@ class APIIntegrationTests(unittest.TestCase):
             self.assertEqual(cloudflare.main(), 0)
             self.assertEqual(remote.events, [])
             values["CLOUDFLARE_API_TOKEN"] = ""
-            values["CITADEL_CLOUDFLARE_API_BEARER"] = ""
             values["CITADEL_CLOUDFLARE_API_OAUTH"] = "0"
             cloudflare.main()
             self.assertEqual(remote.events, [])
@@ -228,7 +229,6 @@ class APIIntegrationTests(unittest.TestCase):
             # while exposing neither stale routes nor a successful connection.
             from cloudflare_api import CloudflareAPIError
             values["CLOUDFLARE_API_TOKEN"] = "management"
-            values["CITADEL_CLOUDFLARE_API_BEARER"] = "a" * 64
             values["CITADEL_CLOUDFLARE_API_OAUTH"] = "1"
             with patch.object(cloudflare, "APIReconciler", side_effect=CloudflareAPIError("HTTP 403")):
                 self.assertEqual(cloudflare.main(), 1)

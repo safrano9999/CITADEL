@@ -15,6 +15,7 @@ from api_discovery import Probe, discover_service
 from api_discovery_rules import FILENAME, load_rules
 from cloudflare_api_policy import APISettings, route_id
 from cloudflare_plan import api_routes
+from cloudflare_api_access import parse_entries
 from providers.cloudflare_api_routes import discover
 
 
@@ -75,7 +76,7 @@ class LocalDiscoveryRulesTests(unittest.TestCase):
         self.assertEqual(self.calls[0][3], {"authorization": "Bearer private"})
         self.assertTrue(all(not call[3] for call in self.calls[1:] if call[0] != "/api"))
         self.assertNotIn("private", json.dumps(rows))
-        plan = api_routes(rows, APISettings(enabled=True, bearer="a" * 64), "example.com")
+        plan = api_routes(rows, APISettings(enabled=True), "example.com", {row["id"]: parse_entries("client;backend") for row in rows})
         route = plan["hosts"]["api-3070.example.com"]["routes"][0]
         self.assertEqual(route["operations"], [{"method": "GET", "path": "/api/status"},
                                               {"method": "POST", "path": "/api/render"}])
@@ -88,15 +89,15 @@ class LocalDiscoveryRulesTests(unittest.TestCase):
             with self.subTest(response=response):
                 rows = self.run_discovery(response)
                 self.assertFalse(any(row["detected"] for row in rows))
-                self.assertEqual(api_routes(rows, APISettings(enabled=True, bearer="a" * 64), "example.com")["hosts"], {})
+                self.assertEqual(api_routes(rows, APISettings(enabled=True), "example.com", {row["id"]: parse_entries("client;backend") for row in rows})["hosts"], {})
         self.run_discovery(Probe(200, {"content-type": "application/json"}, b"{}"),
                            service={**self.service, "title": "Another service"})
         self.assertFalse(any(call[0] == "/api/status" for call in self.calls))
 
     def test_excluded_and_admin_ports_are_never_probed_even_with_rules(self):
         rules = self.load()
-        for settings, port in ((APISettings(enabled=True, bearer="a" * 64, excluded=frozenset([3070])), 2000),
-                               (APISettings(enabled=True, bearer="a" * 64), 3070)):
+        for settings, port in ((APISettings(enabled=True, excluded=frozenset([3070])), 2000),
+                               (APISettings(enabled=True), 3070)):
             with patch("api_discovery.LocalProbes", side_effect=AssertionError("must not probe")):
                 self.assertEqual(discover({"http_services": [self.service]}, settings, {}, port, rules=rules), [])
 

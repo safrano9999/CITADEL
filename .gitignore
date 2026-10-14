@@ -6,6 +6,7 @@ ss.json
 tailscale.json
 last_scan.txt
 ports.filter.json
+/CLOUDFLARE-API_access.json
 /CLOUDFLARE-API_discovery.json
 config.ini
 config.conf

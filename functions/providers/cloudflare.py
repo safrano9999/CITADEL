@@ -29,8 +29,9 @@ from cloudflare_apply import (  # re-export existing provider helpers
     APIReconciler, reconciliation_lock, remote_inventory,
 )
 from cloudflare_plan import api_routes, browser_routes, combine_routes, merge_ingress
-from cloudflare_api_policy import APISettings, backend_credentials, settings as api_settings
+from cloudflare_api_policy import APISettings, settings as api_settings
 from api_discovery_rules import load_rules
+from cloudflare_api_access import load_access, parse_entries, probe_credentials, scaffold, mark_applied
 from cloudflare_api_routes import discover as discover_api, output as api_output
 
 
@@ -90,7 +91,7 @@ def main() -> int:
     api_config = APISettings()
     api_table = {"schema": 1, "hosts": {}}
     api_errors, api_warnings, api_diagnostics = [], [], []
-    endpoints, credentials = [], {}
+    endpoints, access, access_document = [], {}, {}
     api_verified = False
     api_hint = (root / "CITADEL_DATA/cloudflare-api/runtime.json").exists()
 
@@ -107,9 +108,12 @@ def main() -> int:
         # Local detection is independent of remote publication. Keep the fresh
         # inventory available to the API views even when Cloudflare is down.
         if token and api_config.modes:
-            credentials = backend_credentials(root)
-            endpoints = discover_api(services, api_config, credentials,
+            access_document = load_access(root)
+            access = {key: parse_entries(csv) for key, csv in access_document.items()}
+            endpoints = discover_api(services, api_config, probe_credentials(access),
                                      int(get("CITADEL_WEBUI_PORT", "11000") or "11000"), rules=load_rules(root))
+        if token and api_config.enabled:
+            scaffold(root, endpoints)
         write_json(root / "cache/cloudflare-api-inventory.json", {"generated_at": now_iso(), "endpoints": endpoints})
         api_diagnostics = [{key: row.get(key) for key in ("id", "port", "path", "status", "http_status")}
                            for row in endpoints if row.get("status") != "ready"]
@@ -150,12 +154,12 @@ def main() -> int:
                 get(WWW_REDIRECT_SETTING, ""), add=adding())
             redirect_status = {key: redirect_plan[key] for key in ("action", "warning")
                                if key in redirect_plan}
-            plan = api_routes(endpoints, api_config, domain)
+            plan = api_routes(endpoints, api_config, domain, access)
             api_diagnostics = plan["diagnostics"]
             with reconciliation_lock(root):
                 snapshot = remote_inventory(api, account_id, zone_id, tunnel_id)
                 participant = APIReconciler(api, root, account_id, zone_id, tunnel_id, plan,
-                                           api_config, credentials, snapshot, add=adding())
+                                           api_config, access, snapshot, add=adding())
                 desired = combine_routes(browser_desired, participant.plan["origins"])
                 if enabled:
                     prepare_tunnel(api, account_id, zone_id, tunnel_id, desired, persistent, adding(),
@@ -177,6 +181,8 @@ def main() -> int:
                 api_verified = True
                 api_warnings.extend(participant.warnings)
                 api_errors.extend(participant.errors)
+                if not adding() and not api_errors:
+                    mark_applied(root, access_document)
                 if enabled:
                     apply_redirect(api, zone_id, redirect_plan)
             for hostname, route in (browser_desired if enabled else {}).items():

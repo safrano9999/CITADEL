@@ -19,7 +19,7 @@ class WorkerTransportTests(unittest.TestCase):
     def test_code_table_and_secret_bindings_form_one_multipart_deployment(self):
         api = CloudflareAPI("management-secret")
         metadata = {"main_module": "entry.mjs", "bindings": [
-            {"name": "CLIENT_BEARER", "type": "secret_text", "text": "client-secret"}]}
+            {"name": "ACCESS_fixture", "type": "secret_text", "text": "client-secret"}]}
         with patch.object(api, "request", return_value={"id": "worker"}) as request:
             api.upload_worker("account", "citadel-owner", metadata, {
                 "entry.mjs": ("application/javascript+module", b"export default {};"),
@@ -53,6 +53,17 @@ class WorkerTransportTests(unittest.TestCase):
                     api.worker_settings("account", "worker")
         with patch.object(api, "request", side_effect=CloudflareAPIError("missing", 404)):
             self.assertIsNone(api.worker_settings("account", "worker"))
+
+    def test_explicit_secret_deletion_is_idempotent_only_for_missing_secret(self):
+        api = CloudflareAPI("unused")
+        with patch.object(api, "request", return_value={}) as request:
+            api.delete_worker_secret("account", "worker", "ACCESS_fixture")
+        request.assert_called_once_with("DELETE", "/accounts/account/workers/scripts/worker/secrets/ACCESS_fixture")
+        with patch.object(api, "request", side_effect=CloudflareAPIError("missing", 404)):
+            api.delete_worker_secret("account", "worker", "ACCESS_fixture")
+        with patch.object(api, "request", side_effect=CloudflareAPIError("denied", 403)):
+            with self.assertRaises(CloudflareAPIError):
+                api.delete_worker_secret("account", "worker", "ACCESS_fixture")
 
     def test_expired_management_token_is_rejected(self):
         api = CloudflareAPI("unused")

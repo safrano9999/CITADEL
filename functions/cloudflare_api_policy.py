@@ -5,7 +5,7 @@ are shared by the scanner, planner and configuration commands.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
@@ -14,10 +14,9 @@ import stat
 from typing import Callable
 from urllib.parse import urlsplit
 
-from cloudflare_policy import normalize_emails, normalize_hostname
+from cloudflare_policy import normalize_hostname
 
 EXTENSION = "CLOUDFLARE-API"
-BEARER = "CITADEL_CLOUDFLARE_API_BEARER"
 OAUTH = "CITADEL_CLOUDFLARE_API_OAUTH"
 MODE_LABELS = {"api-bearer": "API-Bearer", "api-oauth": "API-OAuth"}
 HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
@@ -41,8 +40,15 @@ def read_object(path: Path, *, missing: bool = True, private: bool = False) -> d
         raise ValueError(f"Invalid policy file: {path.name}")
     if private and stat.S_IMODE(info.st_mode) & 0o077:
         raise ValueError(f"Secret file must be private (mode 0600): {path.name}")
+    def unique_fields(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"Duplicate JSON field in {path.name}")
+            result[key] = value
+        return result
     try:
-        result = json.loads(path.read_text(encoding="utf-8"))
+        result = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_fields)
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"Invalid JSON in {path.name}") from exc
     if not isinstance(result, dict):
@@ -129,10 +135,8 @@ def credential_headers(value: object) -> dict[str, str]:
 @dataclass(frozen=True)
 class APISettings:
     enabled: bool = False
-    bearer: str = field(default="", repr=False)
     oauth: bool = False
     excluded: frozenset[int] = frozenset()
-    emails: tuple[str, ...] = ()
     allowed_redirect_uris: tuple[str, ...] = ()
     allow_localhost: bool = False
     allow_loopback: bool = False
@@ -142,23 +146,17 @@ class APISettings:
     def modes(self) -> tuple[str, ...]:
         if not self.enabled:
             return ()
-        return (("api-bearer",) if self.bearer else ()) + (("api-oauth",) if self.oauth else ())
+        return ("api-bearer",) + (("api-oauth",) if self.oauth else ())
 
 
 def settings(root: Path, get: Callable[[str, str], str]) -> APISettings:
     if not extension_enabled(root, "cloudflare") or not extension_enabled(root, EXTENSION):
         return APISettings()
-    bearer = get(BEARER, "").strip()
-    if bearer.lower() == "blank":
-        bearer = ""
-    if bearer and (bearer.startswith("example:") or len(bearer) < 32
-                   or any(ord(c) < 33 or ord(c) > 126 for c in bearer)):
-        raise ValueError("API bearer must be a rendered secret of at least 32 characters")
     raw_oauth = get(OAUTH, "0").strip()
     if raw_oauth not in {"", "blank", "0", "1"}:
         raise ValueError(f"{OAUTH} must be 0 or 1")
     oauth = raw_oauth == "1"
-    excluded = excluded_ports(root) if (bearer or oauth) else frozenset()
+    excluded = excluded_ports(root)
     policy = read_object(root / "CITADEL_DATA" / "cloudflare-api" / "policy.json") if oauth else {}
     if set(policy) - {"oauth"}:
         raise ValueError("Unknown API policy field")
@@ -183,34 +181,9 @@ def settings(root: Path, get: Callable[[str, str], str]) -> APISettings:
     if type(local) is not bool or type(loopback) is not bool:
         raise ValueError("OAuth loopback options must be JSON booleans")
     errors = []
-    emails = ()
-    if oauth:
-        try:
-            emails = tuple(normalize_emails(get("CLOUDFLARE_EMAIL", "").split(",")))
-        except ValueError:
-            errors.append("OAuth requires a valid email allowlist")
-        if not emails or not (uris or local or loopback):
-            errors.append("OAuth requires allowed emails and explicit client callback configuration")
-        if errors:
-            oauth = False
-    return APISettings(True, bearer, oauth, excluded, emails, tuple(dict.fromkeys(uris)),
-                       local, loopback, tuple(errors))
-
-
-def backend_credentials(root: Path) -> dict[str, dict]:
-    data = read_object(root / "CITADEL_DATA" / "cloudflare-api" / "credentials.json", private=True)
-    if not data:
-        return {}
-    if set(data) != {"routes"} or not isinstance(data["routes"], dict):
-        raise ValueError("Backend credentials must contain a routes object")
-    result = {}
-    for key, entry in data["routes"].items():
-        if (not re.fullmatch(r"p[0-9]{1,5}_[a-f0-9]{20}", key)
-                or not isinstance(entry, dict) or set(entry) - {"headers", "identities", "fallback"}):
-            raise ValueError("Invalid backend credential route")
-        # Reserve the shape for identity-specific credentials; do not silently
-        # grant the shared token when the operator requested per-user isolation.
-        if entry.get("identities") or entry.get("fallback") is False:
-            raise ValueError("Per-identity backend credentials are not supported yet")
-        result[key] = credential_headers(entry.get("headers", {}))
-    return result
+    if oauth and not (uris or local or loopback):
+        errors.append("OAuth requires explicit client callback configuration")
+        oauth = False
+    return APISettings(enabled=True, oauth=oauth, excluded=excluded,
+                       allowed_redirect_uris=tuple(dict.fromkeys(uris)),
+                       allow_localhost=local, allow_loopback=loopback, errors=tuple(errors))

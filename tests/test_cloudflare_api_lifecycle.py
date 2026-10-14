@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "functions/providers"))
 
 from cloudflare_api import CloudflareAPIError
 from cloudflare_api_policy import APISettings, route_id
+from cloudflare_api_access import parse_entries
 from cloudflare_api_state import table_from_settings
 from cloudflare_apply import APIReconciler, create_bindings, prepare_tunnel, remote_inventory
 from cloudflare_plan import api_routes, combine_routes, merge_ingress
@@ -116,11 +117,15 @@ class FakeCloudflare:
         self.event("worker_upload", {"table": table_from_settings(metadata), "name": name})
         previous = self.worker or {}
         self.worker = deepcopy(metadata)
-        if "secret_text" in metadata.get("keep_bindings", []):
-            names = {binding["name"] for binding in metadata["bindings"]}
-            self.worker["bindings"] += [deepcopy(binding) for binding in previous.get("bindings", [])
-                if binding["type"] == "secret_text" and binding["name"] not in names]
+        # Cloudflare retains omitted secrets, even without keep_bindings.
+        names = {binding["name"] for binding in metadata["bindings"]}
+        self.worker["bindings"] += [deepcopy(binding) for binding in previous.get("bindings", [])
+            if binding["type"] == "secret_text" and binding["name"] not in names]
         return {"id": name}
+
+    def delete_worker_secret(self, account, name, secret):
+        self.event("secret_delete", secret)
+        self.worker["bindings"] = [b for b in self.worker["bindings"] if b["name"] != secret]
 
     def disable_worker_subdomain(self, *_):
         self.event("subdomain_disable", {})
@@ -153,14 +158,16 @@ class APILifecycleTests(unittest.TestCase):
                         "origin_port": 8000, "whitelist": True, "emails": ["owner@example.com"]}}
 
     def settings(self, bearer=True, oauth=True, excluded=()):
-        return APISettings(True, "a" * 64 if bearer else "", oauth, frozenset(excluded), ("owner@example.com",),
-                           ("https://client.example/callback",))
+        self.access = {self.endpoint["id"]: parse_entries(
+            ",".join((["client;backend"] if bearer else []) + (["owner@example.com;backend"] if oauth else [])))}
+        return APISettings(enabled=True, oauth=oauth, excluded=frozenset(excluded),
+                           allowed_redirect_uris=("https://client.example/callback",))
 
     def apply(self, settings=None, *, add=False):
         settings = settings if settings is not None else self.settings()
         snapshot = remote_inventory(self.api, "account", "zone", "tunnel")
         participant = APIReconciler(self.api, self.root, "account", "zone", "tunnel",
-            api_routes([self.endpoint], settings, "example.com"), settings, {}, snapshot, add=add)
+            api_routes([self.endpoint], settings, "example.com", self.access), settings, self.access, snapshot, add=add)
         desired = combine_routes(self.browser, participant.plan["origins"])
         prepare_tunnel(self.api, "account", "zone", "tunnel", desired, True, add,
                        inventory=snapshot, preflight_only=True)
@@ -174,6 +181,41 @@ class APILifecycleTests(unittest.TestCase):
             self.api.update_tunnel_configuration("account", "tunnel", updated)
         participant.publish()
         return participant
+
+    def test_removed_grants_delete_retained_worker_secrets_and_origins(self):
+        config = self.settings()
+        self.apply(config)
+        self.api.worker["bindings"].append({"name": "BACKEND_legacy", "type": "secret_text", "text": "old"})
+        self.access = {}
+        self.api.events.clear()
+        self.apply(config)
+        self.assertEqual(table_from_settings(self.api.worker)["hosts"], {})
+        self.assertEqual({b["name"] for b in self.api.worker["bindings"] if b["type"] == "secret_text"}, {"SESSION_KEY"})
+        self.assertIn(("secret_delete", "BACKEND_legacy"), self.api.events)
+
+    def test_changed_grants_replace_secret_invalidate_sessions_and_preserve_app_ids(self):
+        config = self.settings()
+        self.apply(config)
+        before = table_from_settings(self.api.worker)["hosts"]["oauth.api-3070.example.com"]["routes"][0]
+        app_ids = {app["id"] for app in self.api.apps}
+        self.access[self.endpoint["id"]] = parse_entries("new-client;new-backend,new@example.com;new-user-backend")
+        self.apply(config)
+        after = table_from_settings(self.api.worker)["hosts"]["oauth.api-3070.example.com"]
+        self.assertNotEqual(before["access_revision"], after["routes"][0]["access_revision"])
+        self.assertEqual(after["emails"], ["new@example.com"])
+        self.assertEqual(app_ids, {app["id"] for app in self.api.apps})
+        secret = next(b["text"] for b in self.api.worker["bindings"] if b["name"].startswith("ACCESS_"))
+        self.assertNotIn("owner@example.com", secret)
+        self.assertIn("new-user-backend", secret)
+        self.assertNotIn("new-client", secret)
+
+    def test_discovery_timeout_does_not_prevent_explicit_revocation(self):
+        config = self.settings()
+        self.apply(config)
+        self.endpoint.update(status="unknown", http_status=0)
+        self.access = {}
+        self.apply(config)
+        self.assertEqual(table_from_settings(self.api.worker)["hosts"], {})
 
     def test_repeat_scan_preserves_app_ids_and_performs_no_writes(self):
         self.apply()
@@ -247,7 +289,8 @@ class APILifecycleTests(unittest.TestCase):
         self.apply(self.settings(bearer=False))
         self.assertEqual(set(table_from_settings(self.api.worker)["hosts"]), {"oauth.api-3070.example.com"})
         self.assertEqual(next(app for app in self.api.apps if app["domain"].startswith("oauth."))["id"], oauth["id"])
-        self.assertNotIn("CLIENT_BEARER", {binding["name"] for binding in self.api.worker["bindings"]})
+        value = next(binding["text"] for binding in self.api.worker["bindings"] if binding["name"].startswith("ACCESS_"))
+        self.assertEqual(json.loads(value)["bearer"], [])
 
     def test_disabled_extension_cleans_resources_without_using_cached_route_ids(self):
         self.apply()

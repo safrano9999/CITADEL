@@ -28,6 +28,7 @@ import core
 import health
 from webui_transport import bind_unix_socket, unix_socket_path, probe_target
 from runtime_state import prepare_state
+from cloudflare_api_access import management_view, save_access, revision
 
 
 class EditTokenGuard:
@@ -132,6 +133,12 @@ class InstanceIdentifiedFastAPI(FastAPI):
         async def identify_response(message: Message) -> None:
             if message["type"] == "http.response.start":
                 MutableHeaders(scope=message)["X-Citadel-Instance"] = _instance_id
+                if scope.get("path", "").startswith(("/api/cloudflare/access", "/cloudflare-api")):
+                    headers = MutableHeaders(scope=message)
+                    headers["Cache-Control"] = "no-store"
+                    headers["Referrer-Policy"] = "no-referrer"
+                    headers["X-Content-Type-Options"] = "nosniff"
+                    headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'"
             await send(message)
 
         # Wrap the complete middleware stack, including ServerErrorMiddleware.
@@ -190,6 +197,53 @@ def health_checker():
         media_type="text/x-python", filename="citadel-health-check.py",
         headers={"Cache-Control": "no-cache"},
     )
+
+
+def _require_access_admin(request: Request) -> None:
+    # Unlike ordinary dashboard edits, secret management must never become
+    # anonymous when CITADEL_TOKEN is unset.
+    if not _configured_edit_token():
+        raise HTTPException(status_code=503, detail="Set CITADEL_TOKEN to manage API access.")
+    if request.headers.get("Sec-Fetch-Site") == "cross-site":
+        raise HTTPException(status_code=403, detail="Cross-site access is not allowed.")
+    _require_edit_token(request, request.headers.get("X-Citadel-Token", ""))
+
+
+@app.get("/cloudflare-api", response_class=HTMLResponse)
+def api_access_page():
+    # Public login shell only: inventory and credentials require the token API.
+    return _jinja.get_template("cloudflare-api.html").render()
+
+
+@app.get("/api/cloudflare/access")
+def api_access_get(request: Request):
+    _require_access_admin(request)
+    try:
+        return management_view(core.BASE_DIR)
+    except (ValueError, OSError):
+        raise HTTPException(status_code=409, detail="Cannot read private API access configuration. Check the JSON and file permissions.") from None
+
+
+@app.put("/api/cloudflare/access")
+async def api_access_put(request: Request):
+    _require_access_admin(request)
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Access configuration is too large.")
+    try:
+        payload = json.loads(body)
+        if not isinstance(payload, dict) or set(payload) != {"routes", "revision"}:
+            raise ValueError("Expected routes and revision.")
+        routes = save_access(core.BASE_DIR, payload["routes"], payload["revision"])
+    except FileExistsError:
+        raise HTTPException(status_code=409, detail="Configuration changed. Reload before saving.") from None
+    except (ValueError, UnicodeError):
+        raise HTTPException(status_code=400, detail="Invalid access entries. Use email;bearer, outer;inner, bearer, or email. Duplicate identities are not allowed.") from None
+    except OSError:
+        raise HTTPException(status_code=409, detail="Cannot save private API access configuration.") from None
+    return {"ok": True, "revision": revision(routes), "applies_on": "next_scan"}
 
 
 @app.put("/api/cloudflare/ports/{port}")

@@ -10,9 +10,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "functions"))
 
 from cloudflare_api_policy import (
-    BEARER, OAUTH, backend_credentials, credential_headers, endpoint_path,
+    OAUTH, credential_headers, endpoint_path,
     excluded_ports, hostnames, route_id, settings,
 )
+from cloudflare_api_access import parse_entries
 from cloudflare_plan import api_routes, browser_routes, combine_routes, merge_ingress
 from cloudflare_policy import cloudflare_rules
 
@@ -35,36 +36,30 @@ class APIPolicyTests(unittest.TestCase):
         path.write_text(json.dumps(payload))
         return path
 
-    def test_four_independent_modes(self):
-        for bearer, oauth, expected in (
-            ("", "0", ()), ("a" * 64, "0", ("api-bearer",)),
-            ("", "1", ("api-oauth",)),
-            ("a" * 64, "1", ("api-bearer", "api-oauth")),
-        ):
-            with self.subTest(expected=expected):
-                self.config.update({BEARER: bearer, OAUTH: oauth})
-                policy = settings(self.root, self.config.get)
-                self.assertEqual(policy.modes, expected)
-                self.assertFalse(policy.allow_localhost)
-                self.assertFalse(policy.allow_loopback)
-                self.assertNotIn("a" * 64, repr(policy))
+    def test_enabled_extension_scans_without_global_client_secret(self):
+        for oauth, expected in (("0", ("api-bearer",)), ("1", ("api-bearer", "api-oauth"))):
+            self.config[OAUTH] = oauth
+            policy = settings(self.root, self.config.get)
+            self.assertEqual(policy.modes, expected)
+            self.assertFalse(policy.allow_localhost)
+            self.assertFalse(policy.allow_loopback)
+        self.config["CITADEL_CLOUDFLARE_API_BEARER"] = "ignored-legacy-value"
+        self.assertEqual(settings(self.root, self.config.get).modes, ("api-bearer", "api-oauth"))
 
     def test_extension_dependency_and_disable(self):
-        self.config.update({BEARER: "a" * 64, OAUTH: "1"})
+        self.config[OAUTH] = "1"
         for name in ("cloudflare", "CLOUDFLARE-API"):
             with self.subTest(name=name):
                 self.write(f"extensions/enabled/{name}/extension.json", {"enabled": False})
                 self.assertEqual(settings(self.root, self.config.get).modes, ())
                 self.write(f"extensions/enabled/{name}/extension.json", {"enabled": True})
 
-    def test_unrendered_secret_and_invalid_boolean_fail(self):
-        for config in ({BEARER: "example:openssl rand -hex 32"},
-                       {BEARER: "short"}, {OAUTH: "yes"}):
-            with self.subTest(config=config), self.assertRaises(ValueError):
-                settings(self.root, config.get)
+    def test_invalid_boolean_fails(self):
+        with self.assertRaises(ValueError):
+            settings(self.root, {OAUTH: "yes"}.get)
 
     def test_missing_oauth_policy_never_falls_back_to_public(self):
-        self.config.update({BEARER: "a" * 64, OAUTH: "1"})
+        self.config[OAUTH] = "1"
         (self.root / "CITADEL_DATA/cloudflare-api/policy.json").unlink()
         policy = settings(self.root, self.config.get)
         self.assertEqual(policy.modes, ("api-bearer",))
@@ -92,15 +87,7 @@ class APIPolicyTests(unittest.TestCase):
         self.assertNotEqual(route_id(3005, "mcp", "/mcp"), route_id(3006, "mcp", "/mcp"))
         self.assertEqual(hostnames(3005, "example.com")["api-oauth"], "oauth.api-3005.example.com")
 
-    def test_backend_credentials_private_and_separate_from_client_auth(self):
-        key = route_id(3005, "mcp", "/mcp")
-        path = self.write("CITADEL_DATA/cloudflare-api/credentials.json", {
-            "routes": {key: {"headers": {"Authorization": "Bearer backend"}}}})
-        path.chmod(0o644)
-        with self.assertRaises(ValueError):
-            backend_credentials(self.root)
-        path.chmod(0o600)
-        self.assertEqual(backend_credentials(self.root)[key], {"authorization": "Bearer backend"})
+    def test_reserved_backend_headers_are_rejected(self):
         for name in ("Host", "CF-Access-Jwt-Assertion", "Cookie", "X-Forwarded-Host"):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 credential_headers({name: "injected"})
@@ -108,19 +95,22 @@ class APIPolicyTests(unittest.TestCase):
     def test_api_publication_matrix_and_whole_port_exclusion(self):
         endpoint = {"id": route_id(3070, "mcp", "/mcp"), "port": 3070, "scheme": "https", "path": "/mcp",
                     "protocol": "mcp", "status": "ready", "operations": [{"path": "/mcp", "method": "POST"}]}
-        for bearer, oauth, count in (("", "0", 0), ("a" * 64, "0", 1), ("", "1", 1), ("a" * 64, "1", 2)):
-            self.config.update({BEARER: bearer, OAUTH: oauth})
-            plan = api_routes([endpoint], settings(self.root, self.config.get), "example.com")
+        for csv, oauth, count in (("", "0", 0), ("client;backend", "0", 1),
+                                  ("user@example.com;backend", "1", 1),
+                                  ("client;backend,user@example.com;backend", "1", 2),
+                                  ("user@example.com", "0", 0)):
+            self.config[OAUTH] = oauth
+            access = {endpoint["id"]: parse_entries(csv)}
+            plan = api_routes([endpoint], settings(self.root, self.config.get), "example.com", access)
             self.assertEqual(len(plan["hosts"]), count)
             self.assertEqual(len(plan["origins"]), min(count, 1))
-            self.assertNotIn("a" * 64, json.dumps(plan))
+            self.assertNotIn("backend", json.dumps(plan))
         self.write("CLOUDFLARE-API_ignore.json", {"ports": [3070]})
         plan = api_routes([endpoint], settings(self.root, self.config.get), "example.com")
         self.assertEqual(plan["hosts"], {})
         self.assertEqual(plan["origins"], {})
 
     def test_unverified_candidates_never_publish(self):
-        self.config[BEARER] = "a" * 64
         endpoint = {"id": route_id(3070, "mcp", "/mcp"), "port": 3070, "scheme": "https", "path": "/mcp",
                     "protocol": "mcp", "status": "authentication-required"}
         plan = api_routes([endpoint], settings(self.root, self.config.get), "example.com")

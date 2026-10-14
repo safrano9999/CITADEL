@@ -53,7 +53,7 @@ def initialize_private_state(owner: str) -> dict:
 
 
 def access_spec(owner: str, role: str, port: int, hostname: str, settings: APISettings,
-                service_id: str = "") -> tuple[dict, dict]:
+                service_id: str = "", *, emails=()) -> tuple[dict, dict]:
     app = {"name": resource_name(owner, role, port), "domain": hostname, "type": "self_hosted",
            "session_duration": "24h", "auto_redirect_to_identity": False}
     policy = {"name": resource_name(owner, role, port, policy=True), "exclude": [], "require": []}
@@ -62,9 +62,9 @@ def access_spec(owner: str, role: str, port: int, hostname: str, settings: APISe
             raise ValueError("Origin protection requires a service-token identity")
         policy.update(decision="non_identity", include=[{"service_token": {"token_id": service_id}}])
     elif role == "oauth":
-        if not settings.oauth or not settings.emails:
+        if not settings.oauth or not emails:
             raise ValueError("OAuth protection requires an email policy")
-        policy.update(decision="allow", include=[{"email": {"email": email}} for email in settings.emails])
+        policy.update(decision="allow", include=[{"email": {"email": email}} for email in emails])
         app["oauth_configuration"] = {"enabled": True, "dynamic_client_registration": {
             "enabled": True, "allow_any_on_localhost": settings.allow_localhost,
             "allow_any_on_loopback": settings.allow_loopback, "allowed_uris": list(settings.allowed_redirect_uris)},

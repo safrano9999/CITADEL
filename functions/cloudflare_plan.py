@@ -79,7 +79,7 @@ def merge_ingress(config: dict, desired: dict, *, add: bool = False) -> dict:
     return {**deepcopy(config), "ingress": entries}
 
 
-def api_routes(inventory: list[dict], settings: APISettings, domain: str) -> dict:
+def api_routes(inventory: list[dict], settings: APISettings, domain: str, access=None) -> dict:
     """Plan public Worker hosts and their separately protected Tunnel origins.
 
     Origin service-token IDs and OAuth audiences are filled from verified remote
@@ -87,6 +87,7 @@ def api_routes(inventory: list[dict], settings: APISettings, domain: str) -> dic
     """
     if not isinstance(inventory, list):
         raise ValueError("API inventory must be a list")
+    access = access or {}
     hosts, origins, diagnostics = {}, {}, []
     for row in inventory:
         if not isinstance(row, dict):
@@ -101,6 +102,12 @@ def api_routes(inventory: list[dict], settings: APISettings, domain: str) -> dic
             diagnostics.append({"id": identity, "port": port, "path": path,
                                 "status": row.get("status", "unknown"), "http_status": row.get("http_status")})
             continue
+        grant = access.get(identity)
+        modes = [mode for mode in settings.modes if grant and
+                 (grant.bearer if mode == "api-bearer" else grant.oauth)]
+        if not modes:
+            diagnostics.append({"id": identity, "port": port, "path": path, "status": "access-required"})
+            continue
         operations = row.get("operations")
         if not isinstance(operations, list) or not operations or len(operations) > 2000:
             raise ValueError("Invalid discovered operation list")
@@ -112,21 +119,20 @@ def api_routes(inventory: list[dict], settings: APISettings, domain: str) -> dic
             endpoint_path(operation.get("path"), template=protocol == "rest")
             if protocol != "rest" and operation["path"] != path:
                 raise ValueError("Endpoint operation escapes its route")
-        credential_ref = row.get("credential_ref")
-        if credential_ref not in {None, identity}:
-            raise ValueError("Invalid backend credential reference")
         names = hostnames(port, domain)
         origin = {"port": port, "scheme": row["scheme"], "origin_host": "127.0.0.1", "origin_port": port,
                   "access_kind": "service", "whitelist": True, "emails": []}
         if names["origin"] in origins and origins[names["origin"]] != origin:
             raise ValueError("Conflicting API origin listeners")
         origins[names["origin"]] = origin
-        endpoint = {"id": identity, "protocol": protocol, "path": path, "credential_ref": credential_ref,
+        endpoint = {"id": identity, "protocol": protocol, "path": path, "access_ref": identity,
                     "operations": [{"path": op["path"], "method": op["method"]} for op in operations]}
-        for mode in settings.modes:
+        for mode in modes:
             host = hosts.setdefault(names[mode], {"mode": mode, "port": port,
                 "origin": f"https://{names['origin']}", "routes": [],
-                **({"emails": list(settings.emails)} if mode == "api-oauth" else {})})
+                **({"emails": []} if mode == "api-oauth" else {})})
+            if mode == "api-oauth":
+                host["emails"] = sorted(set(host["emails"]) | set(grant.oauth))
             if any(route["id"] == identity for route in host["routes"]):
                 raise ValueError("Duplicate API inventory route")
             host["routes"].append(deepcopy(endpoint))

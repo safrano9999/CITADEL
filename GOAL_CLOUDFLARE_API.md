@@ -4,36 +4,18 @@ Status: implementation candidate on `codex/cloudflare-api`; live acceptance is
 pending. This goal remains the acceptance contract. It does not activate an
 extension, publish a Worker, run a scan, or change live routes by itself.
 
-The source suite and plugin packaging passed on GitHub Actions at `d06a395`:
-[validation run](https://github.com/safrano9999/CITADEL/actions/runs/38602270082).
-That run executed 370 Python tests (369 passed; the existing Caddy-binary test
-was skipped) and 17 Worker tests. These use fixtures for Cloudflare and upstream
-protocol behavior. They are not evidence of a deployed OAuth flow. The
-Containerfile and build workflows are prepared in the matching SCRIPTS branch;
-no image build or pull has been performed for this implementation.
+The live source preview runs behind Caddy on HTTPS port 2000. The prior
+Cloudflare management-token permission problem was corrected. That does not
+establish an accepted OAuth flow: browser OTP, client callback and refresh
+remain to be tested together with the operator.
 
-Live preview on 2026-10-14: at the operator's request, the host checkout and
-service on HTTPS port 2000 now use the extension code. A normal scan ran with
-both client authentication modes configured. The actual dashboard response
-contains API-Bearer and API-OAuth. Configured menus remain visible on empty
-discovery or publication failure, without claiming usable endpoint links.
-Cloudflare rejected origin service-token creation with HTTP 403; a subsequent
-provider reconciliation timed out. Public API publication and the OpenCode
-OAuth/OTP flow have therefore not been accepted. Existing planning documents
-and local configuration were preserved before adopting the preview.
-
-The follow-up isolated the Cloudflare rejection to the account's service-token
-creation endpoint: the management token verifies as active and can list service
-tokens, while creation returns HTTP 403 with API error code 1010. No origin
-service credentials have been created. Token permission inspection is also
-denied; the operator has been asked to check account-scoped
-`Access: Service Tokens Write` before further publication attempts.
-
-The existing backend MCP credential was verified through the normal local
-discovery implementation on port 3005 (`/api/v2/mcp`, initialize HTTP 200) and
-stored using the generic route credential registry with mode 0600. No tool was
-called. This establishes local backend readiness only, not public Bearer or
-OAuth connectivity.
+The access model was revised at the operator's request: explicit CSV grants per
+scanned route replace the global bearer and legacy backend registry. A private
+WebUI using the existing Citadel token stages those grants for the next full
+scan. The previously inserted application token was removed locally and from
+Cloudflare; it must not be imported automatically. Tests with that old manual
+setup are not evidence for this generic flow. No image build or pull is part
+of this source change.
 
 Remaining live acceptance on the authorized preview deployment includes real
 nested-domain TLS and Managed OAuth API behavior; a real
@@ -69,50 +51,33 @@ The existing Cloudflare extension is actually named
 `extensions/enabled/cloudflare/`; keep that name and its existing configuration.
 There is no additional environment variable for extension activation.
 
-Add exactly two public configuration variables to the existing root examples.
-These snippets are planned changes, not settings implemented by this document.
+Keep `CITADEL_TOKEN` and `CLOUDFLARE_API_TOKEN` in `env.example`. Remove
+`CITADEL_CLOUDFLARE_API_BEARER`; it is no longer part of the configuration model.
+Keep the independent `CITADEL_CLOUDFLARE_API_OAUTH=0` option in
+`config.conf_example`, with choices `0 1`. Do not introduce `_N` groups.
 
-In `env.example`:
+Both extension directories and the existing Cloudflare management token are
+prerequisites. Discovery runs before any grants exist. It adds empty rows to
+private, gitignored `CLOUDFLARE-API_access.json` at the repository root. Only the
+empty `.example` file ships. Grant selection is per discovered route ID:
 
-```dotenv
-# Optional API client bearer: skip, enter, or generate through config.sh.
-#secret
-CITADEL_CLOUDFLARE_API_BEARER=example: openssl rand -hex 32
-```
+- `email;backendBearer`: OAuth email maps to that backend bearer.
+- `outerBearer;innerBearer`: verify the outer bearer, then inject the inner.
+- `singleBearer`: verify it at the edge, then forward it unchanged.
+- `email`: authorize OAuth without sending backend Authorization.
 
-The `example:` notation is a `config.sh` generator hint, not a shell command
-or a valid credential. The existing optional-secret prompt already offers
-skip, manual entry, and generation. Blank remains valid, including unattended
-configuration. Preserve an existing secret on ordinary regeneration. Reject
-unrendered generator hints as credentials when examples are loaded as defaults.
+Commas separate entries and semicolons separate pairs. Reject duplicate
+identities within a route. Empty rows publish nothing. Email grants additionally
+require OAuth enabled and a valid callback policy. The browser email policy is
+separate; it does not grant API access.
 
-In `config.conf_example`:
-
-```dotenv
-# Optional OAuth access, independent of the fixed bearer.
-#choices: 0 1
-#default-preset: 0
-CITADEL_CLOUDFLARE_API_OAUTH=0
-```
-
-Render these into `.env` and `config.conf` through the existing loader and
-`config.sh`. Do not add `_N` groups, duplicate example files inside the extension,
-or conditional prompts that erase the bearer when OAuth is enabled.
-
-| Bearer configured | OAuth setting | Desired API modes |
-|---|---|---|
-| No | `0` | None |
-| Yes | `0` | API-Bearer |
-| No | `1` | API-OAuth |
-| Yes | `1` | API-Bearer and API-OAuth |
-
-Both extension directories must be enabled and the existing
-`CLOUDFLARE_API_TOKEN` must permit the required management operations. Resolve
-account, zone, domain, and Tunnel through the existing configuration. OAuth
-also requires a valid email policy and supported client registration. Missing
-OAuth prerequisites must never result in an unauthenticated OAuth URL.
-An OAuth failure can be reported separately while a valid bearer mode remains
-usable. The management API token and the client bearer are different secrets.
+At `/cloudflare-api`, provide an editor protected by `CITADEL_TOKEN` for both
+reading and writing. Unset token fails closed. Show route identity, current
+scan evidence, masked CSV values and whether saved changes are pending. Save
+only updates the private JSON; never deploy or scan automatically. The next
+successful full scan synchronizes its snapshot, replaces changed mappings and
+revokes removed grants. Concurrent edits remain pending; stale editors cannot
+overwrite newer saved changes. `--add` preserves existing credentials.
 
 ## Stable URLs and dashboard modes
 
@@ -219,17 +184,18 @@ to escape path restrictions through encoding, traversal, or redirects.
 
 ### Fixed bearer
 
-Store the configured client bearer as a Worker Secret and validate it before
-forwarding. Missing or invalid credentials produce a machine-readable 401.
-Cloudflare Access does not automatically validate an `openssl`-generated bearer;
-this validation is the Worker's responsibility. A single configured bearer
-grants access to all active bearer routes in this installation.
+Store route-bound HMAC verifiers in Worker Secrets and validate the supplied
+bearer before forwarding. Missing or invalid credentials produce a machine-readable
+401 without contacting the host. Cloudflare Access does not automatically
+validate an arbitrary bearer; the Worker does. No bearer has installation-wide
+access. Pair entries select an inner token; single entries explicitly authorize
+passing the verified client token through.
 
 ### Optional Managed OAuth
 
 Attach Access with Managed OAuth to the OAuth hostnames only, so the fixed
-bearer URLs remain usable. Reuse the configured email allowlist; an explicitly
-public browser route is not an OAuth email policy. Cloudflare performs login,
+bearer URLs remain usable. Build each hostname's Access email policy from its
+route grants, then enforce the exact route/email mapping in the Worker. Cloudflare performs login,
 token issuance, and refresh. The Worker validates the signed
 `Cf-Access-Jwt-Assertion`, including issuer, audience, signature, and expiry,
 and checks the current route identity policy before forwarding.
@@ -260,20 +226,19 @@ without valid service credentials; preserve origin assertion validation where
 the connector supports it. The Tunnel still targets the existing Caddy
 listener, not a Podman-only address unreachable from host cloudflared.
 
-Backend authentication is separate again. If the upstream needs its own API
-key or bearer, attach that credential to the detected route and inject it only
-after successful client authorization. Remove client Authorization and
-untrusted identity headers first. Never forward the Cloudflare management token
-or a client bearer as an assumed backend credential.
+Backend authentication is selected by the explicit matching grant. Remove
+client Authorization and untrusted identity headers before injecting the selected
+backend bearer. A bare email grant forwards no Authorization. Never guess tokens,
+copy them from application configuration, or use the management token upstream.
 
-Provide a private per-route credential registry under
-`CITADEL_DATA/cloudflare-api/` and publish secret values through Worker Secrets.
-Use secret references in generated metadata; no secret values in route JSON,
-logs, URLs, source control, or dashboard output. This registry supplies optional
-backend credentials, not a manual inventory of servers to discover. Its schema
-must permit later identity-to-secret mappings without changing the two global
-example variables. Version 1 may use one backend credential per route; all
-authorized clients then receive that credential's backend permissions.
+Keep CSV values only in the private mode-0600 root access file and Worker Secrets.
+Public inventory, health responses, route tables and logs contain no credentials.
+The token-protected editor is the only WebUI that may read or write the values.
+Use the first explicitly configured backend token for each route's discovery
+probes, never send it to another route. A protocol check does not validate every
+user's backend token. Full scans must explicitly delete obsolete secret bindings
+because Cloudflare may retain secrets omitted from an upload. Changed grants
+also invalidate MCP sessions bound to their previous revision.
 
 Stream requests and responses without buffering complete MCP/SSE streams.
 Preserve protocol headers and cancellation. Do not follow upstream redirects
@@ -289,6 +254,8 @@ do not repurpose its name for the new API-routing extension.
 |---|---|
 | `extensions/disabled/CLOUDFLARE-API/extension.json` | Optional extension manifest; implementation ID `cloudflare_api_routes` |
 | `functions/api_discovery.py` | Bounded read-only detection and normalized endpoint inventory |
+| `functions/cloudflare_api_access.py` | Private grant registry, CSV validation, scan snapshot, secret compilation and editor state |
+| `webui.py`, `templates/cloudflare-api.html`, `assets/cloudflare-api.*` | Token-protected grant editor; save for next scan only |
 | `functions/cloudflare_api_policy.py` | Mode matrix, whole-port exclusions, route identity, auth policy and secret references |
 | `functions/cloudflare_plan.py` | Pure desired-state planning for ordinary Cloudflare routes and API routes together |
 | `functions/cloudflare_apply.py` | One locked inventory/diff/apply coordinator for DNS, Tunnel, Access, Worker and domains |
@@ -335,8 +302,9 @@ existing public rules. Add regression coverage before changing the provider.
 ## State, disable behavior and operational boundaries
 
 Generated endpoint inventory and API route output belong in `cache/`; private
-backend configuration belongs in the ignored persistent data directory. The
-root ignore file is operator policy and must survive refreshes. Publish no
+access configuration belongs in the private root JSON. Machine secrets remain
+in the ignored persistent data directory. Root access, discovery and ignore
+files are operator state and must survive refreshes. Publish no
 secrets to the existing health API or OpenClaw route output.
 
 Turning a mode off, removing its bearer, or moving the extension to disabled
@@ -366,9 +334,10 @@ agreed Fedora image pins and other existing image-reference rules.
 2. **Factor ordinary Cloudflare reconciliation.** Introduce plan/apply and the
    missing-email regression test, preserve current browser behavior, and prove
    resource ownership, pagination, locking, Add semantics and in-place updates.
-3. **Add extension policy and discovery.** Implement the two example settings,
-   four mode combinations, whole-port ignore file, protocol detection, bounded
-   requests, and actionable results for missing backend credentials.
+3. **Add extension policy and discovery.** Keep the OAuth flag, add the private
+   per-route grants and token-protected editor, whole-port ignore file, protocol
+   detection, bounded requests and actionable missing-credential results.
+   Test saving versus applying, concurrent edits and removed grant cleanup.
 4. **Implement the Worker and protected origins.** Test bearer rejection and
    success, route/path boundaries, secret injection, streaming, cancellation,
    session isolation and rejection of direct unauthenticated origin access.

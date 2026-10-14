@@ -3,6 +3,9 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from copy import deepcopy
+import hashlib
+import hmac
+from cloudflare_api_access import compiled_access
 from datetime import datetime, timezone
 import fcntl
 from fnmatch import fnmatchcase
@@ -323,13 +326,28 @@ class APIReconciler:
         self.owned_apps, self.owned_policies = {}, {}
         if not self.needed:
             return
+        self.state_new = not self.state
+        if self.state_new:
+            self.state = initialize_private_state(self.owner)
+        self.access_secrets = {identity: canonical(compiled_access(identity, grant, self.state["session_key"]))
+                               for identity, grant in credentials.items() if grant.bearer or grant.oauth}
+        revisions = {identity: hmac.new(bytes.fromhex(self.state["session_key"]), value.encode(), hashlib.sha256).hexdigest()
+                     for identity, value in self.access_secrets.items()}
+        for host in self.table["hosts"].values():
+            for route in host["routes"]:
+                route["access_revision"] = revisions[route["id"]]
         self.remote = api.worker_settings(account, self.name)
         if self.remote is not None and f"citadel-owner:{self.owner}" not in self.remote.get("tags", []):
             raise CloudflareAPIError("Worker name is occupied by a foreign resource")
         self.previous = table_from_settings(self.remote)
         ready_ids = {route["id"] for host in self.table["hosts"].values() for route in host["routes"]}
         timed_out_ports = {row["port"] for row in self.plan["diagnostics"] if row.get("http_status") == 0}
-        if not add and any(route["id"] not in ready_ids and host["port"] in timed_out_ports
+        access_changed = any(
+            route.get("access_revision") != revisions.get(route["id"])
+            or host["mode"] not in settings.modes or host["port"] in settings.excluded
+            or not (getattr(credentials.get(route["id"]), "bearer" if host["mode"] == "api-bearer" else "oauth", None))
+            for host in self.previous["hosts"].values() for route in host["routes"])
+        if not add and not access_changed and any(route["id"] not in ready_ids and host["port"] in timed_out_ports
                            for host in self.previous["hosts"].values() for route in host["routes"]):
             raise CloudflareAPIError("API discovery is incomplete; previously published routes were preserved")
         self.domains = api.worker_domains(account)
@@ -426,12 +444,10 @@ class APIReconciler:
         # Limits and secret formats must be checked before any remote writes.
         placeholder = {"SESSION_KEY": self.state.get("session_key", "0" * 64),
                        "ORIGIN_CLIENT_ID": "pending", "ORIGIN_CLIENT_SECRET": "pending"}
-        if settings.bearer:
-            placeholder["CLIENT_BEARER"] = settings.bearer
         for host in self.table["hosts"].values():
             for route in host["routes"]:
-                if route.get("credential_ref") and route["id"] in credentials:
-                    placeholder[f"BACKEND_{route['id']}"] = canonical(credentials[route["id"]])
+                if route["id"] in self.access_secrets:
+                    placeholder[f"ACCESS_{route['id']}"] = self.access_secrets[route["id"]]
         deployment(self.owner, self.table, placeholder, self.code)
 
     def owns_domain(self, domain):
@@ -457,12 +473,22 @@ class APIReconciler:
             new_names = {b["name"] for b in metadata["bindings"]}
             if len(metadata["bindings"]) + len(current_names - new_names) > 64:
                 raise ValueError("Retained Worker secrets exceed the binding limit")
-        if self.remote and set(metadata["tags"]).issubset(set(self.remote.get("tags", []))):
-            return
-        self.api.upload_worker(self.account, self.name, metadata, modules)
+        current_names = {b["name"] for b in (self.remote or {}).get("bindings", []) if b.get("type") == "secret_text"}
+        obsolete = current_names - set(secrets) if not keep else set()
+        if not (self.remote and set(metadata["tags"]).issubset(set(self.remote.get("tags", [])))):
+            self.api.upload_worker(self.account, self.name, metadata, modules)
+        # Cloudflare may retain omitted secret bindings on upload. Explicitly
+        # retire them, even when deployment tags otherwise already match.
+        for name in sorted(obsolete):
+            self.api.delete_worker_secret(self.account, self.name, name)
         retained = [b for b in (self.remote or {}).get("bindings", [])
                     if keep and b.get("type") == "secret_text" and b["name"] not in secrets]
         self.remote = {**metadata, "bindings": retained + metadata["bindings"]}
+        if not keep:
+            verified = self.api.worker_settings(self.account, self.name)
+            names = {b["name"] for b in (verified or {}).get("bindings", []) if b.get("type") == "secret_text"}
+            if names != set(secrets):
+                raise CloudflareAPIError("Worker secret synchronization could not be verified")
 
     def quiesce(self):
         if not self.needed or self.add:
@@ -497,7 +523,8 @@ class APIReconciler:
             self.snapshot["config"] = safe_config
 
     def _protect(self, role, port, hostname):
-        app_spec, policy_spec = access_spec(self.owner, role, port, hostname, self.settings, self.service.get("id", ""))
+        app_spec, policy_spec = access_spec(self.owner, role, port, hostname, self.settings, self.service.get("id", ""),
+                                            emails=self.table["hosts"].get(hostname, {}).get("emails", []))
         self.specs[app_spec["name"]] = policy_spec["name"]
         app = self.owned_apps.get(app_spec["name"])
         policy = self.owned_policies.get(policy_spec["name"])
@@ -535,9 +562,9 @@ class APIReconciler:
     def protect(self):
         if not self.needed:
             return
-        if not self.state:
-            self.state = initialize_private_state(self.owner)
+        if self.state_new:
             save_private_state(self.state_path, self.state)
+            self.state_new = False
         if self.plan["origins"] and not self.service:
             try:
                 self.service = self.api.create_service_token(self.account, resource_name(self.owner, "service"))
@@ -579,12 +606,10 @@ class APIReconciler:
             if not service.get("client_id") or not service.get("client_secret"):
                 raise CloudflareAPIError("Origin service credentials are missing")
             secrets.update(ORIGIN_CLIENT_ID=service["client_id"], ORIGIN_CLIENT_SECRET=service["client_secret"])
-        if self.settings.bearer and any(host["mode"] == "api-bearer" for host in self.table["hosts"].values()):
-            secrets["CLIENT_BEARER"] = self.settings.bearer
         for host in self.table["hosts"].values():
             for route in host["routes"]:
-                if route.get("credential_ref") and route["id"] in self.credentials:
-                    secrets[f"BACKEND_{route['id']}"] = canonical(self.credentials[route["id"]])
+                if route["id"] in self.access_secrets:
+                    secrets[f"ACCESS_{route['id']}"] = self.access_secrets[route["id"]]
         keep = self.add and self.remote is not None
         if keep:
             old_names = {b["name"] for b in self.remote.get("bindings", []) if b.get("type") == "secret_text"}

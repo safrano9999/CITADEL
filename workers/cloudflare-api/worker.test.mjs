@@ -1,12 +1,16 @@
 import test from "node:test";
+import { createHmac } from "node:crypto";
 import assert from "node:assert/strict";
 import worker, { handle, verifyAssertion, openSession, sealSession, configuration } from "./worker.mjs";
 
 const routeID = "p3070_0123456789abcdef0123";
 const bearer = "a".repeat(64);
-const route = { id: routeID, path: "/mcp", protocol: "mcp", credential_ref: routeID,
+const route = { id: routeID, path: "/mcp", protocol: "mcp", access_ref: routeID, access_revision: "e".repeat(64),
   operations: ["GET", "POST", "DELETE"].map(method => ({ method, path: "/mcp" })) };
 const sessionKey = "c".repeat(64);
+function grant(identity = routeID, outer = bearer, backend = "backend-secret", oauth = { "owner@example.com": "backend-secret" }) {
+  return JSON.stringify({ bearer: [{ hash: createHmac("sha256", Buffer.from(sessionKey, "hex")).update(identity + "\0" + outer).digest("hex"), backend }], oauth });
+}
 function environment(mode = "api-bearer") {
   const hostname = mode === "api-bearer" ? "api-3070.example.com" : "oauth.api-3070.example.com";
   return {
@@ -14,8 +18,8 @@ function environment(mode = "api-bearer") {
       [hostname]: { mode, origin: "https://origin-api-3070.example.com", routes: [route],
         audience: "correct-audience", emails: ["owner@example.com"] },
     } }),
-    CLIENT_BEARER: bearer, SESSION_KEY: sessionKey, ORIGIN_CLIENT_ID: "machine.access",
-    ORIGIN_CLIENT_SECRET: "origin-secret", [`BACKEND_${routeID}`]: JSON.stringify({ authorization: "Bearer backend-secret" }),
+    SESSION_KEY: sessionKey, ORIGIN_CLIENT_ID: "machine.access",
+    ORIGIN_CLIENT_SECRET: "origin-secret", [`ACCESS_${routeID}`]: grant(),
     API_LIMIT: { async limit() { return { success: true }; } },
   };
 }
@@ -116,7 +120,7 @@ test("rate limiting uses identity rather than the tunnel IP", async () => {
 });
 
 test("missing backend or origin secret fails closed", async () => {
-  for (const binding of [`BACKEND_${routeID}`, "ORIGIN_CLIENT_SECRET"]) {
+  for (const binding of [`ACCESS_${routeID}`, "ORIGIN_CLIENT_SECRET"]) {
     const env = environment();
     delete env[binding];
     assert.ok((await handle(request(), env, mustNotFetch)).status >= 500);
@@ -142,7 +146,7 @@ async function jwt(issuer, claims = {}, pair = pair1, kid = "first") {
 test("signed assertion verifies issuer, audience, expiry, signature and current identity policy", async () => {
   const issuer = "https://verification.cloudflareaccess.com";
   const fetcher = async () => Response.json({ keys: [jwk1] });
-  assert.equal(await verifyAssertion(await jwt(issuer), issuer, hostPolicy, fetcher), "oauth:user-id:owner@example.com");
+  assert.deepEqual(await verifyAssertion(await jwt(issuer), issuer, hostPolicy, fetcher), { principal: "oauth:user-id:owner@example.com", email: "owner@example.com" });
   for (const claims of [{ iss: "https://other.cloudflareaccess.com" }, { aud: ["another-app-same-team"] },
     { exp: 1 }, { nbf: Date.now() / 1000 + 1000 }, { email: "removed@example.com" }]) {
     const jwtToken = await jwt(issuer, claims);
@@ -167,7 +171,6 @@ test("unknown kid refreshes JWKS, with a bounded retry window", async () => {
 
 test("OAuth-only operation needs no client bearer and forwards no opaque OAuth token", async () => {
   const env = environment("api-oauth");
-  delete env.CLIENT_BEARER;
   const token = await jwt("https://test.cloudflareaccess.com");
   let originCalls = 0;
   const response = await handle(request("/mcp", { authorization: "Bearer oauth:opaque-client-token",
@@ -211,17 +214,18 @@ test("REST parameter scopes preserve methods and reject ambiguous credentials", 
   const env = environment();
   const config = JSON.parse(env.ROUTE_TABLE);
   const host = config.hosts["api-3070.example.com"];
-  host.routes.push({ id: "p3070_aaaaaaaaaaaaaaaaaaaa", protocol: "rest", path: "/api", operations: [
+  host.routes.push({ id: "p3070_aaaaaaaaaaaaaaaaaaaa", access_ref: "p3070_aaaaaaaaaaaaaaaaaaaa", access_revision: "e".repeat(64), protocol: "rest", path: "/api", operations: [
     { method: "GET", path: "/api/tasks/{id}" }, { method: "POST", path: "/mcp" }] });
   env.ROUTE_TABLE = JSON.stringify(config);
+  env.ACCESS_p3070_aaaaaaaaaaaaaaaaaaaa = grant("p3070_aaaaaaaaaaaaaaaaaaaa", bearer, "backend-rest");
   let upstream;
   const fetcher = async (url, options) => { upstream = options; return Response.json({ ok: true }); };
   assert.equal((await handle(request("/api/tasks/42", {}, "api-3070.example.com", "GET"), env, fetcher)).status, 200);
-  assert.equal(upstream.headers.get("authorization"), null);
+  assert.equal(upstream.headers.get("authorization"), "Bearer backend-rest");
   assert.equal((await handle(request("/api/tasks/42", {}, "api-3070.example.com", "DELETE"), env, mustNotFetch)).status, 404);
   assert.equal((await handle(request(), env, fetcher)).status, 200);
   assert.equal(upstream.headers.get("authorization"), "Bearer backend-secret");
-  host.routes.push({ id: "p3070_bbbbbbbbbbbbbbbbbbbb", protocol: "rest", path: "/api/tasks", operations: [
+  host.routes.push({ id: "p3070_bbbbbbbbbbbbbbbbbbbb", access_ref: "p3070_bbbbbbbbbbbbbbbbbbbb", access_revision: "e".repeat(64), protocol: "rest", path: "/api/tasks", operations: [
     { method: "GET", path: "/api/tasks/{name}" }] });
   env.ROUTE_TABLE = JSON.stringify(config);
   assert.equal((await handle(request("/api/tasks/42", {}, "api-3070.example.com", "GET"), env, mustNotFetch)).status, 404);
@@ -263,4 +267,51 @@ test("concurrent JWKS refreshes collapse and failures back off without accepting
   assert.equal(calls, 2);
   await verifyAssertion(token, issuer, hostPolicy, fetcher, now + 307);
   assert.equal(calls, 3);
+});
+
+
+test("single bearer is verified at edge and passed through; unregistered token never reaches origin", async () => {
+  const env = environment(); env[`ACCESS_${routeID}`] = grant(routeID, "single", null);
+  assert.equal((await handle(request("/mcp", { authorization: "Bearer unknown" }), env, mustNotFetch)).status, 401);
+  const response = await handle(request("/mcp", { authorization: "Bearer single" }), env, async (url, options) => {
+    assert.equal(options.headers.get("authorization"), "Bearer single");
+    return Response.json({ result: {} });
+  });
+  assert.equal(response.status, 200);
+});
+
+test("OAuth email selects its own backend grant; bare email strips authorization", async () => {
+  const env = environment("api-oauth");
+  env[`ACCESS_${routeID}`] = JSON.stringify({ bearer: [], oauth: {
+    "owner@example.com": "owner-backend", "other@example.com": "other-backend", "guest@example.com": null,
+  } });
+  const config = JSON.parse(env.ROUTE_TABLE);
+  config.hosts["oauth.api-3070.example.com"].emails = ["owner@example.com", "other@example.com", "guest@example.com", "other-route@example.com"];
+  env.ROUTE_TABLE = JSON.stringify(config);
+  for (const [email, expected] of [["owner@example.com", "Bearer owner-backend"], ["other@example.com", "Bearer other-backend"], ["guest@example.com", null], ["other-route@example.com", undefined]]) {
+    let calls = 0;
+    const token = await jwt("https://test.cloudflareaccess.com", { email, sub: email });
+    const response = await handle(request("/mcp", { authorization: "Bearer oauth:opaque", "cf-access-jwt-assertion": token }, "oauth.api-3070.example.com"), env, async (url, options) => {
+      if (url.endsWith("/cdn-cgi/access/certs")) return Response.json({ keys: [jwk1] });
+      calls++;
+      assert.equal(options.headers.get("authorization"), expected);
+      return Response.json({ result: {} });
+    });
+    assert.equal(response.status, expected === undefined ? 403 : 200);
+    assert.equal(calls, expected === undefined ? 0 : 1);
+  }
+});
+
+test("grant revocation and remapping invalidate access and old MCP sessions", async () => {
+  const env = environment();
+  const first = await handle(request(), env, async () => Response.json({ result: {} }, { headers: { "mcp-session-id": "backend-session" } }));
+  const session = first.headers.get("mcp-session-id");
+  assert.ok(session);
+  env[`ACCESS_${routeID}`] = grant(routeID, "different-client", "same-backend");
+  assert.equal((await handle(request("/mcp", { "mcp-session-id": session }), env, mustNotFetch)).status, 401);
+  assert.equal((await handle(request("/mcp", { authorization: "Bearer different-client", "mcp-session-id": session }), env, mustNotFetch)).status, 404);
+  env[`ACCESS_${routeID}`] = grant(routeID, bearer, "changed-backend");
+  const config = JSON.parse(env.ROUTE_TABLE); config.hosts["api-3070.example.com"].routes[0].access_revision = "f".repeat(64);
+  env.ROUTE_TABLE = JSON.stringify(config);
+  assert.equal((await handle(request("/mcp", { "mcp-session-id": session }), env, mustNotFetch)).status, 404);
 });

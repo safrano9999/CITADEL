@@ -318,6 +318,13 @@ class CloudflareAPI:
             raise CloudflareAPIError("Invalid Worker settings inventory")
         return result
 
+    def delete_worker_secret(self, account_id: str, name: str, secret: str) -> None:
+        try:
+            self.request("DELETE", f"/accounts/{account_id}/workers/scripts/{name}/secrets/{secret}")
+        except CloudflareAPIError as exc:
+            if exc.status_code != 404:
+                raise
+
     def upload_worker(self, account_id: str, name: str, metadata: dict,
                       modules: dict[str, tuple[str, bytes]]) -> dict:
         """Atomically deploy code, route module and all Secret bindings together."""

@@ -10,7 +10,6 @@ const inputHeaders = ["accept", "accept-language", "content-type", "content-enco
   "mcp-protocol-version", "last-event-id"];
 const outputHeaders = ["content-type", "content-encoding", "content-disposition", "etag",
   "last-modified", "accept-ranges", "content-range", "mcp-protocol-version"];
-const reservedHeaders = /^(?:cf-|x-forwarded-|host$|connection$|content-length$|transfer-encoding$|upgrade$|cookie$|set-cookie$|forwarded$|proxy-authorization$|mcp-session-id$|mcp-protocol-version$|origin$)/i;
 const adminPaths = ["/api/cloudflare", "/api/scan", "/api/extensions", "/api/settings"];
 
 function deny(status, error) {
@@ -93,6 +92,7 @@ export function configuration(env) {
     for (const route of host.routes) {
       if (!/^p[0-9]{1,5}_[a-f0-9]{20}$/.test(route.id || "") || !safePath(route.path)
           || !["mcp", "rest", "graphql", "rpc"].includes(route.protocol) || !Array.isArray(route.operations)
+          || route.access_ref !== route.id || !/^[a-f0-9]{64}$/.test(route.access_revision || "")
           || !route.operations.length || route.operations.length > 2000) throw new Error("Invalid endpoint binding");
       for (const operation of route.operations) {
         if (!safePath(operation.path) || !["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"].includes(operation.method)) {
@@ -109,11 +109,17 @@ async function digest(value) {
   return new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(value)));
 }
 
-async function sameSecret(actual, expected) {
-  if (typeof expected !== "string" || expected.length < 32 || typeof actual !== "string" || actual.length > 8192) return false;
-  const [a, b] = await Promise.all([digest(actual), digest(expected)]);
-  let difference = 0;
-  for (let i = 0; i < 32; i++) difference |= a[i] ^ b[i];
+async function bearerHash(routeID, token, secret) {
+  if (!/^[a-f0-9]{64}$/.test(secret || "")) throw new Error("Missing authentication key");
+  const bytes = Uint8Array.from(secret.match(/../g), byte => parseInt(byte, 16));
+  const key = await crypto.subtle.importKey("raw", bytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const hash = new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(routeID + "\0" + token)));
+  return Array.from(hash, byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function sameHash(a, b) {
+  let difference = a.length ^ b.length;
+  for (let i = 0; i < a.length; i++) difference |= a.charCodeAt(i) ^ (b.charCodeAt(i) || 0);
   return difference === 0;
 }
 
@@ -192,7 +198,7 @@ export async function verifyAssertion(token, issuer, host, fetcher = fetch, now 
   }
   const email = claims.email.toLowerCase();
   if (!host.emails.includes(email)) throw new Error("Identity no longer allowed");
-  return `oauth:${claims.sub}:${email}`;
+  return { principal: `oauth:${claims.sub}:${email}`, email };
 }
 
 async function sessionKey(secret) {
@@ -222,20 +228,15 @@ export async function openSession(token, route, principal, secret, now = Date.no
   return data.sid;
 }
 
-function backendHeaders(route, env) {
-  if (!route.credential_ref) return {};
-  if (route.credential_ref !== route.id) throw new Error("Invalid credential reference");
-  const headers = JSON.parse(env[`BACKEND_${route.id}`] || "null");
-  if (!headers || typeof headers !== "object" || Array.isArray(headers) || Object.keys(headers).length > 16) {
-    throw new Error("Missing backend credentials");
-  }
-  for (const [name, value] of Object.entries(headers)) {
-    if (reservedHeaders.test(name) || !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)
-        || typeof value !== "string" || !value || value.length > 8192 || /[\x00-\x1f\x7f]/.test(value)) {
-      throw new Error("Invalid backend credential");
-    }
-  }
-  return headers;
+function routeAccess(route, env) {
+  const access = JSON.parse(env[`ACCESS_${route.id}`] || "null");
+  if (!access || !Array.isArray(access.bearer) || access.bearer.length > 64
+      || !access.oauth || typeof access.oauth !== "object" || Array.isArray(access.oauth)
+      || Object.keys(access.oauth).length > 64) throw new Error("Invalid route access policy");
+  const valid = value => value === null || (typeof value === "string" && value.length <= 4096 && /^[A-Za-z0-9._~+/-]+=*$/.test(value));
+  if (access.bearer.some(rule => !/^[a-f0-9]{64}$/.test(rule.hash || "") || !valid(rule.backend))
+      || Object.values(access.oauth).some(value => !valid(value))) throw new Error("Invalid route credentials");
+  return access;
 }
 
 export async function handle(request, env, fetcher = fetch) {
@@ -250,22 +251,41 @@ export async function handle(request, env, fetcher = fetch) {
     return deny(503, "Route configuration unavailable");
   }
   if (request.headers.has("upgrade")) return deny(501, "Unsupported transport");
-  let principal;
-  try {
-    if (host.mode === "api-bearer") {
-      const authorization = request.headers.get("authorization") || "";
-      if (!authorization.startsWith("Bearer ") || !await sameSecret(authorization.slice(7), env.CLIENT_BEARER)) {
-        return deny(401, "Invalid bearer");
-      }
-      principal = "bearer:" + encode64(await digest(env.CLIENT_BEARER));
-    } else {
-      principal = await verifyAssertion(request.headers.get("cf-access-jwt-assertion"), config.issuer, host, fetcher);
+  let principal, identity, backend;
+  const authorization = request.headers.get("authorization") || "";
+  if (host.mode === "api-bearer" && !/^Bearer [A-Za-z0-9._~+/-]+=*$/.test(authorization)) {
+    return deny(401, "Invalid bearer");
+  }
+  if (host.mode === "api-oauth") {
+    try {
+      identity = await verifyAssertion(request.headers.get("cf-access-jwt-assertion"), config.issuer, host, fetcher);
+    } catch {
+      return deny(401, "Invalid identity assertion");
     }
-  } catch {
-    return deny(401, "Invalid identity assertion");
   }
   route = routeFor(host, url.pathname, request.method);
   if (!route) return deny(404, "Unknown endpoint or method");
+  let access;
+  try { access = routeAccess(route, env); }
+  catch { return deny(503, "Route access policy unavailable"); }
+  if (host.mode === "api-bearer") {
+    const token = authorization.slice(7);
+    if (token.length > 4096) return deny(401, "Invalid bearer");
+    let hash;
+    try { hash = await bearerHash(route.id, token, env.SESSION_KEY); }
+    catch { return deny(503, "Authentication key unavailable"); }
+    const matches = access.bearer.filter(rule => sameHash(hash, rule.hash));
+    if (matches.length !== 1) return deny(401, "Invalid bearer");
+    backend = matches[0].backend === null ? token : matches[0].backend;
+    principal = `bearer:${hash}`;
+  } else {
+    if (!Object.hasOwn(access.oauth, identity.email)) return deny(403, "Identity not allowed for this route");
+    backend = access.oauth[identity.email];
+    principal = identity.principal;
+  }
+  // Bind MCP sessions to both the caller and the applied grant revision.
+  // Changed backend mappings and revoked grants cannot reuse old sessions.
+  principal += `:${route.access_revision}`;
   try {
     if (!env.API_LIMIT || typeof env.API_LIMIT.limit !== "function") return deny(503, "Rate control unavailable");
     const allowed = await env.API_LIMIT.limit({ key: encode64(await digest(principal)) });
@@ -280,7 +300,7 @@ export async function handle(request, env, fetcher = fetch) {
         return deny(404, "Invalid MCP session");
       }
     }
-    for (const [name, value] of Object.entries(backendHeaders(route, env))) headers.set(name, value);
+    if (backend !== null) headers.set("Authorization", "Bearer " + backend);
     if (!env.ORIGIN_CLIENT_ID || !env.ORIGIN_CLIENT_SECRET) return deny(503, "Origin credentials unavailable");
     headers.set("CF-Access-Client-Id", env.ORIGIN_CLIENT_ID);
     headers.set("CF-Access-Client-Secret", env.ORIGIN_CLIENT_SECRET);

@@ -136,7 +136,8 @@ class DiscoveryTests(unittest.TestCase):
         self.assertLessEqual(len(self.calls), MAX_REQUESTS)
         from cloudflare_api_policy import APISettings
         from cloudflare_plan import api_routes
-        self.assertEqual(api_routes(rows, APISettings(enabled=True, bearer="a" * 64), "example.com")["hosts"], {})
+        from cloudflare_api_access import parse_entries
+        self.assertEqual(api_routes(rows, APISettings(enabled=True), "example.com", {row["id"]: parse_entries("client;backend") for row in rows})["hosts"], {})
 
     def test_invocation_validation_proves_readiness_only_after_authentication(self):
         key = route_id(3070, "rpc", TOOLS_INVOKE_PATH)
@@ -150,10 +151,11 @@ class DiscoveryTests(unittest.TestCase):
         self.assertNotIn("private", json.dumps(rows))
         from cloudflare_api_policy import APISettings
         from cloudflare_plan import api_routes
-        plan = api_routes(rows, APISettings(enabled=True, bearer="a" * 64), "example.com")
+        from cloudflare_api_access import parse_entries
+        plan = api_routes(rows, APISettings(enabled=True), "example.com", {row["id"]: parse_entries("client;backend") for row in rows})
         route = plan["hosts"]["api-3070.example.com"]["routes"][0]
         self.assertEqual(route["operations"], [{"path": TOOLS_INVOKE_PATH, "method": "POST"}])
-        self.assertEqual(route["credential_ref"], key)
+        self.assertEqual(route["access_ref"], key)
 
     def test_invocation_probe_rejects_global_method_auth_and_html_responses(self):
         for responses in (

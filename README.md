@@ -681,35 +681,36 @@ Both `extensions/enabled/cloudflare/` and
 `CLOUDFLARE_API_TOKEN` must have the required management permissions.
 Directory placement controls activation; no extra enable flag is needed.
 
-The two existing example files contain:
+`env.example` keeps the existing `CITADEL_TOKEN` for WebUI administration and
+`CLOUDFLARE_API_TOKEN` for Cloudflare management. There is no global API client
+bearer in `.env`. The former `CITADEL_CLOUDFLARE_API_BEARER` is no longer read;
+remove it from existing local configuration. Grant access per discovered route
+in the private JSON or the **API-Freigaben** page described below.
+
+`config.conf_example` retains the independent OAuth option:
 
 ```dotenv
-# env.example: optional secret; config.sh offers skip, entry, or generation.
-#secret
-CITADEL_CLOUDFLARE_API_BEARER=example: openssl rand -hex 32
-```
-
-```dotenv
-# config.conf_example: independent OAuth option.
 #choices: 0 1
 #default-preset: 0
 CITADEL_CLOUDFLARE_API_OAUTH=0
 ```
 
-The generator hint belongs in the example only. The rendered `.env` contains
-the actual bearer or an empty value. For OAuth-only access, leave the bearer
-empty and set `CITADEL_CLOUDFLARE_API_OAUTH=1` in `config.conf`.
+Discovery runs with both extensions enabled and the management token present,
+even before any route has access entries. API-Bearer is then available as a
+view; API-OAuth additionally needs the flag and valid callback policy. A route
+is published in a mode only when it has explicit grants for that mode:
 
-| Bearer present | OAuth | Active API modes |
+| Route entries | OAuth flag | Publication |
 |---|---|---|
-| No | `0` | None |
-| Yes | `0` | API-Bearer |
-| No | `1` | API-OAuth |
-| Yes | `1` | Both |
+| Empty | Either | None; edit grants after discovery |
+| Bearer entries | `0` or `1` | API-Bearer |
+| Email entries | `0` | None; OAuth disabled |
+| Email entries | `1` | API-OAuth |
+| Both kinds | `1` | Both |
 
-OAuth-only URLs still use `oauth.api-<port>.<domain>`. OAuth also needs an
-allowed-email policy and client registration/callback settings; it does not
-need a fixed client bearer.
+OAuth-only URLs still use `oauth.api-<port>.<domain>`. No client bearer is needed
+for OAuth. Email grants belong to each route; the ordinary browser OTP allowlist
+remains separate.
 
 Configured modes remain visible after a scan even if no eligible endpoints were
 found or Cloudflare rejected publication. API modes list only services with
@@ -737,9 +738,8 @@ A generic 401, catch-all 405, redirect or HTML login does not qualify.
 
 Activate the extension by moving the shipped directory from
 `extensions/disabled/CLOUDFLARE-API` to `extensions/enabled/CLOUDFLARE-API`.
-Use `./config.sh` to render the two settings; the existing secret prompt offers
-skip, manual entry, or `openssl rand -hex 32` generation. Regeneration preserves
-an existing bearer. An unchanged example hint is rejected as a credential.
+Use `./config.sh` for the existing administration/management tokens and OAuth
+flag. API client grants are edited after discovery, not generated into `.env`.
 
 In addition to the existing Tunnel, DNS and Access permissions, the management
 token needs account **Workers Scripts Edit**, account **Access: Service Tokens
@@ -750,8 +750,8 @@ permission stops publication; it does not create a public fallback.
 [Worker permissions](https://developers.cloudflare.com/workers/authorization/workers/),
 [service-token permission](https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/service_tokens/methods/create/)
 
-For OAuth, configure permitted emails in the existing `CLOUDFLARE_EMAIL` and
-create `CITADEL_DATA/cloudflare-api/policy.json`. For a remote web client, use
+For OAuth, add email grants to the discovered route and create
+`CITADEL_DATA/cloudflare-api/policy.json`. For a remote web client, use
 its exact documented HTTPS callback:
 
 ```json
@@ -815,7 +815,7 @@ always GET and must return successful JSON of the configured `json_type`
 Choose a genuinely read-only endpoint: Citadel never calls the declared POST,
 PUT or DELETE operations during discovery. Only listed operations are forwarded;
 no wildcard or whole-port publication is added. Operations require an explicit
-boolean `requires_auth`; backend secrets still belong in `credentials.json`.
+boolean `requires_auth`; backend bearers belong in `CLOUDFLARE-API_access.json`.
 
 These are trusted local operation declarations, not automatically inferred API
 contracts. Every scan checks the listener title and JSON probe afresh. A bare
@@ -827,27 +827,64 @@ exclusions take precedence. This cannot reach an unexposed container listener;
 such a listener still needs its normal Caddy route. Container installations
 must mount this optional file at the repository root, alongside the ignore file.
 
-When a backend requires its own token, create the private file
-`CITADEL_DATA/cloudflare-api/credentials.json` with mode `0600`:
+### Manage access pairs after scanning
+
+1. Run a normal scan with both Cloudflare extensions enabled. Citadel creates
+   `CLOUDFLARE-API_access.json` in the repository root with empty entries for
+   recognized endpoints and authentication-required candidates.
+2. Open **API-Freigaben** in the dashboard (path `/cloudflare-api`) and enter the
+   existing `CITADEL_TOKEN`. Reading and writing the registry require this token;
+   leaving it unset disables management. The page does not store it in browser
+   storage. Each row shows its port, protocol, path and scan status.
+3. Enter grants in that row and choose **Speichern für nächsten Scan**. This
+   saves the private file only. It does not contact Cloudflare or start a scan.
+4. Run the next **full scan** to verify the endpoint and synchronize the grants
+   to Cloudflare. The page reports pending changes until that snapshot has been
+   reconciled successfully. `--add` does not replace deployed grants.
+
+Comma separates entries; semicolon separates a pair:
+
+| Entry | Client sends | Worker forwards to backend |
+|---|---|---|
+| `person@example.com;backendToken` | OAuth token after email/OTP login | `Bearer backendToken` |
+| `outerToken;innerToken` | `Bearer outerToken` | `Bearer innerToken` |
+| `singleToken` | `Bearer singleToken` | `Bearer singleToken` |
+| `person@example.com` | OAuth token after email/OTP login | No Authorization header |
+
+Multiple users and bearers can be mixed in one row, for example:
+`person@example.com;userToken,outerToken;innerToken,singleToken,guest@example.com`.
+Do not prefix the stored tokens with `Bearer `. A duplicate email or outer token
+within one route is rejected. Each route has its own permissions; an email
+allowed for one endpoint is not automatically allowed for other endpoints on
+the same port. Clearing a row revokes its grants on the next successful full
+scan. A bare email can only use a backend that accepts requests without its own
+bearer. Citadel never extracts tokens from other applications.
+
+The file can also be edited directly, keeping mode `0600`:
 
 ```json
 {
   "routes": {
-    "p3070_REPLACE_WITH_DISCOVERED_ID": {
-      "headers": {"Authorization": "Bearer REPLACE_WITH_BACKEND_TOKEN"}
-    }
+    "p3070_REPLACE_WITH_DISCOVERED_ID": "person@example.com;backendToken,outerToken;innerToken"
   }
 }
 ```
 
-Replace the entire key with the `id` from discovery; the placeholder is not a
-valid route ID. Add further route IDs to the same `routes` object. This file
-attaches credentials to detected routes; it is not a list of ports to publish.
-For protected OpenAPI documents, the document candidate and the resolved API
-base can have different IDs and need separate entries. Scan again after editing.
-Never use the Cloudflare management token as a backend token. Version 1 shares
-each route's backend permissions among its authorized clients. Identity-specific
-credential mappings are reserved in the schema but not implemented.
+Use the complete ID created by discovery; the example key is a placeholder.
+The active file is gitignored; `CLOUDFLARE-API_access.json.example` ships empty.
+It contains secrets, must be backed up privately and must not be committed.
+Only the first explicitly configured backend token for a route is used for
+its authenticated discovery probes. A scan proves protocol availability, not
+that every configured user's token is valid. Protected OpenAPI documents and
+the resolved API base may have different route IDs and need separate grants.
+Unknown or unverified routes are never published just because they have grants.
+
+Outer bearer verifiers and email mappings are stored in Worker Secret bindings.
+Single bearers are stored there as route-bound HMAC verifiers; the verified
+request supplies the forwarded token. Unknown bearers and unlisted emails are
+rejected at Cloudflare before contacting the host. Full scans replace mappings
+and explicitly delete retired secrets, including legacy backend bindings.
+The former `credentials.json` registry is no longer used or imported.
 
 The Worker authenticates the client, strips incoming authorization/identity
 headers, then injects the configured backend credential plus a separate origin
@@ -857,10 +894,10 @@ hostname retains its OTP policy. API-origin requests use the scanned local
 `Host` authority (`127.0.0.1:<port>`), so Caddy host matchers select the same
 backend as discovery. Backend redirects are refused. MCP responses
 stream without whole-response buffering; session IDs are encrypted and bound to
-the authenticated identity and route. The rate control is 120 requests per
+the authenticated identity, route and applied grant revision. The rate control is 120 requests per
 minute per bearer/identity at each Cloudflare location, not a global quota.
 
-Back up `.env`, `config.conf`, the root ignore and discovery files, and the private
+Back up `.env`, `config.conf`, the root access, ignore and discovery files, and the private
 `CITADEL_DATA/cloudflare-api/` directory. Its `runtime.json` contains the session
 key and origin service secret; it is not disposable cache. Losing it requires
 restoration or explicit credential recovery, not automatic OAuth app replacement.
@@ -871,8 +908,9 @@ Container installations persist `CITADEL_DATA` through the existing data mount.
 The ignore file lives beside `scan.sh`, not inside that data directory. Supply
 and retain it in the writable Citadel runtime tree (normally
 `/opt/safrano9999/CITADEL/CLOUDFLARE-API_ignore.json`), or mount it there from the
-host when using an immutable tree. Citadel's refresh preserves this file and the
-enabled/disabled extension selection.
+host when using an immutable tree. Citadel's refresh preserves the access, discovery and ignore files and the
+enabled/disabled extension selection. Persist or mount the private access file
+at the repository root as well; it is not part of the `CITADEL_DATA` mount.
 
 ### Scan and disable behavior
 
@@ -912,9 +950,10 @@ container name and run Podman as its owning host user. The command syntax was
 checked with OpenCode 1.18.34.
 
 1. **Prepare the published OAuth endpoint.** Enable the extension and OAuth,
-   configure the allowed emails and the OpenCode callback policy, then perform
-   a successful full scan. If the bridge requires a backend token, attach it
-   to the detected route through the extension's credential configuration.
+   configure the OpenCode callback policy, then perform a scan. In
+   **API-Freigaben**, add `your-email@example.com;backendToken` for the detected
+   bridge route (or only your email if it needs no backend bearer). Save and
+   perform another full scan to publish that OAuth route.
    Copy the endpoint from **API-OAuth**:
 
    ```text
@@ -1049,15 +1088,17 @@ configuration entry would look like this:
       "url": "https://api-3070.example.com/mcp",
       "oauth": false,
       "headers": {
-        "Authorization": "Bearer {env:CITADEL_CLOUDFLARE_API_BEARER}"
+        "Authorization": "Bearer {env:BLENDER_CLIENT_BEARER}"
       }
     }
   }
 }
 ```
 
-Supply the configured client bearer in the OpenCode process environment; the
-container does not automatically inherit Citadel's `.env`. This method needs
+`BLENDER_CLIENT_BEARER` is a client-side example name, not a Citadel setting.
+Set it to the outer token registered for this route, or the registered single
+token for pass-through. The backend token is selected by the matching registry
+entry. This method needs
 no browser login or OAuth callback. The client bearer, Cloudflare management
 API token, machine credential for the origin, and optional backend token serve
 different purposes and must not be substituted for each other.
@@ -1073,8 +1114,9 @@ python3 functions/mcp_check.py https://oauth.api-3070.example.com/mcp
 
 The hidden prompt takes the configured client bearer for the first URL and an
 actual OAuth **access token** obtained through the selected client's login for
-the second. Never paste the management token, backend secret, authorization code
-or refresh token. Alternatively use `--token-file` with a private `0600` file
+the second. Never paste the management token, a separate inner token, authorization code
+or refresh token. For the single-bearer form, the registered backend token is
+also the client bearer by explicit configuration. Alternatively use `--token-file` with a private `0600` file
 containing only the access token; avoid secrets in command arguments. The checker
 does not perform OAuth login or token refresh itself.
 

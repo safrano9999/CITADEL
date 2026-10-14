@@ -34,6 +34,7 @@ UNITS = ("citadel.service", "citadel-scan.service")
 # Remove retired settings at the final service-environment stage: the image's
 # global PassEnvironment generator otherwise adds them back to every service.
 RETIRED = (
+    "CITADEL_CLOUDFLARE_API_BEARER",
     "CITADEL_PERSISTENT",
     "CITADEL_WEBUI_HTTPS_PORT", "CITADEL_CADDY_BACKEND", "CITADEL_CADDY_HOST",
     "CITADEL_CADDY_HTTPS_START", "CITADEL_CADDY_RANGE", "CITADEL_CADDY_REAL_IP_PORTS",
@@ -46,7 +47,7 @@ RUNTIME = (
     ".env", ".tunnel-token", "config.conf", "config.ini", "cert.pem",
     "ports.filter.json", "cache", "icons", "services.json", "ss.json",
     "last_scan.txt", "tailscale.json", "extensions/providers_state.json",
-    "extensions/ui.json", "CLOUDFLARE-API_ignore.json", "CLOUDFLARE-API_discovery.json",
+    "extensions/ui.json", "CLOUDFLARE-API_ignore.json", "CLOUDFLARE-API_discovery.json", "CLOUDFLARE-API_access.json",
 )
 
 

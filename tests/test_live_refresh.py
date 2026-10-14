@@ -96,7 +96,9 @@ class LiveRefreshTests(unittest.TestCase):
         self.assertFalse(any(command[1:2] in (["start"], ["stop"], ["restart"]) for command in self.calls))
         for unit in refresh.UNITS:
             self.assertIn("Environment=CITADEL_TAILSCALE_SERVE=full", (self.args.unit_dir / f"{unit}.d/95-citadel-instance.conf").read_text())
-            self.assertIn("UnsetEnvironment=CITADEL_PERSISTENT CITADEL_WEBUI_HTTPS_PORT", (self.args.unit_dir / f"{unit}.d/95-citadel-instance.conf").read_text())
+            dropin = (self.args.unit_dir / f"{unit}.d/95-citadel-instance.conf").read_text()
+            unset = next(line.removeprefix("UnsetEnvironment=").split() for line in dropin.splitlines() if line.startswith("UnsetEnvironment="))
+            self.assertTrue({"CITADEL_PERSISTENT", "CITADEL_WEBUI_HTTPS_PORT", "CITADEL_CLOUDFLARE_API_BEARER"} <= set(unset))
 
     def test_same_commit_still_reconciles_units_without_extra_backup(self):
         self.execute()
@@ -113,10 +115,15 @@ class LiveRefreshTests(unittest.TestCase):
         (disabled / "extension.json").write_text('{"version":"new"}')
         (self.old / "CLOUDFLARE-API_ignore.json").write_text('{"ports":[3070]}')
         (self.old / "CLOUDFLARE-API_discovery.json").write_text('{"routes":[]}')
+        access = self.old / "CLOUDFLARE-API_access.json"
+        access.write_text('{"routes":{"fixture":"outer;inner"}}')
+        access.chmod(0o600)
         (self.seed / "CLOUDFLARE-API_ignore.json").write_text('{"ports":[]}')
         self.execute()
         self.assertEqual(json.loads((enabled / "extension.json").read_text()), {"version": "new"})
         self.assertFalse((self.old / "extensions/disabled/CLOUDFLARE-API").exists())
+        self.assertEqual(json.loads(access.read_text()), {"routes": {"fixture": "outer;inner"}})
+        self.assertEqual(access.stat().st_mode & 0o777, 0o600)
         self.assertEqual(json.loads((self.old / "CLOUDFLARE-API_ignore.json").read_text()), {"ports": [3070]})
         self.assertEqual(json.loads((self.old / "CLOUDFLARE-API_discovery.json").read_text()), {"routes": []})
 
