@@ -79,6 +79,11 @@ CITADEL_USER_AGENT=Mozilla/5.0 (compatible; CITADEL/1.0)
 #default-preset: 1
 CITADEL_CLOUDFLARE_SERVERSIDE_PERSISTENCE=1
 
+# Independent OAuth mode for the optional CLOUDFLARE-API extension.
+#choices: 0 1
+#default-preset: 0
+CITADEL_CLOUDFLARE_API_OAUTH=0
+
 #default-preset: insert later
 CITADEL_CLOUDFLARE_DOMAIN=
 

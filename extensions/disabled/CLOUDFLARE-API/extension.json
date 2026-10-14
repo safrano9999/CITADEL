@@ -1,0 +1,7 @@
+{
+  "id": "CLOUDFLARE-API",
+  "label": "Cloudflare API",
+  "enabled": true,
+  "provider": "cloudflare_api_routes",
+  "version": 1
+}

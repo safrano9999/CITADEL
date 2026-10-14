@@ -651,6 +651,243 @@ query the Rulesets API. With explicit `0` and a token lacking read permission,
 normal routing continues, but the provider reports that redirect removal could
 not be verified; retain the permission when switching an enabled redirect off.
 
+## Planned Cloudflare API and MCP access
+
+**Planned feature:** the `CLOUDFLARE-API` extension, its two settings, and the
+URLs below describe the [Cloudflare API refactoring goal](GOAL_CLOUDFLARE_API.md).
+They are not implemented by the current scanner. The walkthrough shows the
+intended operator experience once the extension and its Cloudflare resources
+are deployed.
+
+Citadel will scan the existing reachable listeners, identify API/MCP endpoints,
+and map recognized endpoints through one shared Worker per installation. The
+existing Cloudflare browser URLs keep their email/OTP protection. Two additional
+dropdown modes provide API credentials suitable for clients:
+
+| Mode | Example endpoint | Client authentication |
+|---|---|---|
+| **API-Bearer** | `https://api-3070.example.com/mcp` | Configured fixed bearer |
+| **API-OAuth** | `https://oauth.api-3070.example.com/mcp` | Cloudflare Managed OAuth |
+
+Both hostnames attach to the same Worker as Custom Domains. Cloudflare issues
+certificates for these domains, including the nested OAuth hostname.
+[Worker Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/#certificates)
+
+### Extension configuration and exclusions
+
+Both `extensions/enabled/cloudflare/` and
+`extensions/enabled/CLOUDFLARE-API/` must be active, and the existing
+`CLOUDFLARE_API_TOKEN` must have the required management permissions.
+Directory placement controls activation; no extra enable flag is needed.
+
+The planned additions to the two existing example files are:
+
+```dotenv
+# env.example: optional secret; config.sh offers skip, entry, or generation.
+#secret
+CITADEL_CLOUDFLARE_API_BEARER=example: openssl rand -hex 32
+```
+
+```dotenv
+# config.conf_example: independent OAuth option.
+#choices: 0 1
+#default-preset: 0
+CITADEL_CLOUDFLARE_API_OAUTH=0
+```
+
+The generator hint belongs in the example only. The rendered `.env` contains
+the actual bearer or an empty value. For OAuth-only access, leave the bearer
+empty and set `CITADEL_CLOUDFLARE_API_OAUTH=1` in `config.conf`.
+
+| Bearer present | OAuth | Active API modes |
+|---|---|---|
+| No | `0` | None |
+| Yes | `0` | API-Bearer |
+| No | `1` | API-OAuth |
+| Yes | `1` | Both |
+
+OAuth-only URLs still use `oauth.api-<port>.<domain>`. OAuth also needs an
+allowed-email policy and client registration/callback settings; it does not
+need a fixed client bearer.
+
+Exclude an entire port through the repository-root `CLOUDFLARE-API_ignore.json`:
+
+```json
+{
+  "ports": [3070]
+}
+```
+
+The next successful full `./scan.sh` removes every API-Bearer and API-OAuth
+route for that port. Its ordinary browser route is unaffected. Use an empty
+list to exclude nothing. There are no individual URL/path exclusions. Add mode
+does not remove existing routes; use a full scan after changing this list.
+
+### Example connecting a Blender MCP from OpenCode
+
+Assume a Blender MCP server has already been exposed through an HTTP bridge
+and Caddy at `https://127.0.0.1:3070/mcp`, as reachable by the Citadel scanner.
+Port 3070 and `/mcp` are illustrative; use the actual discovered values.
+This example does not imply that Blender itself, a stdio-only MCP server, or a
+raw add-on TCP socket is an HTTP MCP endpoint. The bridge must already support
+the required remote MCP transport.
+
+Use your own domain in place of `example.com`. Container commands below target
+the existing OpenCode container `fedora45-ai-base-opencode`; substitute your
+container name and run Podman as its owning host user. The command syntax was
+checked with OpenCode 1.18.34.
+
+1. **Prepare the published OAuth endpoint.** Enable the extension and OAuth,
+   configure the allowed emails and the OpenCode callback policy, then perform
+   a successful full scan. If the bridge requires a backend token, attach it
+   to the detected route through the extension's credential configuration.
+   Copy the endpoint from **API-OAuth**:
+
+   ```text
+   https://oauth.api-3070.example.com/mcp
+   ```
+
+   The Worker uses a separately authenticated origin connection to reach the
+   existing Tunnel and Caddy. The browser's OTP-protected service URL remains
+   separate. [Cloudflare Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/)
+
+2. **Save the endpoint in OpenCode under a local name.**
+
+   ```bash
+   podman exec -it fedora45-ai-base-opencode \
+     opencode mcp add blender \
+     --url https://oauth.api-3070.example.com/mcp
+   ```
+
+   `blender` is the name of this MCP configuration entry. It is not a username
+   or a container lookup. The relevant configuration is equivalent to:
+
+   ```json
+   {
+     "mcp": {
+       "blender": {
+         "type": "remote",
+         "url": "https://oauth.api-3070.example.com/mcp"
+       }
+     }
+   }
+   ```
+
+   Add this entry to the existing configuration; do not replace unrelated
+   settings. A separate OpenCode process reads it when it starts.
+
+3. **Start authentication for the saved name.**
+
+   ```bash
+   podman exec -it fedora45-ai-base-opencode opencode mcp auth blender
+   ```
+
+   OpenCode resolves `blender` to the configured URL and begins OAuth discovery
+   and client registration. Keep this terminal open. It prints
+   `Authorize in your browser:`, the authorization link, and
+   `Waiting for authorization...`.
+   [OpenCode 1.18.34 CLI implementation](https://github.com/anomalyco/opencode/blob/v1.18.34/packages/opencode/src/cli/cmd/mcp.ts#L239)
+
+4. **Open that authorization link on your computer.** Enter your allowed email
+   address and the emailed OTP on Cloudflare's browser page. The OTP is not
+   entered into OpenCode's terminal. Cloudflare authenticates your identity;
+   the OAuth transaction separately identifies the waiting CLI request.
+
+5. **Deliver the browser callback to the waiting OpenCode process.** The
+   default callback in this version is:
+
+   ```text
+   http://127.0.0.1:19876/mcp/oauth/callback?code=...&state=...
+   ```
+
+   OpenCode checks `state` to match the response and exchanges the short-lived
+   code using its saved PKCE verifier. Cloudflare must allow the selected
+   callback; its loopback registration setting needs an explicit opt-in for
+   this client. [OpenCode OAuth provider](https://github.com/anomalyco/opencode/blob/v1.18.34/packages/opencode/src/mcp/oauth-provider.ts)
+
+   In a remote container, the browser's `127.0.0.1` is your computer, while
+   OpenCode's callback listener is inside the container. Arrange forwarding
+   into that container's loopback namespace before login. An SSH forward only
+   to the host's loopback, or publishing a port whose listener binds only to
+   container loopback, does not by itself solve this.
+
+   For a first manual test without forwarding, the browser may display a
+   connection error at the callback URL. Copy the **complete** URL from its
+   address bar, including `code` and `state`. In a second terminal, invoke the
+   callback inside the same container with the following helper. Paste the
+   URL at its hidden prompt; keep the first authentication process running.
+
+   ```bash
+   podman exec -it fedora45-ai-base-opencode python3 -c '
+   import getpass
+   import urllib.parse
+   import urllib.request
+
+   callback = getpass.getpass("Complete callback URL (hidden): ")
+   parsed = urllib.parse.urlsplit(callback)
+   if (parsed.scheme != "http" or parsed.hostname != "127.0.0.1"
+           or parsed.port != 19876 or parsed.path != "/mcp/oauth/callback"
+           or parsed.username is not None or parsed.password is not None):
+       raise SystemExit("Unexpected callback URL")
+   opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+   with opener.open(callback, timeout=10) as response:
+       print("Callback HTTP status:", response.status)
+   '
+   ```
+
+   This forwards the OAuth callback, not the OTP. It follows the callback
+   handler's code/state contract; it still requires an end-to-end check against
+   the deployed integration. Version 1.18.34 waits up to five minutes. On
+   timeout, start a fresh login and use its new URL. Check the first terminal
+   for authentication success; an HTTP response alone does not prove that
+   token exchange or the MCP connection succeeded.
+   [OpenCode callback handler](https://github.com/anomalyco/opencode/blob/v1.18.34/packages/opencode/src/mcp/oauth-callback.ts)
+
+6. **Check the resulting connection.**
+
+   ```bash
+   podman exec -it fedora45-ai-base-opencode opencode mcp list
+   ```
+
+   OpenCode stores OAuth credentials in
+   `~/.local/share/opencode/mcp-auth.json` for the user inside the container.
+   Keep that data directory persistent. Subsequent connections reuse valid
+   credentials and refresh them while the authorization grant permits it;
+   expiry or revocation can require another login.
+   [OpenCode MCP authentication](https://docs.opencode.ai/docs/mcp-servers/#authenticating)
+
+   Each request then follows client → Cloudflare OAuth validation → Worker →
+   authenticated Tunnel origin → Caddy → Blender MCP bridge. Any backend
+   credential remains on the proxy side. All users sharing one backend token
+   receive its permissions. A connection check must stop at initialization
+   and listing tools; it must not execute Blender operations.
+
+### Fixed bearer alternative
+
+Clients supporting custom headers can instead use **API-Bearer**. An OpenCode
+configuration entry would look like this:
+
+```json
+{
+  "mcp": {
+    "blender-bearer": {
+      "type": "remote",
+      "url": "https://api-3070.example.com/mcp",
+      "oauth": false,
+      "headers": {
+        "Authorization": "Bearer {env:CITADEL_CLOUDFLARE_API_BEARER}"
+      }
+    }
+  }
+}
+```
+
+Supply the configured client bearer in the OpenCode process environment; the
+container does not automatically inherit Citadel's `.env`. This method needs
+no browser login or OAuth callback. The client bearer, Cloudflare management
+API token, machine credential for the origin, and optional backend token serve
+different purposes and must not be substituted for each other.
+
 ## Operations
 
 Run or repeat discovery:
