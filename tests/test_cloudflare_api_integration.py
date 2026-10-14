@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "functions/providers"))
 import core
 import dispatch
 import cloudflare
+import cloudflare_policy
 from cloudflare_api_routes import output, route_readiness
 from cloudflare_api_policy import route_id
 from test_cloudflare_api_lifecycle import FakeCloudflare
@@ -131,9 +132,11 @@ class APIIntegrationTests(unittest.TestCase):
                 "--services-file", str(self.root / "CITADEL_DATA/services.json")]
         with patch.object(sys, "argv", args), patch.object(cloudflare, "load_project_getter", return_value=values.get), \
                 patch.object(cloudflare, "CloudflareAPI", return_value=remote), \
+                patch.object(cloudflare_policy, "read_policy", wraps=cloudflare_policy.read_policy) as policy_read, \
                 patch.object(cloudflare, "discover_api", return_value=[endpoint]), \
                 patch.object(cloudflare, "api_output", side_effect=lambda *a, **kw: output(*a, **kw, verify=lambda _: True)):
             self.assertEqual(cloudflare.main(), 0)
+            policy_read.assert_called_once()  # Rules and defaults use the same local snapshot.
             self.assertEqual(len(remote.domains), 2)
             self.assertEqual(len(remote.apps), 3)  # Browser OTP, OAuth, machine origin.
             remote.events.clear()

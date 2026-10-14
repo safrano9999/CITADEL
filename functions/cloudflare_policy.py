@@ -135,26 +135,24 @@ def normalize_rule(value: Any, port: int | str | None = None) -> dict[str, Any]:
     }
 
 
-def read_policy(path: Path) -> dict[str, Any]:
+def read_policy(path: Path, *, strict: bool = False) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except FileNotFoundError:
         payload = {}
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        if strict:
+            raise ValueError("Invalid or unreadable Cloudflare policy JSON; reconciliation aborted") from exc
+        payload = {}
+    if strict and not isinstance(payload, dict):
+        raise ValueError("Cloudflare policy must be a JSON object")
     return payload if isinstance(payload, dict) else {}
 
 
-def cloudflare_rules(path: Path, *, strict: bool = False) -> dict[str, dict[str, Any]]:
-    if strict:
-        try:
-            document = json.loads(path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            document = {}
-        except (UnicodeError, json.JSONDecodeError) as exc:
-            raise ValueError("Invalid Cloudflare policy JSON; reconciliation aborted") from exc
-        if not isinstance(document, dict):
-            raise ValueError("Cloudflare policy must be a JSON object")
-    else:
-        document = read_policy(path)
+def cloudflare_rules(path: Path, *, strict: bool = False,
+                     document: dict | None = None) -> dict[str, dict[str, Any]]:
+    if document is None:
+        document = read_policy(path, strict=strict)
     raw = document.get("cloudflare", {})
     if not isinstance(raw, dict):
         if strict:

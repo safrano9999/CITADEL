@@ -31,7 +31,6 @@ from cloudflare_apply import (  # re-export existing provider helpers
 from cloudflare_plan import api_routes, browser_routes, combine_routes, merge_ingress
 from cloudflare_api_policy import APISettings, backend_credentials, settings as api_settings
 from cloudflare_api_routes import discover as discover_api, output as api_output
-from runtime_state import provider_output
 
 
 def load_project_getter(root: Path) -> Callable[[str, str], str]:
@@ -126,8 +125,10 @@ def main() -> int:
                     f"CITADEL_CLOUDFLARE_DOMAIN={domain} is outside zone {zone_domain}"
                 )
 
-            policy = cloudflare_rules(Path(args.services_file).parent / "ports.filter.json", strict=True)
-            defaults = read_policy(Path(args.services_file).parent / "ports.filter.json").get("cloudflare_defaults", {})
+            policy_path = Path(args.services_file).parent / "ports.filter.json"
+            policy_snapshot = read_policy(policy_path, strict=True)
+            policy = cloudflare_rules(policy_path, strict=True, document=policy_snapshot)
+            defaults = policy_snapshot.get("cloudflare_defaults", {})
             if not isinstance(defaults, dict):
                 raise ValueError("Invalid Cloudflare defaults")
             default_emails = (defaults.get("emails", []) if defaults.get("whitelist") is True else []) if defaults.get("configured") else get("CLOUDFLARE_EMAIL", "").split(",")
