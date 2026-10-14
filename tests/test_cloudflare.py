@@ -485,7 +485,8 @@ class CloudflareActivationTests(unittest.TestCase):
         self.settings.pop("CITADEL_CLOUDFLARE_SERVERSIDE_PERSISTENCE", None)
         hostname = "8000.services.example.net"
         self.api.tunnel_configuration.return_value = {"ingress": [
-            {"hostname": hostname, "service": "http://127.0.0.1:8000"},
+            {"hostname": hostname, "service": "http://127.0.0.1:8000",
+             "originRequest": {"httpHostHeader": "127.0.0.1:8000"}},
             {"service": "http_status:404"}]}
         self.api.dns_records.return_value = [{"id": "dns", "name": hostname,
             "type": "CNAME", "content": "tunnel.cfargotunnel.com", "proxied": True, "ttl": 1}]
@@ -511,6 +512,21 @@ class CloudflareActivationTests(unittest.TestCase):
                 self.assertEqual(code, 0, payload["errors"])
                 self.assertEqual(set(payload["services"]), {"8000"})
                 self.assert_no_remote_mutations()
+
+    def test_legacy_browser_ingress_gains_host_override_once_without_access_changes(self):
+        self.existing_protected_route()
+        self.api.tunnel_configuration.return_value["ingress"][0].pop("originRequest")
+        code, payload = self.run_provider()
+        self.assertEqual(code, 0, payload["errors"])
+        self.api.update_tunnel_configuration.assert_called_once()
+        updated = self.api.update_tunnel_configuration.call_args.args[-1]
+        self.assertEqual(updated["ingress"][0]["originRequest"], {"httpHostHeader": "127.0.0.1:8000"})
+        mutations = [call[0] for call in self.api.method_calls if call[0].startswith(("create_", "update_", "delete_"))]
+        self.assertEqual(mutations, ["update_tunnel_configuration"])
+        self.api.tunnel_configuration.return_value = updated
+        self.api.reset_mock()
+        self.assertEqual(self.run_provider()[0], 0)
+        self.assert_no_remote_mutations()
 
     def test_persistent_public_route_does_not_create_access_or_rewrite_ingress(self):
         self.existing_protected_route()
@@ -719,7 +735,8 @@ class CloudflareActivationTests(unittest.TestCase):
         self.assertEqual(set(payload["services"]), {"8000"})
         ingress = self.api.update_tunnel_configuration.call_args.args[2]["ingress"]
         self.assertEqual(ingress, [{
-            "hostname": "8000.services.example.net", "service": "http://127.0.0.1:8000"},
+            "hostname": "8000.services.example.net", "service": "http://127.0.0.1:8000",
+            "originRequest": {"httpHostHeader": "127.0.0.1:8000"}},
             {"service": "http_status:404"}])
         self.api.delete_dns_record.assert_called_once_with("zone", "old-dns")
         self.assertEqual(self.api.update_tunnel_configuration.call_args_list[0].args[2]["ingress"],
