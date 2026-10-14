@@ -653,13 +653,14 @@ not be verified; retain the permission when switching an enabled redirect off.
 
 ## Planned Cloudflare API and MCP access
 
-**Planned feature:** the `CLOUDFLARE-API` extension, its two settings, and the
-URLs below describe the [Cloudflare API refactoring goal](GOAL_CLOUDFLARE_API.md).
-They are not implemented by the current scanner. The walkthrough shows the
-intended operator experience once the extension and its Cloudflare resources
-are deployed.
+**Implementation candidate, not yet live-accepted:** this branch implements
+the [Cloudflare API refactoring goal](GOAL_CLOUDFLARE_API.md). The extension ships
+disabled. Automated protocol and lifecycle checks do not establish that a
+particular Cloudflare account or OAuth client works. Real Managed OAuth login,
+refresh and the OpenCode container callback remain integration acceptance items.
+The instructions below apply after deliberate deployment and configuration.
 
-Citadel will scan the existing reachable listeners, identify API/MCP endpoints,
+Citadel scans the existing reachable listeners, identifies API/MCP endpoints,
 and map recognized endpoints through one shared Worker per installation. The
 existing Cloudflare browser URLs keep their email/OTP protection. Two additional
 dropdown modes provide API credentials suitable for clients:
@@ -680,7 +681,7 @@ Both `extensions/enabled/cloudflare/` and
 `CLOUDFLARE_API_TOKEN` must have the required management permissions.
 Directory placement controls activation; no extra enable flag is needed.
 
-The planned additions to the two existing example files are:
+The two existing example files contain:
 
 ```dotenv
 # env.example: optional secret; config.sh offers skip, entry, or generation.
@@ -710,6 +711,45 @@ OAuth-only URLs still use `oauth.api-<port>.<domain>`. OAuth also needs an
 allowed-email policy and client registration/callback settings; it does not
 need a fixed client bearer.
 
+Activate the extension by moving the shipped directory from
+`extensions/disabled/CLOUDFLARE-API` to `extensions/enabled/CLOUDFLARE-API`.
+Use `./config.sh` to render the two settings; the existing secret prompt offers
+skip, manual entry, or `openssl rand -hex 32` generation. Regeneration preserves
+an existing bearer. An unchanged example hint is rejected as a credential.
+
+In addition to the existing Tunnel, DNS and Access permissions, the management
+token needs account **Workers Scripts Edit**, account **Access: Service Tokens
+Edit**, and **Workers Routes Edit** for the affected zone. Keep Access application,
+policy and identity-provider permissions for OAuth. Scope these to the configured
+account and zone. Citadel requires an initialized Access team domain. A missing
+permission stops publication; it does not create a public fallback.
+[Worker permissions](https://developers.cloudflare.com/workers/authorization/workers/),
+[service-token permission](https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/service_tokens/methods/create/)
+
+For OAuth, configure permitted emails in the existing `CLOUDFLARE_EMAIL` and
+create `CITADEL_DATA/cloudflare-api/policy.json`. For a remote web client, use
+its exact documented HTTPS callback:
+
+```json
+{
+  "oauth": {
+    "allowed_redirect_uris": ["https://your-client.example/oauth/callback"],
+    "allow_localhost": false,
+    "allow_loopback": false
+  }
+}
+```
+
+Replace the illustrative URI with the actual client's URI; no broad wildcards.
+For OpenCode's `127.0.0.1` callback, deliberately set `allow_loopback` to `true`;
+`allowed_redirect_uris` can be empty if no web clients are used. This Cloudflare
+option permits loopback callbacks, not only OpenCode's particular port or path.
+Leave `allow_localhost` off unless a selected client needs the `localhost` name.
+All endpoints in this installation share this registration policy. OAuth uses
+five-minute access tokens. The Worker additionally checks the current allowed
+emails on every request, including existing MCP sessions. A configuration change
+takes effect remotely after a successful full scan.
+
 Exclude an entire port through the repository-root `CLOUDFLARE-API_ignore.json`:
 
 ```json
@@ -722,6 +762,91 @@ The next successful full `./scan.sh` removes every API-Bearer and API-OAuth
 route for that port. Its ordinary browser route is unaffected. Use an empty
 list to exclude nothing. There are no individual URL/path exclusions. Add mode
 does not remove existing routes; use a full scan after changing this list.
+
+### Discovery, backend credentials and persistent state
+
+Discovery uses the normal scanned `127.0.0.1` HTTP(S) listeners, including Caddy's
+published ports. Citadel does not enter Podman networks or scan Unix sockets.
+Keep those bridges in Caddy. Detection supports MCP Streamable HTTP with JSON or
+SSE responses, local OpenAPI/Swagger operation maps, and GraphQL HTTP queries.
+It does not turn stdio, WebSocket or legacy SSE transports into Streamable HTTP.
+Path names, an HTML page, or a bare 401 are insufficient evidence. Probes have
+request, time and body-size limits and never execute application tools.
+
+Inspect `cache/cloudflare-api-inventory.json` for route IDs, paths and evidence;
+the API extension also reports candidates needing backend authentication.
+An app can have several endpoints, all individually linked in each active menu.
+Only discovered OpenAPI methods and paths are forwarded for REST. Generic APIs
+without recognizable metadata remain unverified instead of exposing arbitrary
+paths. Encoded or ambiguous paths and Citadel administration routes are denied.
+
+When a backend requires its own token, create the private file
+`CITADEL_DATA/cloudflare-api/credentials.json` with mode `0600`:
+
+```json
+{
+  "routes": {
+    "p3070_REPLACE_WITH_DISCOVERED_ID": {
+      "headers": {"Authorization": "Bearer REPLACE_WITH_BACKEND_TOKEN"}
+    }
+  }
+}
+```
+
+Replace the entire key with the `id` from discovery; the placeholder is not a
+valid route ID. Add further route IDs to the same `routes` object. This file
+attaches credentials to detected routes; it is not a list of ports to publish.
+For protected OpenAPI documents, the document candidate and the resolved API
+base can have different IDs and need separate entries. Scan again after editing.
+Never use the Cloudflare management token as a backend token. Version 1 shares
+each route's backend permissions among its authorized clients. Identity-specific
+credential mappings are reserved in the schema but not implemented.
+
+The Worker authenticates the client, strips incoming authorization/identity
+headers, then injects the configured backend credential plus a separate origin
+service credential. `origin-api-<port>.<domain>` is a Tunnel hostname protected by
+Access Service Auth and cloudflared assertion validation. The original browser
+hostname retains its OTP policy. Backend redirects are refused. MCP responses
+stream without whole-response buffering; session IDs are encrypted and bound to
+the authenticated identity and route. The rate control is 120 requests per
+minute per bearer/identity at each Cloudflare location, not a global quota.
+
+Back up `.env`, `config.conf`, the root ignore file, and the private
+`CITADEL_DATA/cloudflare-api/` directory. Its `runtime.json` contains the session
+key and origin service secret; it is not disposable cache. Losing it requires
+restoration or explicit credential recovery, not automatic OAuth app replacement.
+The origin service token is created for one year; renewal is an explicit
+operation. Do not delete private state to force rotation.
+
+Container installations persist `CITADEL_DATA` through the existing data mount.
+The ignore file lives beside `scan.sh`, not inside that data directory. Supply
+and retain it in the writable Citadel runtime tree (normally
+`/opt/safrano9999/CITADEL/CLOUDFLARE-API_ignore.json`), or mount it there from the
+host when using an immutable tree. Citadel's refresh preserves this file and the
+enabled/disabled extension selection.
+
+### Scan and disable behavior
+
+Normal scans and Cloudflare-specific scans use one shared reconciliation for
+browser routes and API modes. Unchanged scans preserve Worker and Access IDs.
+`--add` preserves deployed routes, policies and credentials and reports changes
+requiring a full scan. Full scans remove excluded ports or disabled modes after
+first denying them in the Worker. Moving the extension back to `disabled` also
+requires a successful full scan to remove remote bindings. An empty deny-only
+Worker may remain to preserve installation ownership.
+
+Without a working `CLOUDFLARE_API_TOKEN`, removal is **pending**, and remote
+state is **unverified**. Removing the local bearer alone does not revoke its
+deployed copy. Do not delete the management token or private state before
+cleanup. A malformed ignore file, incomplete remote inventory, ownership
+collision or incomplete rediscovery prevents destructive reconciliation.
+
+The dashboard's `provisioned` status means that HTTPS and the anonymous machine
+auth challenge were verified. It does not mean a client's token exchange or
+authenticated backend connection succeeded. `TLS pending` and `Auth pending`
+remain visible. Existing foreign Access wildcard policies covering API hostnames
+must be resolved before publishing, because they can force an unwanted OTP page
+onto bearer endpoints.
 
 ### Example connecting a Blender MCP from OpenCode
 
@@ -887,6 +1012,37 @@ container does not automatically inherit Citadel's `.env`. This method needs
 no browser login or OAuth callback. The client bearer, Cloudflare management
 API token, machine credential for the origin, and optional backend token serve
 different purposes and must not be substituted for each other.
+
+### Read-only acceptance check
+
+After intentional deployment, test both public URLs with the bundled checker:
+
+```bash
+python3 functions/mcp_check.py https://api-3070.example.com/mcp
+python3 functions/mcp_check.py https://oauth.api-3070.example.com/mcp
+```
+
+The hidden prompt takes the configured client bearer for the first URL and an
+actual OAuth **access token** obtained through the selected client's login for
+the second. Never paste the management token, backend secret, authorization code
+or refresh token. Alternatively use `--token-file` with a private `0600` file
+containing only the access token; avoid secrets in command arguments. The checker
+does not perform OAuth login or token refresh itself.
+
+It sends only `initialize`, `notifications/initialized` and paginated `tools/list`,
+checks sessions and protocol responses, and refuses redirects and HTML login
+pages. Success reports a tool count and `tools_called: 0`; tool descriptions and
+token values are not printed. Also verify the real client's OAuth registration,
+browser callback and refresh after access-token expiry. Do not assume that all
+ChatGPT, Claude, Grok or other Web UI variants support static headers or this
+OAuth flow without checking the particular client.
+
+For full acceptance, repeat an unchanged scan, confirm stable Access IDs and the
+existing client session, then exclude the test port and scan again. Both old API
+URLs must reject access while the ordinary OTP browser URL remains functional.
+Direct requests to the machine origin without service credentials must fail;
+an invalid or wrong-audience assertion must also fail at cloudflared. Record the
+actual deployment/client results separately from the automated fixtures.
 
 ## Operations
 

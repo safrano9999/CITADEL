@@ -3,6 +3,8 @@
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
 const jwksCache = new Map();
+const routingCache = new WeakMap();
+let validatedTable;
 const inputHeaders = ["accept", "accept-language", "content-type", "content-encoding",
   "if-match", "if-none-match", "if-modified-since", "if-unmodified-since", "range",
   "mcp-protocol-version", "last-event-id"];
@@ -32,20 +34,34 @@ export function safePath(path) {
     && !path.split("/").some(part => part === "." || part === "..");
 }
 
-function pathMatches(template, path) {
-  if (!safePath(template) || !safePath(path)) return false;
+function pathPattern(template) {
   const pattern = template.split("/").map(part => /^\{[A-Za-z_][A-Za-z0-9_.-]*\}$/.test(part)
     ? "[^/{}]+" : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("/");
-  return new RegExp(`^${pattern}$`).test(path);
+  return new RegExp(`^${pattern}$`);
 }
 
 function routeFor(host, path, method) {
   if (adminPaths.some(prefix => path === prefix || path.startsWith(prefix + "/"))) return null;
-  // Exact endpoint protocols take precedence over REST path parameters.
-  const matches = host.routes.filter(route => route.operations.some(operation =>
-    operation.method === method && pathMatches(operation.path, path)));
-  const exact = matches.filter(route => route.protocol !== "rest" && route.path === path);
-  if (exact.length === 1) return exact[0];
+  let index = routingCache.get(host);
+  if (!index) {
+    index = new Map();
+    for (const route of host.routes) for (const operation of route.operations) {
+      if (!index.has(operation.method)) index.set(operation.method, { exact: new Map(), patterns: [] });
+      const group = index.get(operation.method);
+      if (operation.path.includes("{")) group.patterns.push({ route, pattern: pathPattern(operation.path) });
+      else {
+        if (!group.exact.has(operation.path)) group.exact.set(operation.path, new Set());
+        group.exact.get(operation.path).add(route);
+      }
+    }
+    routingCache.set(host, index);
+  }
+  const group = index.get(method);
+  if (!group) return null;
+  const exact = [...(group.exact.get(path) || [])];
+  const protocol = exact.filter(route => route.protocol !== "rest" && route.path === path);
+  if (protocol.length === 1) return protocol[0];
+  const matches = [...new Set([...exact, ...group.patterns.filter(entry => entry.pattern.test(path)).map(entry => entry.route)])];
   return matches.length === 1 ? matches[0] : null;
 }
 
@@ -58,6 +74,7 @@ export function configuration(env) {
     if (parts.some(part => typeof part !== "string" || part.length > 4000)) throw new Error("Incomplete route table");
     raw = parts.join("");
   }
+  if (typeof raw === "string" && validatedTable?.raw === raw) return validatedTable.config;
   const config = typeof raw === "string" ? JSON.parse(raw) : (raw || {});
   if (config.schema !== 1 || !config.hosts || typeof config.hosts !== "object" || Array.isArray(config.hosts)) {
     throw new Error("Invalid route table");
@@ -84,6 +101,7 @@ export function configuration(env) {
       }
     }
   }
+  if (typeof raw === "string") validatedTable = { raw, config };
   return config;
 }
 
@@ -101,40 +119,53 @@ async function sameSecret(actual, expected) {
 
 async function signingKey(issuer, kid, fetcher, now) {
   let entry = jwksCache.get(issuer);
-  const unknown = entry && !entry.keys.has(kid);
-  if (!entry || entry.expires <= now || (unknown && now >= entry.retryUnknownAfter)) {
-    const response = await fetcher(`${issuer}/cdn-cgi/access/certs`, {
-      redirect: "error", signal: AbortSignal.timeout(5000), headers: { accept: "application/json" },
-    });
-    if (!response.ok) throw new Error("Signing keys unavailable");
-    const reader = response.body.getReader();
-    let text = "";
-    let length = 0;
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        length += value.byteLength;
-        if (length > 65536) throw new Error("Signing key response too large");
-        text += new TextDecoder().decode(value);
-      }
-    } finally {
-      await reader.cancel().catch(() => {});
-    }
-    const document = JSON.parse(text);
-    if (!Array.isArray(document.keys) || document.keys.length > 32) throw new Error("Invalid signing keys");
-    const keys = new Map();
-    for (const key of document.keys) {
-      if (key.kty !== "RSA" || (key.alg && key.alg !== "RS256") || (key.use && key.use !== "sig")
-          || typeof key.kid !== "string" || keys.has(key.kid)) continue;
-      keys.set(key.kid, await crypto.subtle.importKey("jwk", key,
-        { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]));
-    }
-    entry = { keys, expires: now + 300, retryUnknownAfter: unknown ? now + 5 : 0 };
-    // One issuer per installation; bound cache even if versions change teams.
-    if (jwksCache.size >= 4 && !jwksCache.has(issuer)) jwksCache.delete(jwksCache.keys().next().value);
+  if (!entry) {
+    entry = { keys: new Map(), expires: 0, retryAfter: 0, retryUnknownAfter: 0, pending: null };
+    if (jwksCache.size >= 4) jwksCache.delete(jwksCache.keys().next().value);
     jwksCache.set(issuer, entry);
   }
+  const unknown = !entry.keys.has(kid);
+  if (!entry.pending && (entry.expires <= now ? now >= entry.retryAfter
+      : unknown && now >= entry.retryUnknownAfter)) {
+    const hadKeys = entry.keys.size > 0;
+    // Collapse concurrent refreshes; failed requests also get a retry window.
+    entry.retryAfter = now + 5;
+    entry.retryUnknownAfter = now + 5;
+    entry.pending = (async () => {
+      const response = await fetcher(`${issuer}/cdn-cgi/access/certs`, {
+        redirect: "error", signal: AbortSignal.timeout(5000), headers: { accept: "application/json" },
+      });
+      if (!response.ok) throw new Error("Signing keys unavailable");
+      const reader = response.body.getReader();
+      let text = "";
+      let length = 0;
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          length += value.byteLength;
+          if (length > 65536) throw new Error("Signing key response too large");
+          text += new TextDecoder().decode(value);
+        }
+      } finally {
+        await reader.cancel().catch(() => {});
+      }
+      const document = JSON.parse(text);
+      if (!Array.isArray(document.keys) || document.keys.length > 32) throw new Error("Invalid signing keys");
+      const keys = new Map();
+      for (const key of document.keys) {
+        if (key.kty !== "RSA" || (key.alg && key.alg !== "RS256") || (key.use && key.use !== "sig")
+            || typeof key.kid !== "string" || keys.has(key.kid)) continue;
+        keys.set(key.kid, await crypto.subtle.importKey("jwk", key,
+          { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]));
+      }
+      entry.keys = keys;
+      entry.expires = now + 300;
+      if (!hadKeys) entry.retryUnknownAfter = 0;
+    })().finally(() => { entry.pending = null; });
+  }
+  if (entry.pending) await entry.pending;
+  if (entry.expires <= now) throw new Error("Signing keys unavailable");
   const key = entry.keys.get(kid);
   if (!key) throw new Error("Unknown signing key");
   return key;

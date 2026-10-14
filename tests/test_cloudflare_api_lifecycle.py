@@ -183,6 +183,35 @@ class APILifecycleTests(unittest.TestCase):
         self.assertEqual(self.api.events, [])
         self.assertEqual([(app["id"], app["aud"]) for app in self.api.apps], identities)
 
+    def test_origin_wildcard_collision_fails_before_writes(self):
+        self.api.apps.append({"id": "foreign", "name": "Other application", "domain": "origin-api-*.example.com"})
+        with self.assertRaises(CloudflareAPIError):
+            self.apply()
+        self.assertEqual(self.api.events, [])
+
+    def test_otp_setup_failure_does_not_publish_oauth_or_block_bearer(self):
+        with patch.object(self.api, "access_identity_providers", side_effect=CloudflareAPIError("OTP unavailable")):
+            participant = self.apply()
+        self.assertEqual(set(table_from_settings(self.api.worker)["hosts"]), {"api-3070.example.com"})
+        self.assertTrue(participant.errors)
+        self.assertFalse(any(domain["hostname"].startswith("oauth.") for domain in self.api.domains))
+
+    def test_upload_failure_leaves_machine_origin_protected_and_public_host_unbound(self):
+        self.api.fail = "worker_upload"
+        with self.assertRaises(CloudflareAPIError):
+            self.apply()
+        self.assertEqual(self.api.domains, [])
+        origin = next(entry for entry in self.api.config["ingress"] if entry.get("hostname", "").startswith("origin-api-"))
+        self.assertTrue(origin["originRequest"]["access"]["required"])
+
+    def test_incomplete_rediscovery_preserves_existing_routes_without_writes(self):
+        self.apply()
+        self.api.events.clear()
+        self.endpoint.update(status="unknown", http_status=0)
+        with self.assertRaises(CloudflareAPIError):
+            self.apply()
+        self.assertEqual(self.api.events, [])
+
     def test_both_public_modes_share_one_worker_and_machine_protected_origin(self):
         participant = self.apply()
         self.assertEqual(set(table_from_settings(self.api.worker)["hosts"]), {

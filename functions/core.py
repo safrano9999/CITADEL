@@ -329,7 +329,7 @@ def build_dashboard() -> dict:
             tile_urls[pid] = url
         tile["provider_urls"] = tile_urls
         tile["provider_endpoints"] = {
-            mode: ports.get(port, []) for mode, ports in providers["provider_endpoints_by_port"].items()
+                    mode: ports.get(port, []) for mode, ports in providers.get("provider_endpoints_by_port", {}).items()
         }
 
     http_tiles.sort(key=lambda tile: (not tile["featured"], _service_port(tile)))

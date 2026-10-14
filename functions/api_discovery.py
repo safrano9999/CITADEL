@@ -200,6 +200,23 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
 
     def record(path, protocol, response, status, evidence, operations=()):
         key = route_id(port, protocol, path)
+        previous = rows.get(key, {})
+        if protocol == "rest" and previous.get("operations"):
+            # A later /api probe is weaker evidence than its OpenAPI document.
+            # Multiple documents for one API base contribute a single scope.
+            if not operations:
+                return previous
+            combined = {(op["method"], op["path"]): dict(op) for op in previous["operations"]}
+            for op in operations:
+                identity = (op["method"], op["path"])
+                old = combined.get(identity, {})
+                combined[identity] = {**op, "requires_auth": bool(old.get("requires_auth") or op.get("requires_auth"))}
+            if len(combined) > MAX_OPERATIONS:
+                raise ValueError("Combined OpenAPI operation limit exceeded")
+            operations = [combined[identity] for identity in sorted(combined)]
+            needs_auth = any(op["requires_auth"] for op in operations) and not credentials.get(key)
+            status = "authentication-required" if needs_auth else "ready"
+            evidence = "Merged OpenAPI operations" + (" require backend credentials" if needs_auth else "")
         rows[key] = {"id": key, "port": port, "scheme": scheme, "path": path,
             "protocol": protocol, "status": status, "evidence": evidence,
             "http_status": response.status, "operations": list(operations),

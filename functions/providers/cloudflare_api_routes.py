@@ -37,7 +37,7 @@ def route_readiness(hostname):
         if response.status == 401:
             challenge = response.getheader("WWW-Authenticate", "")
             content_type = response.getheader("Content-Type", "")
-            if ("resource_metadata=" in challenge if hostname.startswith("oauth.") else content_type.startswith("application/json")):
+            if challenge.startswith("Bearer ") and ("resource_metadata=" in challenge if hostname.startswith("oauth.") else content_type.startswith("application/json")):
                 return "provisioned"
         return "pending-auth"
     except (OSError, ValueError, http.client.HTTPException):

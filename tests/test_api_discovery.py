@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import json
 import sys
 import unittest
@@ -79,6 +78,17 @@ class DiscoveryTests(unittest.TestCase):
         ):
             with self.subTest(document=document), self.assertRaises(ValueError):
                 openapi_operations(document, "https://127.0.0.1:3070/openapi.json")
+
+    def test_multiple_documents_merge_operations_and_later_root_probe_does_not_erase_them(self):
+        first = {"openapi": "3.1.0", "servers": [{"url": "/api"}],
+                 "paths": {"/one": {"get": {}}, "/shared": {"get": {}}}}
+        second = {"openapi": "3.1.0", "servers": [{"url": "/api"}], "security": [{"token": []}],
+                  "paths": {"/two": {"get": {}}, "/shared": {"get": {}}}}
+        rows = self.discover({"/openapi.json": reply(first), "/swagger.json": reply(second), "/api": reply({"status": "ok"})})
+        api = next(row for row in rows if row["path"] == "/api")
+        self.assertEqual(api["status"], "authentication-required")
+        self.assertEqual({op["path"] for op in api["operations"]}, {"/api/one", "/api/two", "/api/shared"})
+        self.assertTrue(next(op for op in api["operations"] if op["path"] == "/api/shared")["requires_auth"])
 
     def test_graphql_uses_only_read_only_query(self):
         rows = self.discover({"/graphql": reply({"data": {"__typename": "Query"}})})

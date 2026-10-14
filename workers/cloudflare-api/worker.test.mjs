@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import worker, { handle, verifyAssertion, openSession, sealSession } from "./worker.mjs";
+import worker, { handle, verifyAssertion, openSession, sealSession, configuration } from "./worker.mjs";
 
 const routeID = "p3070_0123456789abcdef0123";
 const bearer = "a".repeat(64);
@@ -186,4 +186,59 @@ test("OAuth-only operation needs no client bearer and forwards no opaque OAuth t
 test("Cloudflare execution context is not interpreted as the fetch implementation", async () => {
   const response = await worker.fetch(request("/unknown"), environment(), { waitUntil() {} });
   assert.equal(response.status, 404);
+});
+
+test("unauthenticated readiness returns a machine challenge without an upstream call", async () => {
+  const response = await handle(request("/", { authorization: "" }, "api-3070.example.com", "GET"), environment(), mustNotFetch);
+  assert.equal(response.status, 401);
+  assert.match(response.headers.get("www-authenticate"), /^Bearer /);
+  assert.match(response.headers.get("content-type"), /application\/json/);
+});
+
+test("chunked route table is complete and revalidated after configuration changes", async () => {
+  const env = environment();
+  const raw = env.ROUTE_TABLE;
+  delete env.ROUTE_TABLE;
+  Object.assign(env, { ROUTE_TABLE_PARTS: "2", ROUTE_TABLE_0: raw.slice(0, 100), ROUTE_TABLE_1: raw.slice(100) });
+  assert.equal(configuration(env).hosts["api-3070.example.com"].routes[0].id, routeID);
+  delete env.ROUTE_TABLE_1;
+  assert.throws(() => configuration(env));
+  env.ROUTE_TABLE_1 = raw.slice(100).replace('"mcp"', '"websocket"');
+  assert.throws(() => configuration(env));
+});
+
+test("REST parameter scopes preserve methods and reject ambiguous credentials", async () => {
+  const env = environment();
+  const config = JSON.parse(env.ROUTE_TABLE);
+  const host = config.hosts["api-3070.example.com"];
+  host.routes.push({ id: "p3070_aaaaaaaaaaaaaaaaaaaa", protocol: "rest", path: "/api", operations: [
+    { method: "GET", path: "/api/tasks/{id}" }, { method: "POST", path: "/mcp" }] });
+  env.ROUTE_TABLE = JSON.stringify(config);
+  let upstream;
+  const fetcher = async (url, options) => { upstream = options; return Response.json({ ok: true }); };
+  assert.equal((await handle(request("/api/tasks/42", {}, "api-3070.example.com", "GET"), env, fetcher)).status, 200);
+  assert.equal(upstream.headers.get("authorization"), null);
+  assert.equal((await handle(request("/api/tasks/42", {}, "api-3070.example.com", "DELETE"), env, mustNotFetch)).status, 404);
+  assert.equal((await handle(request(), env, fetcher)).status, 200);
+  assert.equal(upstream.headers.get("authorization"), "Bearer backend-secret");
+  host.routes.push({ id: "p3070_bbbbbbbbbbbbbbbbbbbb", protocol: "rest", path: "/api/tasks", operations: [
+    { method: "GET", path: "/api/tasks/{name}" }] });
+  env.ROUTE_TABLE = JSON.stringify(config);
+  assert.equal((await handle(request("/api/tasks/42", {}, "api-3070.example.com", "GET"), env, mustNotFetch)).status, 404);
+});
+
+test("concurrent JWKS refreshes collapse and failures back off without accepting expired keys", async () => {
+  const issuer = "https://concurrency.cloudflareaccess.com";
+  const now = Date.now() / 1000;
+  const token = await jwt(issuer, { exp: now + 1000 });
+  let calls = 0;
+  const fetcher = async () => { calls++; return Response.json({ keys: [jwk1] }); };
+  await Promise.all(Array.from({ length: 12 }, () => verifyAssertion(token, issuer, hostPolicy, fetcher, now)));
+  assert.equal(calls, 1);
+  const failed = async () => { calls++; throw new Error("offline"); };
+  await assert.rejects(() => verifyAssertion(token, issuer, hostPolicy, failed, now + 301));
+  await assert.rejects(() => verifyAssertion(token, issuer, hostPolicy, failed, now + 302));
+  assert.equal(calls, 2);
+  await verifyAssertion(token, issuer, hostPolicy, fetcher, now + 307);
+  assert.equal(calls, 3);
 });

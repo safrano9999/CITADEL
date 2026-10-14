@@ -109,6 +109,8 @@ def deployment(owner: str, table: dict, secret_values: dict, code: bytes, *, kee
     """Serialize within Free-plan limits; avoid a separate mutable route store."""
     raw = canonical(table)
     parts = [raw[index:index + 4000] for index in range(0, len(raw), 4000)]
+    if len(parts) > 60:
+        raise ValueError("API configuration exceeds the Worker route-table limit")
     bindings = [{"name": "ROUTE_TABLE_PARTS", "type": "plain_text", "text": str(len(parts))}]
     bindings += [{"name": f"ROUTE_TABLE_{index}", "type": "plain_text", "text": value}
                  for index, value in enumerate(parts)]

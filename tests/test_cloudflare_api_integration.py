@@ -13,7 +13,10 @@ sys.path.insert(0, str(ROOT / "functions"))
 sys.path.insert(0, str(ROOT / "functions/providers"))
 import core
 import dispatch
-from cloudflare_api_routes import output
+import cloudflare
+from cloudflare_api_routes import output, route_readiness
+from cloudflare_api_policy import route_id
+from test_cloudflare_api_lifecycle import FakeCloudflare
 from health import snapshot
 
 
@@ -106,6 +109,75 @@ class APIIntegrationTests(unittest.TestCase):
         dashboard = self.dashboard()
         self.assertNotIn("api-oauth", dashboard["provider_options"])
         self.assertTrue(any("cleanup is pending" in alert for alert in dashboard["alerts"]))
+
+    def test_shared_entrypoint_applies_all_modes_then_reports_unverified_cleanup(self):
+        self.write("CLOUDFLARE-API_ignore.json", {"ports": []})
+        self.write("CITADEL_DATA/cloudflare-api/policy.json", {"oauth": {"allow_loopback": True}})
+        code = self.root / "workers/cloudflare-api/worker.mjs"
+        code.parent.mkdir(parents=True)
+        code.write_bytes((ROOT / "workers/cloudflare-api/worker.mjs").read_bytes())
+        remote = FakeCloudflare()
+        remote.verify_token = lambda: None
+        remote.tunnel_connections = lambda *_: [{}]
+        remote.zone = lambda *_: {"name": "example.com"}
+        values = {"CLOUDFLARE_API_TOKEN": "management", "CITADEL_CLOUDFLARE_ACCOUNT_ID": "account",
+            "CITADEL_CLOUDFLARE_ZONE_ID": "zone", "CITADEL_CLOUDFLARE_TUNNEL_ID": "tunnel",
+            "CITADEL_CLOUDFLARE_DOMAIN": "example.com", "CLOUDFLARE_EMAIL": "owner@example.com",
+            "CITADEL_CLOUDFLARE_API_BEARER": "a" * 64, "CITADEL_CLOUDFLARE_API_OAUTH": "1"}
+        endpoint = {"id": route_id(3070, "mcp", "/mcp"), "port": 3070, "scheme": "https", "path": "/mcp",
+            "protocol": "mcp", "status": "ready", "operations": [{"path": "/mcp", "method": "POST"}]}
+        args = ["cloudflare.py", "--provider-dir", str(self.root / "extensions/enabled/cloudflare"),
+                "--routes-out", str(self.root / "cache/cloudflare-routes.json"),
+                "--services-file", str(self.root / "CITADEL_DATA/services.json")]
+        with patch.object(sys, "argv", args), patch.object(cloudflare, "load_project_getter", return_value=values.get), \
+                patch.object(cloudflare, "CloudflareAPI", return_value=remote), \
+                patch.object(cloudflare, "discover_api", return_value=[endpoint]), \
+                patch.object(cloudflare, "api_output", side_effect=lambda *a, **kw: output(*a, **kw, verify=lambda _: True)):
+            self.assertEqual(cloudflare.main(), 0)
+            self.assertEqual(len(remote.domains), 2)
+            self.assertEqual(len(remote.apps), 3)  # Browser OTP, OAuth, machine origin.
+            remote.events.clear()
+            self.assertEqual(cloudflare.main(), 0)
+            self.assertEqual(remote.events, [])
+            values["CLOUDFLARE_API_TOKEN"] = ""
+            values["CITADEL_CLOUDFLARE_API_BEARER"] = ""
+            values["CITADEL_CLOUDFLARE_API_OAUTH"] = "0"
+            cloudflare.main()
+            self.assertEqual(remote.events, [])
+            payload = json.loads((self.root / "cache/CLOUDFLARE-API-routes.json").read_text())
+            self.assertTrue(payload["cleanup_pending"])
+            self.assertFalse(payload["remote_verified"])
+            self.assertEqual(payload["views"], {})
+
+    def test_disabled_directories_still_run_cleanup_coordinator(self):
+        self.write("CITADEL_DATA/cloudflare-api/runtime.json", {"owner": "fixture"})
+        disabled = self.root / "extensions/disabled"
+        disabled.mkdir()
+        for name in ("cloudflare", "CLOUDFLARE-API"):
+            (self.root / "extensions/enabled" / name).rename(disabled / name)
+        args = ["dispatch.py", "--enabled-dir", str(self.root / "extensions/enabled"),
+            "--services-file", str(self.root / "CITADEL_DATA/services.json"), "--cache-dir", str(self.root / "cache"),
+            "--config-ini", str(self.root / "config.ini"), "--state-file", str(self.root / "CITADEL_DATA/providers_state.json"),
+            "--tailscale-file", str(self.root / "tailscale.json")]
+        with patch.object(sys, "argv", args), patch.object(dispatch.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
+            self.assertEqual(dispatch.main(), 0)
+        run.assert_called_once()
+        state = json.loads((self.root / "CITADEL_DATA/providers_state.json").read_text())
+        self.assertEqual(state["enabled_providers"], [])
+
+    def test_readiness_rejects_browser_redirect_or_html_login(self):
+        from unittest.mock import Mock
+        for status, headers, expected in (
+            (302, {"Location": "https://team.cloudflareaccess.com/login"}, "pending-auth"),
+            (200, {"Content-Type": "text/html"}, "pending-auth"),
+            (401, {"Content-Type": "application/json"}, "pending-auth"),
+            (401, {"Content-Type": "application/json", "WWW-Authenticate": 'Bearer realm="citadel-api"'}, "provisioned"),
+        ):
+            connection = Mock()
+            connection.getresponse.return_value = Mock(status=status, getheader=lambda name, default="": headers.get(name, default))
+            with patch("cloudflare_api_routes.http.client.HTTPSConnection", return_value=connection):
+                self.assertEqual(route_readiness("api-3070.example.com"), expected)
+            connection.close.assert_called_once()
 
 
 if __name__ == "__main__":

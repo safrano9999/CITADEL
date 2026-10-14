@@ -441,8 +441,14 @@ class APIReconciler:
     def _preflight_access(self, role, port, hostname):
         expected = resource_name(self.owner, role, port)
         for app in self.snapshot["apps"]:
-            if app.get("domain") == hostname and app.get("name") != expected:
-                raise CloudflareAPIError("API hostname is occupied by a foreign Access application")
+            patterns = [app.get("domain", ""), *(app.get("self_hosted_domains") or [])]
+            patterns += [destination.get("uri", "") for destination in app.get("destinations", [])
+                         if isinstance(destination, dict) and destination.get("type") == "public"]
+            for pattern in patterns:
+                if isinstance(pattern, dict):
+                    pattern = pattern.get("domain", "")
+                if isinstance(pattern, str) and fnmatchcase(hostname, pattern.split("/")[0].lower()) and app.get("name") != expected:
+                    raise CloudflareAPIError("API origin or OAuth hostname is covered by a foreign Access application")
 
     def _upload(self, table, secrets, *, keep=False):
         metadata, modules = deployment(self.owner, table, secrets, self.code, keep_secrets=keep)
@@ -536,8 +542,12 @@ class APIReconciler:
             self.service = self.api.create_service_token(self.account, resource_name(self.owner, "service"))
             self.state["service"] = {key: self.service[key] for key in ("id", "client_id", "client_secret")}
             save_private_state(self.state_path, self.state)
+        otp_error = None
         if any(host["mode"] == "api-oauth" for host in self.plan["hosts"].values()):
-            ensure_one_time_pin(self.api, self.account, self.name)
+            try:
+                ensure_one_time_pin(self.api, self.account, self.name)
+            except CloudflareAPIError as exc:
+                otp_error = exc
         for hostname, origin in self.plan["origins"].items():
             app = self._protect("origin", origin["port"], hostname)
             origin["access_ready"] = True
@@ -546,6 +556,8 @@ class APIReconciler:
         for hostname, host in list(self.plan["hosts"].items()):
             if host["mode"] == "api-oauth":
                 try:
+                    if otp_error:
+                        raise otp_error
                     app = self._protect("oauth", host["port"], hostname)
                     self.table["hosts"][hostname]["audience"] = app["aud"]
                 except CloudflareAPIError as exc:
@@ -575,7 +587,7 @@ class APIReconciler:
             secrets = {name: value for name, value in secrets.items() if name not in old_names}
             self.warnings.append("Add preserves deployed credentials; changes require a full scan")
         self._upload(self.table, secrets, keep=keep)
-        if self.subdomain is None or self.subdomain.get("enabled") or self.subdomain.get("previews_enabled"):
+        if self.subdomain is None or self.subdomain.get("enabled") is not False or self.subdomain.get("previews_enabled") is not False:
             self.api.disable_worker_subdomain(self.account, self.name)
         owned_domains = {domain["hostname"]: domain for domain in self.domains if self.owns_domain(domain)}
         for hostname in self.table["hosts"]:
