@@ -1,7 +1,26 @@
 # Cloudflare API and MCP refactoring goal
 
-Status: implementation plan. This goal specifies the planned feature; it does
-not activate an extension, publish a Worker, run a scan, or change live routes.
+Status: implementation candidate on `codex/cloudflare-api`; live acceptance is
+pending. This goal remains the acceptance contract. It does not activate an
+extension, publish a Worker, run a scan, or change live routes by itself.
+
+The source suite and plugin packaging passed on GitHub Actions at `50cd517`:
+[validation run](https://github.com/safrano9999/CITADEL/actions/runs/38596492206).
+That run executed 368 Python tests (367 passed; the existing Caddy-binary test
+was skipped) and 17 Worker tests. These use fixtures for Cloudflare and upstream
+protocol behavior. They are not evidence of a deployed OAuth flow. The
+Containerfile and build workflows are prepared in the matching SCRIPTS branch;
+no image build, local adoption, or live Cloudflare publication has occurred.
+
+Remaining live acceptance requires deliberate authorization and an isolated
+test deployment: real nested-domain TLS and Managed OAuth API behavior; a real
+client's registration, OTP callback, PKCE/resource binding and token refresh;
+read-only MCP checks through both public auth modes; origin rejection without
+service credentials and with a forged/wrong-audience assertion; stable Access
+IDs and sessions across rescans; and exclusion cleanup while browser OTP stays
+functional. The README contains the Blender/OpenCode procedure and the bundled
+`functions/mcp_check.py` sends no `tools/call`. Do not mark this goal complete
+until those results have been recorded.
 
 ## Objective
 

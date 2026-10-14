@@ -60,6 +60,16 @@ def json_message(probe: Probe):
     return None
 
 
+def legacy_sse(probe: Probe) -> bool:
+    if not probe.headers.get("content-type", "").startswith("text/event-stream"):
+        return False
+    for event in probe.body.replace(b"\r\n", b"\n").split(b"\n\n"):
+        lines = event.split(b"\n")
+        if b"event: endpoint" in lines and any(line.startswith(b"data:") for line in lines):
+            return True
+    return False
+
+
 class LocalProbes:
     def __init__(self, scheme: str, port: int, *, seconds: float = 10):
         if scheme not in {"http", "https"} or type(port) is not int or not 1 <= port <= 65535:
@@ -109,7 +119,7 @@ class LocalProbes:
                 chunks.extend(chunk)
                 if result.headers.get("content-type", "").startswith("text/event-stream"):
                     candidate = Probe(result.status, result.headers, bytes(chunks))
-                    if json_message(candidate) is not None:
+                    if json_message(candidate) is not None or legacy_sse(candidate):
                         return candidate
             return Probe(0, {}, b"")
         except (OSError, urllib.error.URLError, ValueError):
@@ -238,8 +248,16 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
                 {"path": path, "method": method} for method in ("GET", "POST", "DELETE")])
         elif response.status in {401, 403}:
             record(path, "mcp", response, "authentication-required", "Credentials required; protocol unverified")
+        elif response.status == 426 or legacy_sse(response):
+            record(path, "mcp", response, "unsupported", "WebSocket or legacy SSE transport requires a Streamable HTTP bridge")
         elif response.status not in {404, 405}:
             record(path, "mcp", response, "unknown", "No valid Streamable HTTP initialize result")
+
+    # Identify the common legacy SSE transport without following its endpoint
+    # event or advertising it as an HTTP MCP route. Keep the shared probe budget.
+    response = probe("/sse", headers=credentials.get(route_id(port, "mcp", "/sse"), {}))
+    if legacy_sse(response):
+        record("/sse", "mcp", response, "unsupported", "Legacy SSE requires a Streamable HTTP bridge")
 
     document_paths = list(DOC_PATHS + API_ROOTS)
     followed = 0
@@ -255,7 +273,7 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
             continue
         if 200 <= response.status < 300:
             for link in documentation_links(response, source_url):
-                if followed < 4 and link not in document_paths:
+                if followed < 3 and link not in document_paths:
                     document_paths.append(link)
                     followed += 1
         if response.status in {401, 403}:

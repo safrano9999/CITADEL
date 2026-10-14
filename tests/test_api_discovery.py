@@ -51,6 +51,19 @@ class DiscoveryTests(unittest.TestCase):
         self.assertFalse(any(row["status"] == "ready" for row in rows))
         self.assertEqual(rows[0]["status"], "authentication-required")
 
+    def test_legacy_sse_is_reported_unsupported_without_following_its_endpoint(self):
+        response = Probe(200, {"content-type": "text/event-stream"},
+                         b"event: endpoint\ndata: https://other.example/messages\n\n")
+        rows = self.discover({"/sse": response})
+        self.assertEqual(rows[0]["status"], "unsupported")
+        self.assertFalse(any("other.example" in call[0] for call in self.calls))
+        probe = LocalProbes("http", 3070)
+        stream = Mock(code=200, headers=response.headers)
+        stream.read1.side_effect = [response.body, AssertionError("must not wait on legacy stream")]
+        with patch.object(probe.opener, "open", return_value=stream):
+            self.assertEqual(probe("/sse").body, response.body)
+        stream.close.assert_called_once()
+
     def test_backend_secret_only_sent_to_matching_candidate_and_not_in_inventory(self):
         key = route_id(3070, "mcp", "/mcp")
         rows = self.discover({"/mcp": reply({}, 401)}, {key: {"authorization": "Bearer private-backend"}})
