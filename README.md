@@ -800,9 +800,32 @@ request, time and body-size limits and never execute application tools.
 Inspect `cache/cloudflare-api-inventory.json` for route IDs, paths and evidence;
 the API extension also reports candidates needing backend authentication.
 An app can have several endpoints, all individually linked in each active menu.
-Only discovered OpenAPI methods and paths are forwarded for REST. Generic APIs
+Only discovered OpenAPI or explicitly declared methods and paths are forwarded for REST. Generic APIs
 without recognizable metadata remain unverified instead of exposing arbitrary
 paths. Encoded or ambiguous paths and Citadel administration routes are denied.
+
+For APIs without operation metadata, optionally create the repository-root
+`CLOUDFLARE-API_discovery.json` using `CLOUDFLARE-API_discovery.json.example`.
+The active file is local and gitignored; only the example ships. Its Blender
+Bridge is illustrative, not a claim about standard Blender endpoints.
+Each `routes` entry names a scanned `port`, its exact dashboard `title`, an API
+base `path`, a read-only `probe` and an explicit `operations` list. The probe is
+always GET and must return successful JSON of the configured `json_type`
+(`object` or `array`); `json_keys` optionally requires top-level object keys.
+Choose a genuinely read-only endpoint: Citadel never calls the declared POST,
+PUT or DELETE operations during discovery. Only listed operations are forwarded;
+no wildcard or whole-port publication is added. Operations require an explicit
+boolean `requires_auth`; backend secrets still belong in `credentials.json`.
+
+These are trusted local operation declarations, not automatically inferred API
+contracts. Every scan checks the listener title and JSON probe afresh. A bare
+401, login HTML, redirect, timeout or changed title does not verify a rule.
+Rules stay within existing request/time/body limits (at most four per port).
+Missing file or `{"routes": []}` adds no rules; invalid configuration aborts
+API reconciliation. The whole-port ignore list and Citadel administration
+exclusions take precedence. This cannot reach an unexposed container listener;
+such a listener still needs its normal Caddy route. Container installations
+must mount this optional file at the repository root, alongside the ignore file.
 
 When a backend requires its own token, create the private file
 `CITADEL_DATA/cloudflare-api/credentials.json` with mode `0600`:
@@ -835,7 +858,7 @@ stream without whole-response buffering; session IDs are encrypted and bound to
 the authenticated identity and route. The rate control is 120 requests per
 minute per bearer/identity at each Cloudflare location, not a global quota.
 
-Back up `.env`, `config.conf`, the root ignore file, and the private
+Back up `.env`, `config.conf`, the root ignore and discovery files, and the private
 `CITADEL_DATA/cloudflare-api/` directory. Its `runtime.json` contains the session
 key and origin service secret; it is not disposable cache. Losing it requires
 restoration or explicit credential recovery, not automatic OAuth app replacement.

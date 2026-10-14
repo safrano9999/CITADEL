@@ -13,7 +13,7 @@ from cloudflare_api_policy import MODE_LABELS
 from common import now_iso, parse_bool
 
 
-def discover(services, settings, credentials, admin_port):
+def discover(services, settings, credentials, admin_port, *, rules=()):
     if not settings.modes:
         return []
     rows = services.get("http_services")
@@ -24,7 +24,7 @@ def discover(services, settings, credentials, admin_port):
     rows = [row for row in rows if row["port"] not in settings.excluded
             and (not parse_bool(services.get("https_only")) or row.get("scheme") == "https")]
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-        results = list(pool.map(lambda row: discover_service(row, credentials, admin_ports=[admin_port]), rows))
+        results = list(pool.map(lambda row: discover_service(row, credentials, admin_ports=[admin_port], rules=rules), rows))
     return sorted((endpoint for group in results for endpoint in group), key=lambda row: row["id"])
 
 

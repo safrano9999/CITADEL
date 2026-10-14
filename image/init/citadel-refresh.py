@@ -46,7 +46,7 @@ RUNTIME = (
     ".env", ".tunnel-token", "config.conf", "config.ini", "cert.pem",
     "ports.filter.json", "cache", "icons", "services.json", "ss.json",
     "last_scan.txt", "tailscale.json", "extensions/providers_state.json",
-    "extensions/ui.json", "CLOUDFLARE-API_ignore.json",
+    "extensions/ui.json", "CLOUDFLARE-API_ignore.json", "CLOUDFLARE-API_discovery.json",
 )
 
 

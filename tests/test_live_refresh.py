@@ -112,11 +112,13 @@ class LiveRefreshTests(unittest.TestCase):
         disabled.mkdir(parents=True)
         (disabled / "extension.json").write_text('{"version":"new"}')
         (self.old / "CLOUDFLARE-API_ignore.json").write_text('{"ports":[3070]}')
+        (self.old / "CLOUDFLARE-API_discovery.json").write_text('{"routes":[]}')
         (self.seed / "CLOUDFLARE-API_ignore.json").write_text('{"ports":[]}')
         self.execute()
         self.assertEqual(json.loads((enabled / "extension.json").read_text()), {"version": "new"})
         self.assertFalse((self.old / "extensions/disabled/CLOUDFLARE-API").exists())
         self.assertEqual(json.loads((self.old / "CLOUDFLARE-API_ignore.json").read_text()), {"ports": [3070]})
+        self.assertEqual(json.loads((self.old / "CLOUDFLARE-API_discovery.json").read_text()), {"routes": []})
 
     def test_shared_instance_files_are_authoritative_and_unchanged(self):
         directory = self.args.instance_dir

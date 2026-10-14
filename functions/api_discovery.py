@@ -15,6 +15,7 @@ import urllib.request
 from urllib.parse import urlencode, urljoin, urlsplit
 
 from cloudflare_api_policy import endpoint_path, route_id
+from api_discovery_rules import matches_json, matches_service
 
 MCP_PATHS = ("/mcp", "/api/mcp", "/api/v1/mcp", "/api/v2/mcp")
 DOC_PATHS = ("/openapi.json", "/swagger.json", "/api/docs.json", "/api/openapi.json",
@@ -212,7 +213,7 @@ def documentation_links(response: Probe, source_url: str) -> list[str]:
     return list(dict.fromkeys(paths))[:4]
 
 
-def discover_service(service: dict, credentials: dict, *, probe=None, admin_ports=()) -> list[dict]:
+def discover_service(service: dict, credentials: dict, *, probe=None, admin_ports=(), rules=()) -> list[dict]:
     port, scheme = service.get("port"), service.get("scheme")
     if type(port) is not int or not 1 <= port <= 65535 or scheme not in {"http", "https"}:
         raise ValueError("Invalid scanned HTTP listener")
@@ -247,6 +248,23 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
             "http_status": response.status, "operations": list(operations),
             "credential_ref": key if credentials.get(key) else None}
         return rows[key]
+
+    # Local declarations supply the operation map, not an alternate upstream.
+    # Verify the current listener/title and a read-only JSON response every scan.
+    # They share the transport's existing time/request/body limits.
+    for rule in rules:
+        if not matches_service(rule, service):
+            continue
+        path = rule["path"]
+        key = route_id(port, "rest", path)
+        response = probe(rule["probe"]["path"], headers=credentials.get(key, {}))
+        if 200 <= response.status < 300 and matches_json(rule["probe"], json_message(response)):
+            needs_auth = any(op["requires_auth"] for op in rule["operations"]) and not credentials.get(key)
+            record(path, "rest", response, "authentication-required" if needs_auth else "ready",
+                   "Local operation declaration; service title and JSON probe matched", rule["operations"])
+        else:
+            record(path, "rest", response, "authentication-required" if response.status in {401, 403} else "unknown",
+                   "Local declaration unverified: read-only JSON probe did not match")
 
     for path in MCP_PATHS:
         key = route_id(port, "mcp", path)

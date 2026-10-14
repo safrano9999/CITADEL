@@ -30,6 +30,7 @@ from cloudflare_apply import (  # re-export existing provider helpers
 )
 from cloudflare_plan import api_routes, browser_routes, combine_routes, merge_ingress
 from cloudflare_api_policy import APISettings, backend_credentials, settings as api_settings
+from api_discovery_rules import load_rules
 from cloudflare_api_routes import discover as discover_api, output as api_output
 
 
@@ -107,7 +108,8 @@ def main() -> int:
         # inventory available to the API views even when Cloudflare is down.
         if token and api_config.modes:
             credentials = backend_credentials(root)
-            endpoints = discover_api(services, api_config, credentials, int(get("CITADEL_WEBUI_PORT", "11000") or "11000"))
+            endpoints = discover_api(services, api_config, credentials,
+                                     int(get("CITADEL_WEBUI_PORT", "11000") or "11000"), rules=load_rules(root))
         write_json(root / "cache/cloudflare-api-inventory.json", {"generated_at": now_iso(), "endpoints": endpoints})
         api_diagnostics = [{key: row.get(key) for key in ("id", "port", "path", "status", "http_status")}
                            for row in endpoints if row.get("status") != "ready"]
