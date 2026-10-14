@@ -86,7 +86,7 @@ def endpoint_path(value: str, *, template: bool = False) -> str:
 def route_id(port: int, protocol: str, path: str) -> str:
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError("Invalid route port")
-    if protocol not in {"mcp", "rest", "graphql"}:
+    if protocol not in {"mcp", "rest", "graphql", "rpc"}:
         raise ValueError("Unsupported API protocol")
     endpoint_path(path)
     digest = hashlib.sha256(f"{port}:{protocol}:{path}".encode()).hexdigest()[:20]

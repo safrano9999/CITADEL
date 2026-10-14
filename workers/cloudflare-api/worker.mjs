@@ -92,7 +92,7 @@ export function configuration(env) {
     }
     for (const route of host.routes) {
       if (!/^p[0-9]{1,5}_[a-f0-9]{20}$/.test(route.id || "") || !safePath(route.path)
-          || !["mcp", "rest", "graphql"].includes(route.protocol) || !Array.isArray(route.operations)
+          || !["mcp", "rest", "graphql", "rpc"].includes(route.protocol) || !Array.isArray(route.operations)
           || !route.operations.length || route.operations.length > 2000) throw new Error("Invalid endpoint binding");
       for (const operation of route.operations) {
         if (!safePath(operation.path) || !["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"].includes(operation.method)) {

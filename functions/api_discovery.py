@@ -18,15 +18,18 @@ from cloudflare_api_policy import endpoint_path, route_id
 
 MCP_PATHS = ("/mcp", "/api/mcp", "/api/v1/mcp", "/api/v2/mcp")
 DOC_PATHS = ("/openapi.json", "/swagger.json", "/api/docs.json", "/api/openapi.json",
-             "/api/v1/docs.json", "/api/v2/docs.json", "/v3/api-docs")
+             "/api/v1/docs.json", "/api/v2/docs.json", "/v3/api-docs",
+             "/api-doc/openapi.json", "/api/schema/", "/doc")
 GRAPHQL_PATHS = ("/graphql", "/api/graphql")
 API_ROOTS = ("/api", "/api/v1", "/api/v2")
 METHODS = {"get", "head", "post", "put", "patch", "delete", "options"}
 MAX_BODY = 4 * 1024 * 1024
-MAX_REQUESTS = 20
+MAX_REQUESTS = 26
 MAX_OPERATIONS = 2000
 PROTOCOL_VERSION = "2025-06-18"
 GRAPHQL_QUERY = "query CitadelDiscovery { __typename }"
+TOOLS_INVOKE_PATH = "/tools/invoke"
+MISSING_PATH = "/.well-known/citadel-discovery-missing"
 
 
 @dataclass
@@ -90,8 +93,10 @@ class LocalProbes:
             return Probe(0, {}, b"")
         if method not in {"GET", "POST"}:
             raise ValueError("Unsupported discovery method")
-        if method == "POST" and (not isinstance(payload, dict) or payload.get("method") != "initialize"):
-            raise ValueError("Discovery may only POST MCP initialize")
+        empty_tool_probe = path == TOOLS_INVOKE_PATH and method == "POST" and payload == {}
+        mcp_initialize = path in MCP_PATHS and isinstance(payload, dict) and payload.get("method") == "initialize"
+        if method == "POST" and not (empty_tool_probe or mcp_initialize):
+            raise ValueError("Discovery may only POST MCP initialize or an empty tools/invoke validation probe")
         if query is not None and (method != "GET" or query != {"query": GRAPHQL_QUERY}):
             raise ValueError("Only the read-only GraphQL discovery query is allowed")
         request_headers = {"Accept": "application/json, text/event-stream", **(headers or {})}
@@ -103,17 +108,21 @@ class LocalProbes:
         response = None
         try:
             try:
-                response = self.opener.open(request, timeout=min(1.0, remaining))
+                # Some frameworks generate their schema on demand. Keep the
+                # overall listener deadline while allowing that bounded read.
+                response = self.opener.open(request, timeout=min(3.0 if path in DOC_PATHS else 1.0, remaining))
             except urllib.error.HTTPError as exc:
                 response = exc
             result = Probe(response.code, {k.lower(): v for k, v in response.headers.items()}, b"")
-            # Do not consume bodies from redirects/auth failures or wait on a
-            # persistent SSE connection after the initialize result arrives.
-            if response.code < 200 or response.code >= 300:
+            # The empty invocation probe needs the small JSON auth/validation
+            # error, never a tool result. Other error/redirect bodies are ignored.
+            inspect_error = empty_tool_probe and response.code in {400, 401, 403}
+            if not 200 <= response.code < 300 and not inspect_error:
                 return result
+            max_body = 16384 if inspect_error else MAX_BODY
             chunks = bytearray()
-            while len(chunks) <= MAX_BODY and time.monotonic() < self.deadline:
-                chunk = response.read1(min(16384, MAX_BODY + 1 - len(chunks)))
+            while len(chunks) <= max_body and time.monotonic() < self.deadline:
+                chunk = response.read1(min(16384, max_body + 1 - len(chunks)))
                 if not chunk:
                     return Probe(result.status, result.headers, bytes(chunks))
                 chunks.extend(chunk)
@@ -265,6 +274,29 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
     response = probe("/sse", headers=credentials.get(route_id(port, "mcp", "/sse"), {}))
     if legacy_sse(response):
         record("/sse", "mcp", response, "unsupported", "Legacy SSE requires a Streamable HTTP bridge", detected=True)
+
+    # An HTTP invocation API need not publish OpenAPI. Establish a dedicated
+    # POST route first, excluding global 405/auth middleware and SPA fallbacks.
+    # An empty object has no tool/name/action/args and cannot select a tool.
+    key = route_id(port, "rpc", TOOLS_INVOKE_PATH)
+    headers = credentials.get(key, {})
+    response = probe(TOOLS_INVOKE_PATH, headers=headers)
+    allowed = {method.strip().upper() for method in response.headers.get("allow", "").split(",")}
+    if response.status == 405 and "POST" in allowed and probe(MISSING_PATH).status == 404:
+        response = probe(TOOLS_INVOKE_PATH, "POST", {}, headers)
+        data = json_message(response)
+        error = data.get("error") if isinstance(data, dict) else None
+        operations = [{"path": TOOLS_INVOKE_PATH, "method": "POST", "requires_auth": bool(headers)}]
+        if response.status in {401, 403} and error:
+            operations[0]["requires_auth"] = True
+            record(TOOLS_INVOKE_PATH, "rpc", response, "authentication-required",
+                   "Dedicated POST invocation endpoint with JSON authentication error", operations, detected=True)
+        elif (response.status == 400 and isinstance(error, dict) and data.get("ok") is False
+              and error.get("type") == "invalid_request"
+              and re.search(r"\b(tool|name)\b", str(error.get("message", "")), re.I)
+              and re.search(r"\b(required|requires|missing)\b", str(error.get("message", "")), re.I)):
+            record(TOOLS_INVOKE_PATH, "rpc", response, "ready",
+                   "Empty invocation rejected for missing tool name; no tool executed", operations)
 
     document_paths = list(DOC_PATHS + API_ROOTS)
     followed = 0

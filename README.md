@@ -713,13 +713,27 @@ need a fixed client bearer.
 
 Configured modes remain visible after a scan even if no eligible endpoints were
 found or Cloudflare rejected publication. API modes list only services with
-detected REST, GraphQL or MCP endpoints; ordinary browser-only tiles and other
+detected REST, HTTP RPC, GraphQL or MCP endpoints; ordinary browser-only tiles and other
 listening ports are hidden. Discovery runs before Cloudflare management calls,
 so detected endpoints remain visible during a Cloudflare failure, with an
 explicit unpublished or backend-authentication status and no public link.
 An OpenAPI document proves an API exists even when its operations require a
 backend credential. A guessed path, HTML login or bare 401 does not. Inactive
 modes are hidden. A visible tile alone does not confirm a working connection.
+
+Discovery also checks `/api-doc/openapi.json`, `/api/schema/` and `/doc` for
+OpenAPI schemas. Schema requests allow up to three seconds inside the shared
+ten-second listener deadline. Up to 26 requests per listener are allowed,
+including at most three linked documents.
+
+The `/tools/invoke` HTTP RPC probe runs on every eligible listener, without
+matching an application name or port. It requires `GET` to return `405` with
+`Allow: POST`, a missing control path to return `404`, and an empty `POST {}` to
+return a JSON authentication error or a specific missing-tool validation error.
+The probe never sends a tool name, action or arguments. A protected endpoint is
+shown as requiring backend credentials; publication requires successful empty
+request validation. Only the exact `POST /tools/invoke` operation is mapped.
+A generic 401, catch-all 405, redirect or HTML login does not qualify.
 
 Activate the extension by moving the shipped directory from
 `extensions/disabled/CLOUDFLARE-API` to `extensions/enabled/CLOUDFLARE-API`.

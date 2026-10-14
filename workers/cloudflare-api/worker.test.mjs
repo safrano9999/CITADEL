@@ -227,6 +227,28 @@ test("REST parameter scopes preserve methods and reject ambiguous credentials", 
   assert.equal((await handle(request("/api/tasks/42", {}, "api-3070.example.com", "GET"), env, mustNotFetch)).status, 404);
 });
 
+test("RPC invocation forwards only the exact POST scope with its backend credential", async () => {
+  const env = environment();
+  const config = JSON.parse(env.ROUTE_TABLE);
+  config.hosts["api-3070.example.com"].routes = [{ ...route, protocol: "rpc", path: "/tools/invoke",
+    operations: [{ method: "POST", path: "/tools/invoke" }] }];
+  env.ROUTE_TABLE = JSON.stringify(config);
+  for (const [path, method] of [["/tools/invoke", "GET"], ["/tools/invoke/other", "POST"], ["/tools", "POST"]]) {
+    assert.equal((await handle(request(path, {}, "api-3070.example.com", method), env, mustNotFetch)).status, 404);
+  }
+  const body = JSON.stringify({ tool: "fixture", args: {} });
+  const req = new Request("https://api-3070.example.com/tools/invoke", {
+    method: "POST", body, headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+  });
+  const response = await handle(req, env, async (url, options) => {
+    assert.equal(url, "https://origin-api-3070.example.com/tools/invoke");
+    assert.equal(options.headers.get("authorization"), "Bearer backend-secret");
+    assert.equal(await new Response(options.body).text(), body);
+    return Response.json({ ok: true });
+  });
+  assert.equal(response.status, 200);
+});
+
 test("concurrent JWKS refreshes collapse and failures back off without accepting expired keys", async () => {
   const issuer = "https://concurrency.cloudflareaccess.com";
   const now = Date.now() / 1000;

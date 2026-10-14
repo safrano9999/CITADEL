@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "functions"))
 
 from api_discovery import (
-    GRAPHQL_QUERY, LocalProbes, Probe, discover_service, documentation_links,
+    GRAPHQL_QUERY, MAX_REQUESTS, MISSING_PATH, TOOLS_INVOKE_PATH, LocalProbes, Probe, discover_service, documentation_links,
     json_message, openapi_operations,
 )
 from cloudflare_api_policy import route_id
@@ -28,7 +28,7 @@ class DiscoveryTests(unittest.TestCase):
 
         def probe(path, method="GET", payload=None, headers=None, **kwargs):
             self.calls.append((path, method, payload, headers, kwargs))
-            return responses.get(path, Probe(404, {}, b""))
+            return responses.get((method, path), responses.get(path, Probe(404, {}, b"")))
 
         return discover_service(self.service, credentials or {}, probe=probe)
 
@@ -44,7 +44,7 @@ class DiscoveryTests(unittest.TestCase):
                 self.assertEqual(rows[0]["protocol"], "mcp")
                 self.assertTrue(rows[0]["detected"])
                 self.assertTrue(all(call[2]["method"] == "initialize" for call in self.calls if call[1] == "POST"))
-                self.assertLessEqual(len(self.calls), 20)
+                self.assertLessEqual(len(self.calls), MAX_REQUESTS)
 
     def test_html_and_auth_status_are_not_protocol_proof(self):
         rows = self.discover({"/mcp": Probe(200, {"content-type": "text/html"}, b"<html>Login</html>"),
@@ -125,6 +125,52 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(call[1], "GET")
         self.assertEqual(call[4]["query"], {"query": GRAPHQL_QUERY})
 
+    def test_invocation_api_detected_without_token_and_without_tool_execution(self):
+        rows = self.discover({TOOLS_INVOKE_PATH: Probe(405, {"allow": "POST"}, b""),
+            ("POST", TOOLS_INVOKE_PATH): reply({"error": {"type": "unauthorized"}}, 401)})
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["protocol"], rows[0]["status"]), ("rpc", "authentication-required"))
+        self.assertTrue(rows[0]["detected"])
+        self.assertEqual(rows[0]["operations"], [{"path": TOOLS_INVOKE_PATH, "method": "POST", "requires_auth": True}])
+        self.assertEqual(next(call[2] for call in self.calls if call[:2] == (TOOLS_INVOKE_PATH, "POST")), {})
+        self.assertLessEqual(len(self.calls), MAX_REQUESTS)
+        from cloudflare_api_policy import APISettings
+        from cloudflare_plan import api_routes
+        self.assertEqual(api_routes(rows, APISettings(enabled=True, bearer="a" * 64), "example.com")["hosts"], {})
+
+    def test_invocation_validation_proves_readiness_only_after_authentication(self):
+        key = route_id(3070, "rpc", TOOLS_INVOKE_PATH)
+        rows = self.discover({TOOLS_INVOKE_PATH: Probe(405, {"allow": "POST"}, b""),
+            ("POST", TOOLS_INVOKE_PATH): reply({"ok": False, "error": {
+                "type": "invalid_request", "message": "tools.invoke requires name"}}, 400)},
+            {key: {"authorization": "Bearer private"}})
+        self.assertEqual(rows[0]["status"], "ready")
+        self.assertEqual(rows[0]["credential_ref"], key)
+        self.assertEqual(next(call[3] for call in self.calls if call[0] == MISSING_PATH), None)
+        self.assertNotIn("private", json.dumps(rows))
+        from cloudflare_api_policy import APISettings
+        from cloudflare_plan import api_routes
+        plan = api_routes(rows, APISettings(enabled=True, bearer="a" * 64), "example.com")
+        route = plan["hosts"]["api-3070.example.com"]["routes"][0]
+        self.assertEqual(route["operations"], [{"path": TOOLS_INVOKE_PATH, "method": "POST"}])
+        self.assertEqual(route["credential_ref"], key)
+
+    def test_invocation_probe_rejects_global_method_auth_and_html_responses(self):
+        for responses in (
+            {TOOLS_INVOKE_PATH: reply({"error": "unauthorized"}, 401)},
+            {TOOLS_INVOKE_PATH: Probe(405, {"allow": "POST"}, b""), MISSING_PATH: Probe(405, {"allow": "POST"}, b"")},
+            {TOOLS_INVOKE_PATH: Probe(405, {"allow": "GET"}, b"")},
+            {TOOLS_INVOKE_PATH: Probe(405, {"allow": "POST"}, b""), ("POST", TOOLS_INVOKE_PATH): Probe(401, {"content-type": "text/html"}, b"Login")},
+        ):
+            with self.subTest(responses=responses):
+                self.assertFalse(any(row.get("detected") for row in self.discover(responses)))
+
+    def test_additional_schema_locations_are_discovered(self):
+        for path in ("/api-doc/openapi.json", "/api/schema/", "/doc"):
+            with self.subTest(path=path):
+                rows = self.discover({path: reply({"openapi": "3.0.3", "paths": {"/api/items": {"get": {}}}})})
+                self.assertTrue(any(row["detected"] and row["protocol"] == "rest" for row in rows))
+
     def test_admin_listener_never_probed(self):
         probe = Mock(side_effect=AssertionError("Admin API must not be discovered"))
         for service, ports in ((self.service, [3070]), ({**self.service, "citadel_webui": True}, []),
@@ -143,6 +189,9 @@ class DiscoveryTests(unittest.TestCase):
         probe = LocalProbes("https", 3070)
         with patch.object(probe.opener, "open") as open_request:
             for path, kwargs in (("https://other/mcp", {}), ("/mcp", {"method": "POST", "payload": {"method": "tools/call"}}),
+                                 (TOOLS_INVOKE_PATH, {"method": "POST", "payload": {"tool": "exec", "args": {}}}),
+                                 (TOOLS_INVOKE_PATH, {"method": "POST", "payload": {"method": "initialize", "tool": "exec"}}),
+                                 ("/unrelated", {"method": "POST", "payload": {}}),
                                  ("/graphql", {"query": {"query": "mutation { deleteAll }"}})):
                 with self.subTest(path=path), self.assertRaises(ValueError):
                     probe(path, **kwargs)
@@ -156,6 +205,19 @@ class DiscoveryTests(unittest.TestCase):
             result = probe("/mcp", "POST", {"method": "initialize"})
         self.assertEqual(json_message(result)["id"], 1)
         response.close.assert_called_once()
+
+    def test_empty_invocation_transport_reads_only_bounded_error_response(self):
+        import io
+        probe = LocalProbes("http", 3070)
+        response = Mock(code=401, headers={"content-type": "application/json"})
+        response.read1.side_effect = io.BytesIO(b'{"error":{"type":"unauthorized"}}').read1
+        with patch.object(probe.opener, "open", return_value=response) as opened:
+            result = probe(TOOLS_INVOKE_PATH, "POST", {})
+            self.assertEqual(opened.call_args.args[0].data, b"{}")
+        self.assertEqual(json_message(result)["error"]["type"], "unauthorized")
+        response.read1.side_effect = io.BytesIO(b"x" * 16385).read1
+        with patch.object(probe.opener, "open", return_value=response):
+            self.assertEqual(probe(TOOLS_INVOKE_PATH, "POST", {}).status, 0)
 
     def test_large_openapi_document_is_read_with_a_bounded_body(self):
         import io
