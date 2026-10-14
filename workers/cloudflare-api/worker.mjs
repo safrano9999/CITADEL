@@ -50,7 +50,15 @@ function routeFor(host, path, method) {
 }
 
 export function configuration(env) {
-  const config = typeof env.ROUTE_TABLE === "string" ? JSON.parse(env.ROUTE_TABLE) : (env.ROUTE_TABLE || {});
+  let raw = env.ROUTE_TABLE;
+  if (raw === undefined) {
+    const count = Number(env.ROUTE_TABLE_PARTS);
+    if (!Number.isInteger(count) || count < 1 || count > 60) throw new Error("Missing route table");
+    const parts = Array.from({ length: count }, (_, index) => env[`ROUTE_TABLE_${index}`]);
+    if (parts.some(part => typeof part !== "string" || part.length > 4000)) throw new Error("Incomplete route table");
+    raw = parts.join("");
+  }
+  const config = typeof raw === "string" ? JSON.parse(raw) : (raw || {});
   if (config.schema !== 1 || !config.hosts || typeof config.hosts !== "object" || Array.isArray(config.hosts)) {
     throw new Error("Invalid route table");
   }
@@ -207,8 +215,6 @@ export async function handle(request, env, fetcher = fetch) {
     config = configuration(env);
     host = config.hosts[url.hostname];
     if (!host) return deny(404, "Unknown route");
-    route = routeFor(host, url.pathname, request.method);
-    if (!route) return deny(404, "Unknown endpoint or method");
   } catch {
     return deny(503, "Route configuration unavailable");
   }
@@ -227,6 +233,8 @@ export async function handle(request, env, fetcher = fetch) {
   } catch {
     return deny(401, "Invalid identity assertion");
   }
+  route = routeFor(host, url.pathname, request.method);
+  if (!route) return deny(404, "Unknown endpoint or method");
   try {
     if (!env.API_LIMIT || typeof env.API_LIMIT.limit !== "function") return deny(503, "Rate control unavailable");
     const allowed = await env.API_LIMIT.limit({ key: encode64(await digest(principal)) });

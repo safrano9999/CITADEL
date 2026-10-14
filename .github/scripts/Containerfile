@@ -27,6 +27,9 @@ COPY webui.py python_header.py scan.sh unroute.sh requirements.txt config.conf_e
 COPY functions/*.py ./functions/
 COPY functions/providers/*.py ./functions/providers/
 COPY functions/exporters/*.py ./functions/exporters/
+COPY workers/cloudflare-api/worker.mjs ./workers/cloudflare-api/
+COPY CLOUDFLARE-API_ignore.json ./
+COPY extensions/disabled/CLOUDFLARE-API/extension.json ./extensions/disabled/CLOUDFLARE-API/
 COPY assets/ ./assets/
 COPY templates/ ./templates/
 COPY extensions/ui.json ./extensions/

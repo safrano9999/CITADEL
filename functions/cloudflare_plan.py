@@ -96,7 +96,7 @@ def api_routes(inventory: list[dict], settings: APISettings, domain: str) -> dic
             continue
         if row.get("status") != "ready":
             diagnostics.append({"id": identity, "port": port, "path": path,
-                                "status": row.get("status", "unknown")})
+                                "status": row.get("status", "unknown"), "http_status": row.get("http_status")})
             continue
         operations = row.get("operations")
         if not isinstance(operations, list) or not operations or len(operations) > 2000:

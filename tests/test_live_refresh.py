@@ -104,6 +104,20 @@ class LiveRefreshTests(unittest.TestCase):
         self.assertEqual(len(list(self.root.glob(".CITADEL-backup-*"))), 1)
         self.assertTrue((self.args.unit_dir / "citadel-scan.service").exists())
 
+    def test_preserves_api_extension_selection_and_whole_port_ignore_file(self):
+        enabled = self.old / "extensions/enabled/CLOUDFLARE-API"
+        enabled.mkdir(parents=True)
+        (enabled / "extension.json").write_text('{"version":"old"}')
+        disabled = self.seed / "extensions/disabled/CLOUDFLARE-API"
+        disabled.mkdir(parents=True)
+        (disabled / "extension.json").write_text('{"version":"new"}')
+        (self.old / "CLOUDFLARE-API_ignore.json").write_text('{"ports":[3070]}')
+        (self.seed / "CLOUDFLARE-API_ignore.json").write_text('{"ports":[]}')
+        self.execute()
+        self.assertEqual(json.loads((enabled / "extension.json").read_text()), {"version": "new"})
+        self.assertFalse((self.old / "extensions/disabled/CLOUDFLARE-API").exists())
+        self.assertEqual(json.loads((self.old / "CLOUDFLARE-API_ignore.json").read_text()), {"ports": [3070]})
+
     def test_shared_instance_files_are_authoritative_and_unchanged(self):
         directory = self.args.instance_dir
         directory.mkdir()

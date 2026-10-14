@@ -10,7 +10,7 @@ def data_directory(root: Path = ROOT) -> Path:
 
 
 def provider_output(root: Path, provider: str, kind: str = "provider") -> Path:
-    directory = root / "cache" if provider == "cloudflare" else data_directory(root)
+    directory = root / "cache" if provider in {"cloudflare", "CLOUDFLARE-API"} else data_directory(root)
     filename = "status.json" if kind == "export" else "routes.json"
     return directory / f"{provider}-{filename}"
 

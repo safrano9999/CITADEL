@@ -233,6 +233,9 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
         response = probe(path, headers=credentials.get(key, {}))
         data = json_message(response)
         source_url = f"{scheme}://127.0.0.1:{port}{path}"
+        if response.status == 0:
+            record(path, "rest", response, "unknown", "Discovery timeout or request budget exhausted")
+            continue
         if 200 <= response.status < 300:
             for link in documentation_links(response, source_url):
                 if followed < 4 and link not in document_paths:

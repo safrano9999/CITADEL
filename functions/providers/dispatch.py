@@ -59,6 +59,9 @@ def main() -> int:
     args = parser.parse_args()
 
     provider_dirs = discover_enabled_provider_dirs(args.enabled_dir)
+    project_root = Path(args.enabled_dir).absolute().parent.parent
+    cloudflare_family = {"cloudflare", "CLOUDFLARE-API"}
+    all_provider_dirs = list(provider_dirs)
     requested = []
     for provider_id in args.provider:
         if not PROVIDER_ID.fullmatch(provider_id):
@@ -75,6 +78,16 @@ def main() -> int:
             for provider_id in requested
             if provider_id in by_id
         ]
+        if cloudflare_family.intersection(requested):
+            provider_dirs += [directory for directory in all_provider_dirs
+                              if Path(directory).name in cloudflare_family and directory not in provider_dirs]
+
+    cleanup_hint = (project_root / "CITADEL_DATA/cloudflare-api/runtime.json").is_file()
+    synthetic_cleanup = None
+    if cleanup_hint and not requested and not any(Path(directory).name in cloudflare_family for directory in provider_dirs):
+        synthetic_cleanup = str(project_root / "extensions/enabled/cloudflare")
+        provider_dirs.append(synthetic_cleanup)
+    cloudflare_run = None
 
     previous_state = read_json(args.state_file, {}) if adding() else {}
     state = {
@@ -149,13 +162,16 @@ def main() -> int:
             print(f"  {provider_id}: {error}")
             continue
 
-        if ext_payload.get("enabled") is False:
+        cleanup_only = provider_dir == synthetic_cleanup or (
+            cleanup_hint and provider_id in cloudflare_family and ext_payload.get("enabled") is False)
+        if ext_payload.get("enabled") is False and not cleanup_only:
             state["providers"][provider_id] = {
                 "kind": kind, "status": "disabled", "considered": False, "available": False,
             }
             continue
         category = "exports" if kind == "export" else "providers"
-        state[f"enabled_{category}"].append(provider_id)
+        if not cleanup_only:
+            state[f"enabled_{category}"].append(provider_id)
         os.makedirs(os.path.dirname(routes_out), exist_ok=True)
 
         if not os.path.isfile(script_path):
@@ -188,7 +204,12 @@ def main() -> int:
             args.tailscale_file,
         ]
 
-        run_res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if provider_id in cloudflare_family and cloudflare_run is not None:
+            run_res = cloudflare_run
+        else:
+            run_res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            if provider_id in cloudflare_family:
+                cloudflare_run = run_res
 
         routes_payload = read_json(routes_out, {})
         if not isinstance(routes_payload, dict):

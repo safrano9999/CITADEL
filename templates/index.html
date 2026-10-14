@@ -73,6 +73,7 @@
             data-cloudflare-subdomains="{{ svc.cloudflare_rule.subdomains|join(',')|e }}"
             data-cloudflare-whitelist="{{ '1' if svc.cloudflare_rule.whitelist else '0' }}"
             data-cloudflare-emails="{{ svc.cloudflare_rule.emails|tojson|e }}"
+            data-api-endpoints="{{ svc.provider_endpoints|default({})|tojson|e }}"
             {% for pid in data.provider_order %}
             data-url-{{ pid|e }}="{{ svc.provider_urls.get(pid, '')|e }}"
             {% endfor %}
@@ -88,6 +89,7 @@
                 {{ '🔒 ' if scheme == 'https' else '' }}:{{ svc.port|int }}
             </span>
             <span class="tile-url">-</span>
+            <div class="api-endpoints" hidden></div>
             <div class="cloudflare-editor" hidden>
                 <label>
                     <span>Subdomains</span>
@@ -268,6 +270,34 @@ function applyMode(mode) {
       label.textContent = '';
     } else {
       label.textContent = compactUrl(choice);
+    }
+    const list = tile.querySelector('.api-endpoints');
+    if (list) {
+      list.replaceChildren();
+      let endpoints = [];
+      try { endpoints = JSON.parse(tile.dataset.apiEndpoints || '{}')[mode] || []; } catch {}
+      list.hidden = !endpoints.length;
+      label.hidden = Boolean(endpoints.length);
+      for (const endpoint of endpoints) {
+        const row = document.createElement('div');
+        const link = document.createElement('a');
+        link.href = endpoint.url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = `${String(endpoint.protocol).toUpperCase()} ${endpoint.path}`;
+        link.addEventListener('click', event => event.stopPropagation());
+        const copy = document.createElement('button');
+        copy.type = 'button';
+        copy.textContent = 'Copy URL';
+        copy.addEventListener('click', async event => {
+          event.stopPropagation();
+          try { await navigator.clipboard.writeText(endpoint.url); copy.textContent = 'Copied'; }
+          catch { copy.textContent = 'Copy from link'; }
+        });
+        row.append(link, document.createTextNode(' '), copy);
+        if (endpoint.status !== 'provisioned') row.append(document.createTextNode(endpoint.status === 'pending-auth' ? ' · Auth pending' : ' · TLS pending'));
+        list.append(row);
+      }
     }
   });
 

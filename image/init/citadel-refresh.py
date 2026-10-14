@@ -46,7 +46,7 @@ RUNTIME = (
     ".env", ".tunnel-token", "config.conf", "config.ini", "cert.pem",
     "ports.filter.json", "cache", "icons", "services.json", "ss.json",
     "last_scan.txt", "tailscale.json", "extensions/providers_state.json",
-    "extensions/ui.json",
+    "extensions/ui.json", "CLOUDFLARE-API_ignore.json",
 )
 
 
@@ -209,6 +209,16 @@ def extension_selections(old, staged):
         if enabled.is_dir() and not enabled.is_symlink() and not exists(disabled):
             disabled.parent.mkdir(parents=True, exist_ok=True)
             enabled.rename(disabled)
+    # Optional extensions ship disabled; retain an operator's enabled selection
+    # while taking their implementation from the new checkout.
+    for candidate in (old / "extensions/enabled").glob("*"):
+        enabled = staged / "extensions/enabled" / candidate.name
+        disabled = staged / "extensions/disabled" / candidate.name
+        if (old / "extensions/disabled" / candidate.name).exists():
+            raise RuntimeError(f"Ambiguous enabled/disabled extension: {candidate.name}")
+        if disabled.is_dir() and not disabled.is_symlink() and not exists(enabled):
+            enabled.parent.mkdir(parents=True, exist_ok=True)
+            disabled.rename(enabled)
 
 
 def prepare_tree(old, staged, export_dir, settings, export_content):

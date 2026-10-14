@@ -14,6 +14,7 @@ Environment=FASTAPI_HOST=0.0.0.0
 # installs dependencies there; the standalone RPM image keeps its own -s CMD.
 ExecStart=/usr/bin/python3 webui.py
 PassEnvironment=CITADEL_CLOUDFLARE_SERVERSIDE_PERSISTENCE
+PassEnvironment=CITADEL_CLOUDFLARE_API_BEARER CITADEL_CLOUDFLARE_API_OAUTH
 PassEnvironment=CADDYFILE_BACKEND
 ExecStartPost=/usr/bin/python3 webui.py --wait-ready /usr/local/libexec/fedora45-wait-ready
 Restart=on-failure

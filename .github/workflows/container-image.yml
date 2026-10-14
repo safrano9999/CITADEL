@@ -39,10 +39,15 @@ jobs:
         with:
           python-version: "3.13"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Test sources
         run: |
           python -m pip install -r requirements.txt
           python -m unittest discover -s tests
+          node --test workers/cloudflare-api/worker.test.mjs
 
       - name: Verify generated HTTPS routes with Caddy
         run: |

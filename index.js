@@ -13,6 +13,8 @@ const providerNames = new Set([
   "subnet",
   "tailscale",
   "cloudflare",
+  "api-bearer",
+  "api-oauth",
   "other",
 ]);
 let activeScan;
@@ -209,10 +211,14 @@ function serviceLabel(service) {
 
 function serviceEntries(data, provider) {
   return (data.http_tiles ?? [])
-    .map((service) => ({
+    .flatMap((service) => Array.isArray(service?.provider_endpoints?.[provider])
+      ? service.provider_endpoints[provider].map((endpoint) => ({
+        service: { ...service, display_name: `${readString(service.display_name) ?? readString(service.name) ?? "Service"} · ${endpoint.protocol} ${endpoint.path}${endpoint.status === "provisioned" ? "" : endpoint.status === "pending-auth" ? " · Auth pending" : " · TLS pending"}` },
+        url: readString(endpoint.url),
+      })) : [{
       service,
       url: readString(service?.provider_urls?.[provider]) ?? readString(service?.urls?.[provider]),
-    }))
+    }])
     .filter((entry) => entry.url);
 }
 
