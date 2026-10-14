@@ -59,6 +59,9 @@ def ingress_entry(hostname: str, route: dict) -> dict:
         result["originRequest"] = {"noTLSVerify": True}
     if route.get("origin_access"):
         result.setdefault("originRequest", {})["access"] = deepcopy(route["origin_access"])
+        # Discovery verified this local authority. Passing the public origin
+        # hostname instead can miss Caddy's host matcher and yield an empty 200.
+        result["originRequest"]["httpHostHeader"] = f"{route['origin_host']}:{route['origin_port']}"
     return result
 
 

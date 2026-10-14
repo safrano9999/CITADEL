@@ -219,6 +219,9 @@ class APILifecycleTests(unittest.TestCase):
         self.assertEqual({domain["service"] for domain in self.api.domains}, {participant.name})
         origin = next(entry for entry in self.api.config["ingress"] if entry.get("hostname", "").startswith("origin-api-"))
         self.assertTrue(origin["originRequest"]["access"]["required"])
+        self.assertEqual(origin["originRequest"]["httpHostHeader"], "127.0.0.1:3070")
+        browser = next(entry for entry in self.api.config["ingress"] if entry.get("hostname") == "8000.example.com")
+        self.assertNotIn("httpHostHeader", browser.get("originRequest", {}))
         policy = next(policy for policy in self.api.policies if policy["decision"] == "non_identity")
         self.assertEqual(policy["include"], [{"service_token": {"token_id": self.api.tokens[0]["id"]}}])
         events = [event[0] for event in self.api.events]
