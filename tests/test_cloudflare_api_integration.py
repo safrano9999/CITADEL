@@ -192,6 +192,24 @@ class APIIntegrationTests(unittest.TestCase):
             self.assertFalse(payload["available"])
             self.assertEqual(payload["services"], {})
 
+            # A network failure during token verification also keeps the modes
+            # visible without claiming authentication or publishing any links.
+            with patch.object(remote, "verify_token", side_effect=OSError("The read operation timed out")):
+                self.assertEqual(cloudflare.main(), 1)
+            payload = json.loads((self.root / "cache/CLOUDFLARE-API-routes.json").read_text())
+            self.assertEqual(set(payload["views"]), {"api-bearer", "api-oauth"})
+            self.assertFalse(payload["authenticated"])
+            self.assertFalse(payload["available"])
+            self.assertEqual(payload["services"], {})
+
+            # A missing management token still skips publication and both modes,
+            # even when client bearer/OAuth are configured.
+            values["CLOUDFLARE_API_TOKEN"] = ""
+            cloudflare.main()
+            payload = json.loads((self.root / "cache/CLOUDFLARE-API-routes.json").read_text())
+            self.assertFalse(payload["considered"])
+            self.assertEqual(payload["views"], {})
+
     def test_disabled_directories_still_run_cleanup_coordinator(self):
         self.write("CITADEL_DATA/cloudflare-api/runtime.json", {"owner": "fixture"})
         disabled = self.root / "extensions/disabled"

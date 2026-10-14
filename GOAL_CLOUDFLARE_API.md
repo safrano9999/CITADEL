@@ -10,10 +10,20 @@ That run executed 368 Python tests (367 passed; the existing Caddy-binary test
 was skipped) and 17 Worker tests. These use fixtures for Cloudflare and upstream
 protocol behavior. They are not evidence of a deployed OAuth flow. The
 Containerfile and build workflows are prepared in the matching SCRIPTS branch;
-no image build, local adoption, or live Cloudflare publication has occurred.
+no image build or pull has been performed for this implementation.
 
-Remaining live acceptance requires deliberate authorization and an isolated
-test deployment: real nested-domain TLS and Managed OAuth API behavior; a real
+Live preview on 2026-10-14: at the operator's request, the host checkout and
+service on HTTPS port 2000 now use the extension code. A normal scan ran with
+both client authentication modes configured. The actual dashboard response
+contains API-Bearer and API-OAuth. Configured menus remain visible on empty
+discovery or publication failure, without claiming usable endpoint links.
+Cloudflare rejected origin service-token creation with HTTP 403; a subsequent
+provider reconciliation timed out. Public API publication and the OpenCode
+OAuth/OTP flow have therefore not been accepted. Existing planning documents
+and local configuration were preserved before adopting the preview.
+
+Remaining live acceptance on the authorized preview deployment includes real
+nested-domain TLS and Managed OAuth API behavior; a real
 client's registration, OTP callback, PKCE/resource binding and token refresh;
 read-only MCP checks through both public auth modes; origin rejection without
 service credentials and with a forged/wrong-audience assertion; stable Access

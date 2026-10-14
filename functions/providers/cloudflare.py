@@ -221,7 +221,7 @@ def main() -> int:
         "errors": errors,
         "warnings": warnings,
     }
-    api_payload = api_output(api_table, considered=bool(api_config.modes or api_table["hosts"]),
+    api_payload = api_output(api_table, considered=bool((token and api_config.modes) or api_table["hosts"]),
                              authenticated=api_verified, modes=api_config.modes,
                              errors=api_errors, warnings=api_warnings,
                              diagnostics=api_diagnostics)
