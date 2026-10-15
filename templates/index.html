@@ -38,6 +38,7 @@
         </label>
 
         <button id="page-refresh-btn" class="btn-default" type="button">Refresh</button>
+        <a class="btn-default" href="/cloudflare-api">API-Freigaben</a>
         {% if data.cloudflare_available and data.edit_token_required %}
         <label id="cloudflare-token-control" class="control cloudflare-token-control" hidden>
             <span>Token:</span>
@@ -62,17 +63,18 @@
     {% endif %}
 
     {% if data.http_tiles %}
-    <div class="section-title">Services</div>
+    <div class="section-title" id="services-title">Services</div>
     <section class="grid" id="services-grid">
         {% for svc in data.http_tiles %}
         {% set port = svc.port|string %}
-        {% set port = svc.port|string %}
         {% set scheme = svc.scheme|default('http') %}
         <article class="tile" tabindex="0"
+            {% if data.default_mode in ['api-bearer', 'api-oauth'] and not (svc.provider_endpoints|default({})).get(data.default_mode) %}hidden{% endif %}
             data-port="{{ port|e }}"
             data-cloudflare-subdomains="{{ svc.cloudflare_rule.subdomains|join(',')|e }}"
             data-cloudflare-whitelist="{{ '1' if svc.cloudflare_rule.whitelist else '0' }}"
-            data-cloudflare-emails="{{ svc.cloudflare_rule.emails|tojson|e }}"
+            data-cloudflare-emails="{{ svc.cloudflare_rule.emails|tojson|forceescape }}"
+            data-api-endpoints="{{ svc.provider_endpoints|default({})|tojson|forceescape }}"
             {% for pid in data.provider_order %}
             data-url-{{ pid|e }}="{{ svc.provider_urls.get(pid, '')|e }}"
             {% endfor %}
@@ -88,6 +90,7 @@
                 {{ '🔒 ' if scheme == 'https' else '' }}:{{ svc.port|int }}
             </span>
             <span class="tile-url">-</span>
+            <div class="api-endpoints" hidden></div>
             <div class="cloudflare-editor" hidden>
                 <label>
                     <span>Subdomains</span>
@@ -104,8 +107,10 @@
         {% endfor %}
     </section>
     {% endif %}
+    <p id="api-empty" hidden>Keine API- oder MCP-Endpunkte erkannt.</p>
 
     {% if data.other_ports %}
+    <div id="other-ports" {% if data.default_mode in ['api-bearer', 'api-oauth'] %}hidden{% endif %}>
     <div class="section-title">Other Listening Ports</div>
     <section class="other-wrap">
         <table class="other-table">
@@ -129,6 +134,7 @@
             </tbody>
         </table>
     </section>
+    </div>
     {% endif %}
     </div>
 
@@ -241,6 +247,10 @@ function compactUrl(url) {
 
 function applyMode(mode) {
   const cloudflareMode = mode === 'cloudflare';
+  const apiMode = mode === 'api-bearer' || mode === 'api-oauth';
+  let visibleServices = 0;
+  const otherPorts = document.getElementById('other-ports');
+  if (otherPorts) otherPorts.hidden = apiMode;
   if (cloudflareEditBtn) {
     cloudflareEditBtn.hidden = !cloudflareMode;
   }
@@ -253,9 +263,14 @@ function applyMode(mode) {
 
   tiles.forEach(tile => {
     const choice = chooseTileUrl(tile, mode);
+    let endpoints = [];
+    try { endpoints = JSON.parse(tile.dataset.apiEndpoints || '{}')[mode] || []; } catch {}
+    tile.hidden = apiMode && !endpoints.length;
+    if (!tile.hidden) visibleServices++;
 
     tile.dataset.activeUrl = choice;
-    tile.classList.toggle('no-link', !choice);
+    tile.classList.toggle('no-link', !choice && !apiMode);
+    tile.classList.toggle('api-pending', apiMode && !choice);
     tile.classList.toggle('cloudflare-editing', cloudflareMode && cloudflareEditing);
 
     const editor = tile.querySelector('.cloudflare-editor');
@@ -269,7 +284,46 @@ function applyMode(mode) {
     } else {
       label.textContent = compactUrl(choice);
     }
+    const list = tile.querySelector('.api-endpoints');
+    if (list) {
+      list.replaceChildren();
+      list.hidden = !endpoints.length;
+      label.hidden = Boolean(endpoints.length);
+      for (const endpoint of endpoints) {
+        const row = document.createElement('div');
+        if (!endpoint.url) {
+          const status = endpoint.status === 'authentication-required' ? 'Backend-Zugang erforderlich'
+            : endpoint.status === 'unsupported' ? 'Automatische Freigabe nicht unterstützt'
+            : 'Erkannt · noch nicht veröffentlicht';
+          row.textContent = `${String(endpoint.protocol).toUpperCase()} ${endpoint.path} · ${status}`;
+          list.append(row);
+          continue;
+        }
+        const link = document.createElement('a');
+        link.href = endpoint.url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = `${String(endpoint.protocol).toUpperCase()} ${endpoint.path}`;
+        link.addEventListener('click', event => event.stopPropagation());
+        const copy = document.createElement('button');
+        copy.type = 'button';
+        copy.textContent = 'Copy URL';
+        copy.addEventListener('click', async event => {
+          event.stopPropagation();
+          try { await navigator.clipboard.writeText(endpoint.url); copy.textContent = 'Copied'; }
+          catch { copy.textContent = 'Copy from link'; }
+        });
+        row.append(link, document.createTextNode(' '), copy);
+        if (endpoint.status !== 'provisioned') row.append(document.createTextNode(endpoint.status === 'pending-auth' ? ' · Auth pending' : ' · TLS pending'));
+        list.append(row);
+      }
+    }
   });
+
+  const title = document.getElementById('services-title');
+  if (title) title.textContent = `${apiMode ? 'API / MCP' : 'Services'} (${visibleServices})`;
+  const empty = document.getElementById('api-empty');
+  if (empty) empty.hidden = !apiMode || visibleServices > 0;
 
   updateCloudflareSaveState();
 }

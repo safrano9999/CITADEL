@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CITADEL · API-Freigaben</title>
+  <link rel="icon" href="/citadel.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/style.css">
+  <link rel="stylesheet" href="/assets/cloudflare-api.css">
+  <script src="/assets/cloudflare-api.js" defer></script>
+</head>
+<body>
+<header class="site-header">
+  <div class="brand"><img src="/citadel.svg" alt=""><h1>API-Freigaben</h1></div>
+  <a class="btn-default" href="/">Dashboard</a>
+</header>
+<main class="access-layout">
+  <p>Verwalte den Zugang zu den API- und MCP-Routen aus dem Scan. Änderungen gelten erst nach dem nächsten vollständigen Scan.</p>
+  <form id="access-login" class="access-login">
+    <label for="access-token">Citadel-WebUI-Token</label>
+    <input id="access-token" type="password" autocomplete="current-password" required>
+    <button class="btn-default" type="submit">Entsperren</button>
+  </form>
+  <p id="access-status" role="status" aria-live="polite"></p>
+  <section id="access-editor" hidden>
+    <div class="access-controls">
+      <button id="access-save" class="btn-default" type="button">Speichern für nächsten Scan</button>
+      <button id="access-reload" class="btn-default" type="button">Neu laden</button>
+      <button id="access-lock" class="btn-default" type="button">Sperren</button>
+    </div>
+    <p>Komma trennt Einträge, Semikolon verbindet ein Paar. Leer bedeutet: keine Freigabe.</p>
+    <dl class="access-help">
+      <dt>E-Mail;Bearer</dt><dd>OAuth-Benutzer → Backend-Bearer</dd>
+      <dt>Bearer außen;Bearer innen</dt><dd>Äußeren Bearer prüfen → inneren weiterreichen</dd>
+      <dt>Ein Bearer</dt><dd>Prüfen und unverändert weiterreichen</dd>
+      <dt>Eine E-Mail</dt><dd>OAuth-Zugang ohne Backend-Bearer</dd>
+    </dl>
+    <p id="access-empty" hidden>Noch keine Routen vorhanden. Führe zuerst einen Scan mit aktivierter CLOUDFLARE-API-Erweiterung aus.</p>
+    <div class="access-filters">
+      <label for="access-filter">Port oder Pfad suchen</label>
+      <input id="access-filter" type="search" placeholder="z. B. 3005 oder /mcp" autocomplete="off">
+      <label><input id="access-candidates" type="checkbox"> Auch unbestätigte Kandidaten anzeigen <span id="access-candidate-count"></span></label>
+      <p>Ein Kandidat mit Anmeldepflicht ist noch kein API-Nachweis. Mit einem zugeordneten Backend-Bearer prüft der nächste Scan erneut.</p>
+    </div>
+    <div id="access-routes"></div>
+  </section>
+</main>
+</body>
+</html>

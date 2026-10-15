@@ -34,6 +34,7 @@ jobs:
         run: python3 .github/scripts/examplefiles-githubaction.py
 
       - name: Publish latest release asset
+        if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

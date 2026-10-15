@@ -68,6 +68,9 @@ class LiveRefreshTests(unittest.TestCase):
 
     def test_preserves_data_links_and_known_disabled_selection(self):
         (self.old / ".env").write_text("CUSTOM=value\n")
+        whitelist = "CLOUDFLARE_OAUTH_Whitelist.json"
+        (self.old / whitelist).write_text('{"allowed_redirect_uris":["https://client.example/callback"]}')
+        (self.seed / whitelist).write_text("{}")
         (self.old / "config.conf").write_text("CUSTOM=keep\nCITADEL_TAILSCALE_SERVE=full\n")
         (self.old / "config.ini").write_text("ca_cert=/custom/cert\n")
         (self.old / "icons").mkdir()
@@ -83,6 +86,8 @@ class LiveRefreshTests(unittest.TestCase):
         (self.old / "legacy.py").write_text("old code")
         self.execute()
         self.assertEqual((self.old / ".env").read_text(), "CUSTOM=value\n")
+        self.assertEqual(json.loads((self.old / whitelist).read_text()),
+                         {"allowed_redirect_uris": ["https://client.example/callback"]})
         self.assertIn("CUSTOM=keep", (self.old / "config.conf").read_text())
         self.assertIn("CITADEL_TAILSCALE_SERVE=full", (self.old / "config.conf").read_text())
         self.assertEqual((self.old / "icons/custom.svg").read_text(), "custom")
@@ -96,13 +101,36 @@ class LiveRefreshTests(unittest.TestCase):
         self.assertFalse(any(command[1:2] in (["start"], ["stop"], ["restart"]) for command in self.calls))
         for unit in refresh.UNITS:
             self.assertIn("Environment=CITADEL_TAILSCALE_SERVE=full", (self.args.unit_dir / f"{unit}.d/95-citadel-instance.conf").read_text())
-            self.assertIn("UnsetEnvironment=CITADEL_PERSISTENT CITADEL_WEBUI_HTTPS_PORT", (self.args.unit_dir / f"{unit}.d/95-citadel-instance.conf").read_text())
+            dropin = (self.args.unit_dir / f"{unit}.d/95-citadel-instance.conf").read_text()
+            unset = next(line.removeprefix("UnsetEnvironment=").split() for line in dropin.splitlines() if line.startswith("UnsetEnvironment="))
+            self.assertTrue({"CITADEL_PERSISTENT", "CITADEL_WEBUI_HTTPS_PORT", "CITADEL_CLOUDFLARE_API_BEARER"} <= set(unset))
 
     def test_same_commit_still_reconciles_units_without_extra_backup(self):
         self.execute()
         self.execute()
         self.assertEqual(len(list(self.root.glob(".CITADEL-backup-*"))), 1)
         self.assertTrue((self.args.unit_dir / "citadel-scan.service").exists())
+
+    def test_preserves_api_extension_selection_and_whole_port_ignore_file(self):
+        enabled = self.old / "extensions/enabled/CLOUDFLARE-API"
+        enabled.mkdir(parents=True)
+        (enabled / "extension.json").write_text('{"version":"old"}')
+        disabled = self.seed / "extensions/disabled/CLOUDFLARE-API"
+        disabled.mkdir(parents=True)
+        (disabled / "extension.json").write_text('{"version":"new"}')
+        (self.old / "CLOUDFLARE-API_ignore.json").write_text('{"ports":[3070]}')
+        (self.old / "CLOUDFLARE-API_discovery.json").write_text('{"routes":[]}')
+        access = self.old / "CLOUDFLARE-API_access.json"
+        access.write_text('{"routes":{"fixture":"outer;inner"}}')
+        access.chmod(0o600)
+        (self.seed / "CLOUDFLARE-API_ignore.json").write_text('{"ports":[]}')
+        self.execute()
+        self.assertEqual(json.loads((enabled / "extension.json").read_text()), {"version": "new"})
+        self.assertFalse((self.old / "extensions/disabled/CLOUDFLARE-API").exists())
+        self.assertEqual(json.loads(access.read_text()), {"routes": {"fixture": "outer;inner"}})
+        self.assertEqual(access.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(json.loads((self.old / "CLOUDFLARE-API_ignore.json").read_text()), {"ports": [3070]})
+        self.assertEqual(json.loads((self.old / "CLOUDFLARE-API_discovery.json").read_text()), {"routes": []})
 
     def test_shared_instance_files_are_authoritative_and_unchanged(self):
         directory = self.args.instance_dir

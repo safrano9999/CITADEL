@@ -1,0 +1,12 @@
+.access-layout { max-width: 1000px; margin: auto; padding: 24px; }
+.access-login, .access-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 20px 0; }
+.access-layout input { min-width: 0; padding: 10px; border: 1px solid #657080; border-radius: 6px; background: #17202d; color: #f4f7fb; }
+.access-help { display: grid; grid-template-columns: minmax(160px, 1fr) 2fr; gap: 10px; }
+.access-help dd { margin: 0; }
+.access-route { margin: 22px 0; padding: 20px; border: 1px solid #657080; border-radius: 10px; overflow-wrap: anywhere; }
+.access-route h2 { font-size: 1.1rem; }
+.access-id { opacity: .75; font-family: monospace; }
+.access-route label { display: block; margin: 12px 0 6px; }
+.access-route input { box-sizing: border-box; width: 100%; margin-bottom: 10px; font-family: monospace; }
+#access-status { min-height: 1.5em; font-weight: 600; }
+@media (max-width: 600px) { .access-layout { padding: 14px; } .access-help { display: block; } .access-help dt { margin-top: 14px; } }

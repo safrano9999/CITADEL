@@ -137,6 +137,7 @@ def _load_providers() -> dict:
     alerts: list[str] = []
     provider_options: dict[str, str] = {}
     provider_urls_by_port: dict[str, dict[str, str]] = {}
+    provider_endpoints_by_port: dict[str, dict[str, list[dict]]] = {}
     provider_header_meta: list[dict[str, str]] = []
 
     # Collect dispatch errors
@@ -180,6 +181,40 @@ def _load_providers() -> dict:
             continue
 
         routes = _read_json(_provider_routes_file(provider_dir), {})
+
+        if pid == "CLOUDFLARE-API":
+            for mode, view in (routes.get("views") or {}).items():
+                if mode not in {"api-bearer", "api-oauth"} or not isinstance(view, dict) or not view.get("considered"):
+                    continue
+                provider_options[mode] = "API-Bearer" if mode == "api-bearer" else "API-OAuth"
+                detected = {}
+                for endpoint in routes.get("discovered") or []:
+                    if not isinstance(endpoint, dict):
+                        continue
+                    port = str(endpoint.get("port"))
+                    status = endpoint.get("status")
+                    detected.setdefault(port, {})[endpoint.get("id")] = {
+                        **{key: endpoint.get(key) for key in ("id", "protocol", "path")},
+                        "url": "", "status": "not-published" if status == "ready" else status,
+                    }
+                for port, route in (view.get("services") or {}).items():
+                    if not isinstance(route, dict):
+                        continue
+                    endpoints = [{key: endpoint.get(key) for key in ("id", "protocol", "path", "url", "status")}
+                                 for endpoint in route.get("endpoints", []) if isinstance(endpoint, dict)]
+                    detected.setdefault(str(port), {}).update({endpoint["id"]: endpoint for endpoint in endpoints})
+                for port, endpoints in detected.items():
+                    values = sorted(endpoints.values(), key=lambda endpoint: (endpoint["protocol"], endpoint["path"]))
+                    provider_endpoints_by_port.setdefault(mode, {})[port] = values
+                    provider_urls_by_port.setdefault(mode, {})[port] = next((endpoint["url"] for endpoint in values if endpoint.get("url")), "")
+            for message in [*(routes.get("errors") or []), *(routes.get("warnings") or [])]:
+                if message:
+                    alerts.append(f"[{pid}] {message}")
+            # Unverified probes stay in the discovery inventory. A guessed path
+            # returning a login page/401 does not belong in the API service list.
+            if routes.get("considered") and not routes.get("services"):
+                alerts.append(f"[{pid}] Beim letzten Scan keine API-Routen veroeffentlicht.")
+            continue
 
         label = str(routes.get("label") or ext.get("label") or pid.capitalize())
 
@@ -227,9 +262,14 @@ def _load_providers() -> dict:
             "Keine Provider aus extensions/enabled wurden im letzten Scan beruecksichtigt."
         )
 
+    api_state = _read_json(provider_output(BASE_DIR, "CLOUDFLARE-API"), {})
+    if api_state.get("cleanup_pending"):
+        alerts.append("[Cloudflare API] Remote cleanup is pending; disabling local configuration has not verified revocation.")
+
     return {
         "provider_options": provider_options,
         "provider_urls_by_port": provider_urls_by_port,
+        "provider_endpoints_by_port": provider_endpoints_by_port,
         "provider_header_meta": provider_header_meta,
         "provider_order": list(provider_options.keys()),
         "cloudflare_available": "cloudflare" in available and "cloudflare" in provider_options,
@@ -301,6 +341,9 @@ def build_dashboard() -> dict:
                 url = (tile.get("urls") or {}).get(pid, "")
             tile_urls[pid] = url
         tile["provider_urls"] = tile_urls
+        tile["provider_endpoints"] = {
+                    mode: ports.get(port, []) for mode, ports in providers.get("provider_endpoints_by_port", {}).items()
+        }
 
     http_tiles.sort(key=lambda tile: (not tile["featured"], _service_port(tile)))
 

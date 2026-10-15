@@ -135,6 +135,24 @@ def snapshot(base: Path, selected: list[str] | None = None) -> dict:
             if not routes.get("considered"):
                 entry["detail"] = "Extension not configured in the index"
                 continue
+            if name == "CLOUDFLARE-API":
+                for mode, view in (routes.get("views") or {}).items():
+                    if mode not in {"api-bearer", "api-oauth"} or not isinstance(view, dict):
+                        raise ValueError("Invalid API mode")
+                    for port, route in (view.get("services") or {}).items():
+                        for endpoint in route.get("endpoints", []):
+                            service = {"port": int(port), "provider": mode, "url": public_url(endpoint.get("url")),
+                                       "protocol": endpoint.get("protocol"), "status": "NOT_TESTED",
+                                       "detail": "Public certificate or auth challenge pending; application calls not tested"}
+                            if str(port) not in indexed:
+                                service.update(status="FAIL", detail="API endpoint missing from service index")
+                            elif endpoint.get("status") == "provisioned":
+                                service.update(status="PASS", detail="TLS and anonymous machine-auth challenge verified; authenticated protocol check NOT_TESTED")
+                            entry["services"].append(service)
+                statuses = [service["status"] for service in entry["services"]]
+                entry.update(status="FAIL" if "FAIL" in statuses else "PASS" if statuses and all(s == "PASS" for s in statuses) else "NOT_TESTED",
+                             detail="API route state; browser OTP redirects are not MCP authentication")
+                continue
             if not routes.get("available"):
                 raise ValueError("Configured extension unavailable")
             if kind == "export":

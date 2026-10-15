@@ -15,7 +15,7 @@ import re
 import sys
 from urllib.error import HTTPError
 from urllib.parse import urlencode, urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 SCHEMA_VERSION = 1
 MAX_BODY = 2_000_000
@@ -62,11 +62,38 @@ def is_cloudflare_access(final_url, body):
     return parser.login_form and parser.login_input
 
 
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, *_args, **_kwargs):
+        return None
+
+
+def api_auth_probe(url, mode, timeout):
+    request = Request(url, headers={"Accept": "application/json", "User-Agent": "Citadel-Health/1"})
+    try:
+        response = build_opener(NoRedirect()).open(request, timeout=timeout)
+    except HTTPError as error:
+        response = error
+    with response:
+        code = response.status
+        challenge = response.headers.get("WWW-Authenticate", "")
+        content_type = response.headers.get("Content-Type", "")
+        body = response.read(4097)
+    protected = code == 401 and ("resource_metadata=" in challenge if mode == "api-oauth"
+                                else content_type.startswith("application/json") and len(body) <= 4096)
+    return code, protected
+
+
 def probe(extension, service, timeout):
     result = {"extension": extension, "port": service["port"], "status": "FAIL"}
     try:
         url = clean_url(service["url"])
         result["url"] = url
+        if extension == "CLOUDFLARE-API":
+            code, protected = api_auth_probe(url, service.get("provider"), timeout)
+            result.update(http_status=code, status="PASS" if protected else "FAIL",
+                          detail="Machine authentication challenge verified; authenticated backend NOT_TESTED" if protected
+                          else "Expected a machine-readable 401; browser OTP redirects are not accepted")
+            return result
         code, final, body = fetch(url, timeout)
         result["http_status"] = code
         result["final_url"] = clean_url(final)

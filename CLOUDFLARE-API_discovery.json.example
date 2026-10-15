@@ -1,0 +1,18 @@
+{
+  "routes": [
+    {
+      "port": 3070,
+      "title": "Blender Bridge",
+      "path": "/api",
+      "probe": {
+        "path": "/api/status",
+        "json_type": "object",
+        "json_keys": ["version", "status"]
+      },
+      "operations": [
+        {"method": "GET", "path": "/api/status", "requires_auth": false},
+        {"method": "POST", "path": "/api/render", "requires_auth": true}
+      ]
+    }
+  ]
+}

@@ -135,16 +135,25 @@ def normalize_rule(value: Any, port: int | str | None = None) -> dict[str, Any]:
     }
 
 
-def read_policy(path: Path) -> dict[str, Any]:
+def read_policy(path: Path, *, strict: bool = False) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except FileNotFoundError:
         payload = {}
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        if strict:
+            raise ValueError("Invalid or unreadable Cloudflare policy JSON; reconciliation aborted") from exc
+        payload = {}
+    if strict and not isinstance(payload, dict):
+        raise ValueError("Cloudflare policy must be a JSON object")
     return payload if isinstance(payload, dict) else {}
 
 
-def cloudflare_rules(path: Path, *, strict: bool = False) -> dict[str, dict[str, Any]]:
-    raw = read_policy(path).get("cloudflare", {})
+def cloudflare_rules(path: Path, *, strict: bool = False,
+                     document: dict | None = None) -> dict[str, dict[str, Any]]:
+    if document is None:
+        document = read_policy(path, strict=strict)
+    raw = document.get("cloudflare", {})
     if not isinstance(raw, dict):
         if strict:
             raise ValueError("Cloudflare policy must be a JSON object keyed by port.")
@@ -154,7 +163,10 @@ def cloudflare_rules(path: Path, *, strict: bool = False) -> dict[str, dict[str,
         try:
             port_number = int(str(port))
             if not (1 <= port_number <= 65535):
-                continue
+                raise ValueError("Port must be between 1 and 65535")
+            if strict and (not isinstance(value, dict) or
+                           type(value.get("whitelist", False)) is not bool):
+                raise ValueError("Rule must be an object with a boolean whitelist")
             rules[str(port_number)] = normalize_rule(value, port_number)
         except (TypeError, ValueError) as exc:
             if strict:
