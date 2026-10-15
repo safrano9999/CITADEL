@@ -31,6 +31,8 @@ start() {
 # No credentials or volumes: WebUI must still start, with an absent filter file.
 start
 check_ready http://127.0.0.1:11000/
+# Ship callback examples, never the installation's active registration policy.
+docker exec "$name" python3 -s -c 'import json; from pathlib import Path; p = Path("CLOUDFLARE_OAUTH_Whitelist.json.example"); d = json.loads(p.read_text()); assert d["allowed_redirect_uris"]; assert d["allow_localhost"] is False; assert d["allow_loopback"] is False; assert not Path("CLOUDFLARE_OAUTH_Whitelist.json").exists()'
 processes="$(docker top "$name" -eo pid,comm)"
 if grep -Eq '[[:space:]](tailscaled|cloudflared)$' <<< "$processes"; then
     echo 'Unexpected tunnel daemon without credentials' >&2; exit 1

@@ -1,7 +1,7 @@
 import test from "node:test";
 import { createHmac } from "node:crypto";
 import assert from "node:assert/strict";
-import worker, { handle, verifyAssertion, openSession, sealSession, configuration } from "./worker.mjs";
+import worker, { handle, verifyAssertion, openSession, sealSession, configuration, assertionDiagnostic } from "./worker.mjs";
 
 const routeID = "p3070_0123456789abcdef0123";
 const bearer = "a".repeat(64);
@@ -314,4 +314,53 @@ test("grant revocation and remapping invalidate access and old MCP sessions", as
   const config = JSON.parse(env.ROUTE_TABLE); config.hosts["api-3070.example.com"].routes[0].access_revision = "f".repeat(64);
   env.ROUTE_TABLE = JSON.stringify(config);
   assert.equal((await handle(request("/mcp", { "mcp-session-id": session }), env, mustNotFetch)).status, 404);
+});
+
+
+test("assertion diagnostics never disclose exception text or credentials", () => {
+  const error = new Error("Bearer super-secret-token at https://secret.example/?token=secret");
+  error.stack += "\n    at verifyAssertion (worker.mjs:198:7)";
+  const result = assertionDiagnostic(error);
+  assert.equal(result.reason, "runtime");
+  assert.deepEqual(result.positions, ["198:7"]);
+  assert.doesNotMatch(JSON.stringify(result), /secret|Bearer|https/);
+  assert.equal(assertionDiagnostic(new Error("Assertion audience mismatch")).reason, "audience");
+});
+
+
+test("JWKS uses workerd-compatible redirect mode and refuses redirected keys", async () => {
+  for (const status of [200, 301, 302, 307, 308, 503]) {
+    const issuer = `https://jwks-status-${status}.cloudflareaccess.com`;
+    const token = await jwt(issuer);
+    let calls = 0, cancelled = false;
+    const fetcher = async (url, options) => {
+      calls++;
+      assert.equal(url, issuer + "/cdn-cgi/access/certs");
+      if (!["manual", "follow"].includes(options.redirect)) throw new TypeError("Unsupported redirect mode");
+      assert.equal(options.redirect, "manual");
+      if (status === 200) return Response.json({ keys: [jwk1] });
+      return new Response(new ReadableStream({ cancel() { cancelled = true; } }), {
+        status, headers: { location: "https://untrusted.example/keys" },
+      });
+    };
+    if (status === 200) await verifyAssertion(token, issuer, hostPolicy, fetcher);
+    else {
+      await assert.rejects(() => verifyAssertion(token, issuer, hostPolicy, fetcher), /Signing keys unavailable/);
+      assert.equal(cancelled, true);
+    }
+    assert.equal(calls, 1);
+  }
+});
+
+test("JWKS network failure is a service failure, not a new login challenge", async () => {
+  const env = environment("api-oauth");
+  const table = JSON.parse(env.ROUTE_TABLE);
+  table.issuer = "https://unavailable.cloudflareaccess.com";
+  env.ROUTE_TABLE = JSON.stringify(table);
+  const token = await jwt(table.issuer);
+  const response = await handle(request("/mcp", { "cf-access-jwt-assertion": token }, "oauth.api-3070.example.com"), env,
+    async () => { throw new TypeError("network failed: secret upstream information"); });
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("www-authenticate"), null);
+  assert.equal(await response.text(), '{"error":"Identity verification unavailable"}');
 });

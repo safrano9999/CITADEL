@@ -138,10 +138,20 @@ async function signingKey(issuer, kid, fetcher, now) {
     entry.retryAfter = now + 5;
     entry.retryUnknownAfter = now + 5;
     entry.pending = (async () => {
-      const response = await fetcher(`${issuer}/cdn-cgi/access/certs`, {
-        redirect: "error", signal: AbortSignal.timeout(5000), headers: { accept: "application/json" },
-      });
-      if (!response.ok) throw new Error("Signing keys unavailable");
+      // workerd only accepts "follow" and "manual"; "error" throws before I/O.
+      // Refuse redirects explicitly so keys always come from the pinned issuer.
+      let response;
+      try {
+        response = await fetcher(`${issuer}/cdn-cgi/access/certs`, {
+          redirect: "manual", signal: AbortSignal.timeout(5000), headers: { accept: "application/json" },
+        });
+      } catch {
+        throw new Error("Signing keys unavailable");
+      }
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => {});
+        throw new Error("Signing keys unavailable");
+      }
       const reader = response.body.getReader();
       let text = "";
       let length = 0;
@@ -186,12 +196,14 @@ export async function verifyAssertion(token, issuer, host, fetcher = fetch, now 
   if (header.alg !== "RS256" || typeof header.kid !== "string" || header.kid.length > 128 || header.crit) {
     throw new Error("Unsupported signing algorithm");
   }
-  if (claims.iss !== issuer || !(Array.isArray(claims.aud) ? claims.aud : [claims.aud]).includes(host.audience)
-      || !Number.isFinite(claims.exp) || claims.exp <= now || !Number.isFinite(claims.iat) || claims.iat > now + 30
-      || (claims.nbf !== undefined && (!Number.isFinite(claims.nbf) || claims.nbf > now + 30))
-      || typeof claims.sub !== "string" || !claims.sub || typeof claims.email !== "string") {
-    throw new Error("Invalid assertion claims");
-  }
+  if (!claims || typeof claims !== "object" || Array.isArray(claims)) throw new Error("Invalid assertion claims");
+  if (claims.iss !== issuer) throw new Error("Assertion issuer mismatch");
+  if (!(Array.isArray(claims.aud) ? claims.aud : [claims.aud]).includes(host.audience)) throw new Error("Assertion audience mismatch");
+  if (!Number.isFinite(claims.exp) || claims.exp <= now) throw new Error("Assertion expired");
+  if (!Number.isFinite(claims.iat) || claims.iat > now + 30) throw new Error("Assertion issued at invalid");
+  if (claims.nbf !== undefined && (!Number.isFinite(claims.nbf) || claims.nbf > now + 30)) throw new Error("Assertion not yet valid");
+  if (typeof claims.sub !== "string" || !claims.sub) throw new Error("Assertion subject missing");
+  if (typeof claims.email !== "string") throw new Error("Assertion email missing");
   const key = await signingKey(issuer, header.kid, fetcher, now);
   if (!await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, decode64(parts[2]), encoder.encode(parts[0] + "." + parts[1]))) {
     throw new Error("Invalid assertion signature");
@@ -239,6 +251,30 @@ function routeAccess(route, env) {
   return access;
 }
 
+// Log only fixed diagnostic codes and source positions, never JWTs, claims,
+// exception messages, URLs or credentials supplied by clients or upstreams.
+export function assertionDiagnostic(error) {
+  const reasons = new Map([
+    ["Missing assertion", "missing"], ["Invalid assertion", "format"],
+    ["Invalid encoding", "encoding"], ["Unsupported signing algorithm", "algorithm"],
+    ["Invalid assertion claims", "claims"], ["Assertion issuer mismatch", "issuer"],
+    ["Assertion audience mismatch", "audience"], ["Assertion expired", "expiry"],
+    ["Assertion issued at invalid", "issued_at"], ["Assertion not yet valid", "not_before"],
+    ["Assertion subject missing", "subject"], ["Assertion email missing", "email"],
+    ["Signing keys unavailable", "jwks_unavailable"], ["Signing key response too large", "jwks_size"],
+    ["Invalid signing keys", "jwks_format"], ["Unknown signing key", "jwks_unknown_key"],
+    ["Invalid assertion signature", "signature"], ["Identity no longer allowed", "identity"],
+  ]);
+  const kind = ["Error", "TypeError", "SyntaxError", "DOMException", "TimeoutError", "AbortError", "DataError", "OperationError"]
+    .includes(error?.name) ? error.name : "Error";
+  return {
+    event: "citadel_access_assertion_rejected",
+    reason: reasons.get(error?.message) || "runtime",
+    kind,
+    positions: typeof error?.stack === "string" ? [...error.stack.matchAll(/worker\.mjs:(\d+):(\d+)/g)].slice(0, 4).map(match => match[1] + ":" + match[2]) : [],
+  };
+}
+
 export async function handle(request, env, fetcher = fetch) {
   let config, host, route;
   const url = new URL(request.url);
@@ -259,7 +295,13 @@ export async function handle(request, env, fetcher = fetch) {
   if (host.mode === "api-oauth") {
     try {
       identity = await verifyAssertion(request.headers.get("cf-access-jwt-assertion"), config.issuer, host, fetcher);
-    } catch {
+    } catch (error) {
+      const diagnostic = assertionDiagnostic(error);
+      console.warn(JSON.stringify(diagnostic));
+      if (["jwks_unavailable", "jwks_size", "jwks_format"].includes(diagnostic.reason)) {
+        return deny(503, "Identity verification unavailable");
+      }
+      if (diagnostic.reason === "identity") return deny(403, "Identity not allowed");
       return deny(401, "Invalid identity assertion");
     }
   }

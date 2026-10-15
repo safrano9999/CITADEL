@@ -48,6 +48,7 @@ RUNTIME = (
     "ports.filter.json", "cache", "icons", "services.json", "ss.json",
     "last_scan.txt", "tailscale.json", "extensions/providers_state.json",
     "extensions/ui.json", "CLOUDFLARE-API_ignore.json", "CLOUDFLARE-API_discovery.json", "CLOUDFLARE-API_access.json",
+    "CLOUDFLARE_OAUTH_Whitelist.json",
 )
 
 

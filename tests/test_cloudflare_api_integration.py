@@ -185,7 +185,7 @@ class APIIntegrationTests(unittest.TestCase):
 
     def test_shared_entrypoint_applies_all_modes_then_reports_unverified_cleanup(self):
         self.write("CLOUDFLARE-API_ignore.json", {"ports": []})
-        self.write("CITADEL_DATA/cloudflare-api/policy.json", {"oauth": {"allow_loopback": True}})
+        self.write("CLOUDFLARE_OAUTH_Whitelist.json", {"allow_loopback": True})
         code = self.root / "workers/cloudflare-api/worker.mjs"
         code.parent.mkdir(parents=True)
         code.write_bytes((ROOT / "workers/cloudflare-api/worker.mjs").read_bytes())
@@ -213,6 +213,19 @@ class APIIntegrationTests(unittest.TestCase):
             policy_read.assert_called_once()  # Rules and defaults use the same local snapshot.
             self.assertEqual(len(remote.domains), 2)
             self.assertEqual(len(remote.apps), 3)  # Browser OTP, OAuth, machine origin.
+            remote.events.clear()
+            self.assertEqual(cloudflare.main(), 0)
+            self.assertEqual(remote.events, [])
+            identities = {app["domain"]: (app["id"], app["aud"]) for app in remote.apps}
+            uris = ["https://client.example/callback", "https://client.example/oauth/*"]
+            self.write("CLOUDFLARE_OAUTH_Whitelist.json", {"allowed_redirect_uris": uris})
+            self.assertEqual(cloudflare.main(), 0)
+            self.assertEqual({app["domain"]: (app["id"], app["aud"]) for app in remote.apps}, identities)
+            oauth_apps = [app for app in remote.apps if app.get("oauth_configuration", {}).get("enabled")]
+            self.assertEqual(len(oauth_apps), 1)
+            dcr = oauth_apps[0]["oauth_configuration"]["dynamic_client_registration"]
+            self.assertEqual(dcr["allowed_uris"], uris)
+            self.assertFalse(dcr["allow_any_on_loopback"])
             remote.events.clear()
             self.assertEqual(cloudflare.main(), 0)
             self.assertEqual(remote.events, [])

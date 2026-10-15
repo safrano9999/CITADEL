@@ -28,7 +28,7 @@ COPY functions/*.py ./functions/
 COPY functions/providers/*.py ./functions/providers/
 COPY functions/exporters/*.py ./functions/exporters/
 COPY workers/cloudflare-api/worker.mjs ./workers/cloudflare-api/
-COPY CLOUDFLARE-API_ignore.json CLOUDFLARE-API_discovery.json.example CLOUDFLARE-API_access.json.example ./
+COPY CLOUDFLARE-API_ignore.json CLOUDFLARE-API_discovery.json.example CLOUDFLARE-API_access.json.example CLOUDFLARE_OAUTH_Whitelist.json.example ./
 COPY extensions/disabled/CLOUDFLARE-API/extension.json ./extensions/disabled/CLOUDFLARE-API/
 COPY assets/ ./assets/
 COPY templates/ ./templates/

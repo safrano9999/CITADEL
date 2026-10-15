@@ -18,6 +18,7 @@ from cloudflare_policy import normalize_hostname
 
 EXTENSION = "CLOUDFLARE-API"
 OAUTH = "CITADEL_CLOUDFLARE_API_OAUTH"
+OAUTH_WHITELIST = "CLOUDFLARE_OAUTH_Whitelist.json"
 MODE_LABELS = {"api-bearer": "API-Bearer", "api-oauth": "API-OAuth"}
 HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 FORBIDDEN_HEADERS = {
@@ -157,32 +158,38 @@ def settings(root: Path, get: Callable[[str, str], str]) -> APISettings:
         raise ValueError(f"{OAUTH} must be 0 or 1")
     oauth = raw_oauth == "1"
     excluded = excluded_ports(root)
-    policy = read_object(root / "CITADEL_DATA" / "cloudflare-api" / "policy.json") if oauth else {}
-    if set(policy) - {"oauth"}:
-        raise ValueError("Unknown API policy field")
-    options = policy.get("oauth", {})
+    options = read_object(root / OAUTH_WHITELIST) if oauth else {}
     if not isinstance(options, dict) or set(options) - {
         "allowed_redirect_uris", "allow_localhost", "allow_loopback",
     }:
-        raise ValueError("Invalid OAuth registration policy")
+        raise ValueError(f"Invalid OAuth registration policy in {OAUTH_WHITELIST}")
     uris = options.get("allowed_redirect_uris", [])
     if not isinstance(uris, list) or len(uris) > 100:
         raise ValueError("OAuth callback addresses must be a list")
     for uri in uris:
-        if not isinstance(uri, str):
+        if (not isinstance(uri, str) or len(uri) > 2048
+                or any(ord(c) < 33 or ord(c) > 126 for c in uri)
+                or any(c in uri for c in "\\?#")):
             raise ValueError("Invalid OAuth callback address")
         parsed = urlsplit(uri)
-        if (parsed.scheme != "https" or not parsed.hostname or parsed.username
-                or parsed.password or parsed.fragment or parsed.query or "*" in uri
-                or any(ord(c) < 33 for c in uri)):
-            raise ValueError("OAuth callbacks must be explicit HTTPS URLs without wildcards")
+        if (parsed.scheme != "https" or not parsed.hostname
+                or parsed.username is not None or parsed.password is not None
+                or parsed.port == 0):
+            raise ValueError("OAuth callbacks must be HTTPS URLs without credentials")
+        normalize_hostname(parsed.hostname)
+        endpoint_path(parsed.path or "/")
+        # Cloudflare supports a final /* for variable callback IDs. Require
+        # a specific path prefix; never allow wildcard hosts or an entire site.
+        if "*" in uri and (uri.count("*") != 1 or not parsed.path.endswith("/*")
+                           or parsed.path == "/*"):
+            raise ValueError("OAuth callback wildcards require a specific path ending in /*")
     local = options.get("allow_localhost", False)
     loopback = options.get("allow_loopback", False)
     if type(local) is not bool or type(loopback) is not bool:
         raise ValueError("OAuth loopback options must be JSON booleans")
     errors = []
     if oauth and not (uris or local or loopback):
-        errors.append("OAuth requires explicit client callback configuration")
+        errors.append(f"OAuth requires client callbacks in {OAUTH_WHITELIST}")
         oauth = False
     return APISettings(enabled=True, oauth=oauth, excluded=excluded,
                        allowed_redirect_uris=tuple(dict.fromkeys(uris)),

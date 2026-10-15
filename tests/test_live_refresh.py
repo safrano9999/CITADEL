@@ -68,6 +68,9 @@ class LiveRefreshTests(unittest.TestCase):
 
     def test_preserves_data_links_and_known_disabled_selection(self):
         (self.old / ".env").write_text("CUSTOM=value\n")
+        whitelist = "CLOUDFLARE_OAUTH_Whitelist.json"
+        (self.old / whitelist).write_text('{"allowed_redirect_uris":["https://client.example/callback"]}')
+        (self.seed / whitelist).write_text("{}")
         (self.old / "config.conf").write_text("CUSTOM=keep\nCITADEL_TAILSCALE_SERVE=full\n")
         (self.old / "config.ini").write_text("ca_cert=/custom/cert\n")
         (self.old / "icons").mkdir()
@@ -83,6 +86,8 @@ class LiveRefreshTests(unittest.TestCase):
         (self.old / "legacy.py").write_text("old code")
         self.execute()
         self.assertEqual((self.old / ".env").read_text(), "CUSTOM=value\n")
+        self.assertEqual(json.loads((self.old / whitelist).read_text()),
+                         {"allowed_redirect_uris": ["https://client.example/callback"]})
         self.assertIn("CUSTOM=keep", (self.old / "config.conf").read_text())
         self.assertIn("CITADEL_TAILSCALE_SERVE=full", (self.old / "config.conf").read_text())
         self.assertEqual((self.old / "icons/custom.svg").read_text(), "custom")
