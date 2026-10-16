@@ -685,7 +685,7 @@ Directory placement controls activation; no extra enable flag is needed.
 `CLOUDFLARE_API_TOKEN` for Cloudflare management. There is no global API client
 bearer in `.env`. The former `CITADEL_CLOUDFLARE_API_BEARER` is no longer read;
 remove it from existing local configuration. Grant access per discovered route
-in the private JSON or the **API-Freigaben** page described below.
+in the private JSON or the **API Access** page described below.
 
 `config.conf_example` retains the independent OAuth option:
 
@@ -693,11 +693,40 @@ in the private JSON or the **API-Freigaben** page described below.
 #choices: 0 1
 #default-preset: 0
 CITADEL_CLOUDFLARE_API_OAUTH=0
+CITADEL_CLOUDFLARE_API_MODE=both
 ```
 
+Set `CITADEL_CLOUDFLARE_API_MODE=oauth` and
+`CITADEL_CLOUDFLARE_API_OAUTH=1` to publish OAuth routes only. The default
+`both` preserves the existing behavior; `bearer` publishes only bearer routes.
+Backend bearer mappings remain available in OAuth-only mode. A full scan applies
+mode changes and removes previously published routes for disabled modes.
+
+API tiles show exactly four lines: **Access**, **Reachable**,
+**Authentication prompt**, and a plain comma-separated protocol list such as
+`HTTP, REST, MCP`. The three status labels stay fixed; green means confirmed and red means not
+confirmed. HTTP denotes a scanned browser page. Synthetic MCP discovery pages
+can opt out with `<meta name="citadel-page-role" content="mcp-discovery">`;
+the scanner then omits HTTP and the browser link without hiding the MCP service.
+Real browser interfaces remain visible. API types come from discovery
+and may include interfaces that are not published. Access is green when at least one interface on the port has access configured.
+Reachable records whether the local HTTP/HTTPS service responded during the last
+scan, independently of API grants, publication or OAuth. Authentication prompt
+refers to the tile's primary managed API URL.
+The authentication check inspects the anonymous challenge; it does not log in
+or make an authenticated API call.
+
+All interface URLs appear in full below the four lines. Published APIs use their
+managed API URL; unpublished APIs use the existing service URL plus their path.
+Browser pages include their service URL. A direct link does not imply API access
+has been configured. The whole tile links to MCP first, then another API, then
+the browser page. Each listed URL is independently clickable and supports the
+browser's normal right-click copy-link and open-in-new-tab actions.
+
+
 Discovery runs with both extensions enabled and the management token present,
-even before any route has access entries. API-Bearer is then available as a
-view; API-OAuth additionally needs the flag and valid callback policy. A route
+even before any route has access entries. Available views follow the configured
+authentication mode; API-OAuth also needs the flag and valid callback policy. A route
 is published in a mode only when it has explicit grants for that mode:
 
 | Route entries | OAuth flag | Publication |
@@ -716,8 +745,8 @@ Configured modes remain visible after a scan even if no eligible endpoints were
 found or Cloudflare rejected publication. API modes list only services with
 detected REST, HTTP RPC, GraphQL or MCP endpoints; ordinary browser-only tiles and other
 listening ports are hidden. Discovery runs before Cloudflare management calls,
-so detected endpoints remain visible during a Cloudflare failure, with an
-explicit unpublished or backend-authentication status and no public link.
+so detected endpoints remain visible during a Cloudflare failure. Known direct
+service links remain available; no unprovisioned managed API URL is advertised.
 An OpenAPI document proves an API exists even when its operations require a
 backend credential. A guessed path, HTML login or bare 401 does not. Inactive
 modes are hidden. A visible tile alone does not confirm a working connection.
@@ -855,7 +884,7 @@ must mount this optional file at the repository root, alongside the ignore file.
 1. Run a normal scan with both Cloudflare extensions enabled. Citadel creates
    `CLOUDFLARE-API_access.json` in the repository root with empty entries for
    recognized endpoints and authentication-required candidates.
-2. Open **API-Freigaben** in the dashboard (path `/cloudflare-api`) and enter the
+2. Open **API Access** in the dashboard (path `/cloudflare-api`) and enter the
    existing `CITADEL_TOKEN`. Reading and writing the registry require this token;
    leaving it unset disables management. The page does not store it in browser
    storage. Each row shows its port, protocol, path and scan status. Confirmed
@@ -978,7 +1007,7 @@ checked with OpenCode 1.18.34.
 
 1. **Prepare the published OAuth endpoint.** Enable the extension and OAuth,
    configure the OpenCode callback policy, then perform a scan. In
-   **API-Freigaben**, add `your-email@example.com;backendToken` for the detected
+   **API Access**, add `your-email@example.com;backendToken` for the detected
    bridge route (or only your email if it needs no backend bearer). Save and
    perform another full scan to publish that OAuth route.
    Copy the endpoint from **API-OAuth**:

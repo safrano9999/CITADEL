@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CITADEL · API-Freigaben</title>
+  <title>CITADEL · API Access</title>
   <link rel="icon" href="/citadel.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/style.css">
   <link rel="stylesheet" href="/assets/cloudflare-api.css">
@@ -11,36 +11,36 @@
 </head>
 <body>
 <header class="site-header">
-  <div class="brand"><img src="/citadel.svg" alt=""><h1>API-Freigaben</h1></div>
+  <div class="brand"><img src="/citadel.svg" alt=""><h1>API Access</h1></div>
   <a class="btn-default" href="/">Dashboard</a>
 </header>
 <main class="access-layout">
-  <p>Verwalte den Zugang zu den API- und MCP-Routen aus dem Scan. Änderungen gelten erst nach dem nächsten vollständigen Scan.</p>
+  <p>Manage access to discovered API and MCP routes. Changes take effect after the next full scan.</p>
   <form id="access-login" class="access-login">
-    <label for="access-token">Citadel-WebUI-Token</label>
+    <label for="access-token">Citadel WebUI token</label>
     <input id="access-token" type="password" autocomplete="current-password" required>
-    <button class="btn-default" type="submit">Entsperren</button>
+    <button class="btn-default" type="submit">Unlock</button>
   </form>
   <p id="access-status" role="status" aria-live="polite"></p>
   <section id="access-editor" hidden>
     <div class="access-controls">
-      <button id="access-save" class="btn-default" type="button">Speichern für nächsten Scan</button>
-      <button id="access-reload" class="btn-default" type="button">Neu laden</button>
-      <button id="access-lock" class="btn-default" type="button">Sperren</button>
+      <button id="access-save" class="btn-default" type="button">Save for next scan</button>
+      <button id="access-reload" class="btn-default" type="button">Reload</button>
+      <button id="access-lock" class="btn-default" type="button">Lock</button>
     </div>
-    <p>Komma trennt Einträge, Semikolon verbindet ein Paar. Leer bedeutet: keine Freigabe.</p>
+    <p>Separate entries with commas and paired values with semicolons. Leave empty to deny access.</p>
     <dl class="access-help">
-      <dt>E-Mail;Bearer</dt><dd>OAuth-Benutzer → Backend-Bearer</dd>
-      <dt>Bearer außen;Bearer innen</dt><dd>Äußeren Bearer prüfen → inneren weiterreichen</dd>
-      <dt>Ein Bearer</dt><dd>Prüfen und unverändert weiterreichen</dd>
-      <dt>Eine E-Mail</dt><dd>OAuth-Zugang ohne Backend-Bearer</dd>
+      <dt>Email;Bearer</dt><dd>OAuth user → backend bearer</dd>
+      <dt>Client bearer;Backend bearer</dt><dd>Validate the client bearer → forward the backend bearer</dd>
+      <dt>Single bearer</dt><dd>Validate and forward unchanged</dd>
+      <dt>Single email</dt><dd>OAuth access without a backend bearer</dd>
     </dl>
-    <p id="access-empty" hidden>Noch keine Routen vorhanden. Führe zuerst einen Scan mit aktivierter CLOUDFLARE-API-Erweiterung aus.</p>
+    <p id="access-empty" hidden>No routes yet. Run a scan with the CLOUDFLARE-API extension enabled.</p>
     <div class="access-filters">
-      <label for="access-filter">Port oder Pfad suchen</label>
-      <input id="access-filter" type="search" placeholder="z. B. 3005 oder /mcp" autocomplete="off">
-      <label><input id="access-candidates" type="checkbox"> Auch unbestätigte Kandidaten anzeigen <span id="access-candidate-count"></span></label>
-      <p>Ein Kandidat mit Anmeldepflicht ist noch kein API-Nachweis. Mit einem zugeordneten Backend-Bearer prüft der nächste Scan erneut.</p>
+      <label for="access-filter">Search by port or path</label>
+      <input id="access-filter" type="search" placeholder="e.g. 3005 or /mcp" autocomplete="off">
+      <label><input id="access-candidates" type="checkbox"> Show unverified candidates <span id="access-candidate-count"></span></label>
+      <p>An authentication requirement alone does not confirm an API. The next scan can verify the protocol using a configured backend bearer.</p>
     </div>
     <div id="access-routes"></div>
   </section>

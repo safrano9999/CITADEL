@@ -208,6 +208,37 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(json_message(result)["id"], 1)
         response.close.assert_called_once()
 
+    def test_mcp_initialize_accepts_delayed_bridge_startup(self):
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        import threading
+
+        delay = threading.Event()
+
+        class Bridge(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/event-stream')
+                self.end_headers()
+                self.wfile.flush()
+                delay.wait(1.2)
+                self.wfile.write(b'data: {"jsonrpc":"2.0","id":1,"result":{}}\n\n')
+
+            def log_message(self, *args):
+                pass
+
+        with HTTPServer(('127.0.0.1', 0), Bridge) as server:
+            thread = threading.Thread(target=server.handle_request, daemon=True)
+            thread.start()
+            try:
+                probe = LocalProbes('http', server.server_port)
+                result = probe('/mcp', 'POST', {'method': 'initialize'})
+                self.assertEqual(result.status, 200)
+                self.assertEqual(json_message(result)['id'], 1)
+            finally:
+                delay.set()
+                thread.join(timeout=3)
+
     def test_empty_invocation_transport_reads_only_bounded_error_response(self):
         import io
         probe = LocalProbes("http", 3070)

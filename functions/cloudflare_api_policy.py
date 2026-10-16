@@ -18,6 +18,7 @@ from cloudflare_policy import normalize_hostname
 
 EXTENSION = "CLOUDFLARE-API"
 OAUTH = "CITADEL_CLOUDFLARE_API_OAUTH"
+AUTH_MODE = "CITADEL_CLOUDFLARE_API_MODE"
 OAUTH_WHITELIST = "CLOUDFLARE_OAUTH_Whitelist.json"
 MODE_LABELS = {"api-bearer": "API-Bearer", "api-oauth": "API-OAuth"}
 HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
@@ -142,12 +143,13 @@ class APISettings:
     allow_localhost: bool = False
     allow_loopback: bool = False
     errors: tuple[str, ...] = ()
+    bearer: bool = True
 
     @property
     def modes(self) -> tuple[str, ...]:
         if not self.enabled:
             return ()
-        return ("api-bearer",) + (("api-oauth",) if self.oauth else ())
+        return (("api-bearer",) if self.bearer else ()) + (("api-oauth",) if self.oauth else ())
 
 
 def settings(root: Path, get: Callable[[str, str], str]) -> APISettings:
@@ -156,7 +158,10 @@ def settings(root: Path, get: Callable[[str, str], str]) -> APISettings:
     raw_oauth = get(OAUTH, "0").strip()
     if raw_oauth not in {"", "blank", "0", "1"}:
         raise ValueError(f"{OAUTH} must be 0 or 1")
-    oauth = raw_oauth == "1"
+    mode = get(AUTH_MODE, "both").strip()
+    if mode not in {"both", "bearer", "oauth"}:
+        raise ValueError(f"{AUTH_MODE} must be both, bearer or oauth")
+    oauth = raw_oauth == "1" and mode != "bearer"
     excluded = excluded_ports(root)
     options = read_object(root / OAUTH_WHITELIST) if oauth else {}
     if not isinstance(options, dict) or set(options) - {
@@ -191,6 +196,6 @@ def settings(root: Path, get: Callable[[str, str], str]) -> APISettings:
     if oauth and not (uris or local or loopback):
         errors.append(f"OAuth requires client callbacks in {OAUTH_WHITELIST}")
         oauth = False
-    return APISettings(enabled=True, oauth=oauth, excluded=excluded,
+    return APISettings(enabled=True, oauth=oauth, bearer=mode != "oauth", excluded=excluded,
                        allowed_redirect_uris=tuple(dict.fromkeys(uris)),
                        allow_localhost=local, allow_loopback=loopback, errors=tuple(errors))

@@ -6,12 +6,32 @@ import argparse
 import json
 import re
 import ssl
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 
 from providers.atomic_io import atomic_write_json
+
+
+class _PageRoleParser(HTMLParser):
+    discovery_page = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "meta":
+            return
+        attrs = dict(attrs)
+        if (attrs.get("name", "").lower() == "citadel-page-role"
+                and attrs.get("content", "").lower() == "mcp-discovery"):
+            self.discovery_page = True
+
+
+def is_browser_page(html: str) -> bool:
+    """Hide explicitly marked discovery pages; preserve real web interfaces."""
+    parser = _PageRoleParser()
+    parser.feed(html)
+    return not parser.discovery_page
 
 
 def existing_icon(directory: str | Path, port: int) -> str:

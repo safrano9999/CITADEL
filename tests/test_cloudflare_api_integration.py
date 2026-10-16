@@ -30,7 +30,7 @@ class APIIntegrationTests(unittest.TestCase):
             self.write(f"extensions/enabled/{name}/extension.json", {"provider": provider, "enabled": True})
         self.write("CITADEL_DATA/services.json", {"http_services": [{"port": 3070, "scheme": "https", "name": "Blender"}]})
         self.write("CITADEL_DATA/ports.filter.json", {})
-        self.write("cache/3070.json", {"kind": "http-service"})
+        self.write("cache/3070.json", {"kind": "http-service", "scheme": "https"})
         self.write("CITADEL_DATA/providers_state.json", {"providers": {
             "cloudflare": {"status": "ok"}, "CLOUDFLARE-API": {"status": "ok"}}})
         (self.root / "CITADEL_DATA/last_scan.txt").write_text("2026-10-14T00:00:00Z")
@@ -97,6 +97,8 @@ class APIIntegrationTests(unittest.TestCase):
             self.assertEqual([tile["port"] for tile in tiles], [3070])
             self.assertEqual(set(tiles[0]["links"]), {f"https://{host}/mcp", f"https://{host}/api/v1"})
             self.assertFalse(tiles[0]["grey"])
+            self.assertEqual(len(tiles[0]["statusLines"]), 4)
+            self.assertEqual(tiles[0]["statusLines"][-1], "REST, MCP")
 
     def test_health_keeps_both_modes_and_does_not_claim_authenticated_protocol_success(self):
         result = snapshot(self.root, ["CLOUDFLARE-API"])
@@ -141,7 +143,7 @@ class APIIntegrationTests(unittest.TestCase):
                     for mode in ("api-bearer", "api-oauth"):
                         self.assertEqual(f'value="{mode}"' in page, mode in modes)
                     if modes:
-                        self.assertTrue(any("keine API-Routen" in alert for alert in dashboard["alerts"]))
+                        self.assertTrue(any("No API routes" in alert for alert in dashboard["alerts"]))
                     if errors:
                         self.assertTrue(any("HTTP 403" in alert for alert in dashboard["alerts"]))
 
@@ -170,8 +172,13 @@ class APIIntegrationTests(unittest.TestCase):
             self.assertEqual([tile["port"] for tile in modes[mode]["visible"]], [3070, 3072, 3074])
             self.assertTrue(modes[mode]["otherHidden"])
             self.assertFalse(modes[mode]["empty"])
-            self.assertTrue(all(not tile["grey"] and not tile["url"] and not tile["links"] for tile in modes[mode]["visible"]))
-            self.assertIn("Backend-Zugang erforderlich", modes[mode]["visible"][1]["details"][0])
+            self.assertTrue(all(not tile["grey"] for tile in modes[mode]["visible"]))
+            self.assertEqual(modes[mode]["visible"][0]["cardHref"], "https://3070.example.com/mcp")
+            self.assertEqual(modes[mode]["visible"][0]["statusLines"][:3],
+                             ["🔴 Access", "🟢 Reachable", "🔴 Authentication prompt"])
+            self.assertTrue(all(not tile["links"] for tile in modes[mode]["visible"][1:]))
+            self.assertEqual(modes[mode]["visible"][1]["statusLines"],
+                             ["🔴 Access", "🔴 Reachable", "🔴 Authentication prompt", "REST"])
         self.assertEqual(len(modes["cloudflare"]["visible"]), 5)
         self.assertFalse(modes["cloudflare"]["otherHidden"])
 
@@ -299,6 +306,88 @@ class APIIntegrationTests(unittest.TestCase):
             with patch("cloudflare_api_routes.http.client.HTTPSConnection", return_value=connection):
                 self.assertEqual(route_readiness("api-3070.example.com"), expected)
             connection.close.assert_called_once()
+
+    def test_readiness_distinguishes_dns_tls_and_connection_failures(self):
+        import socket
+        import ssl
+        from unittest.mock import Mock
+        for error, expected in ((socket.gaierror("lookup failed"), "pending-dns"),
+                                (ssl.SSLError("TLS failed"), "pending-tls"),
+                                (ConnectionRefusedError(), "unreachable")):
+            connection = Mock()
+            connection.request.side_effect = error
+            with patch("cloudflare_api_routes.http.client.HTTPSConnection", return_value=connection):
+                self.assertEqual(route_readiness("oauth.api-3070.example.com"), expected)
+
+    def test_pending_route_keeps_full_url_below_separate_statuses(self):
+        from jinja2 import Environment, FileSystemLoader
+        from dashboard_dom import simulate_dashboard
+        for state in ("pending-dns", "pending-tls", "pending-auth", "provisioned"):
+            for view in self.api_payload['views'].values():
+                for route in view['services'].values():
+                    for endpoint in route['endpoints']:
+                        endpoint['status'] = state
+            self.write('cache/CLOUDFLARE-API-routes.json', self.api_payload)
+            page = Environment(loader=FileSystemLoader(ROOT / 'templates'), autoescape=True).get_template('index.html').render(data=self.dashboard())
+            tile = simulate_dashboard(page)['api-oauth']['visible'][0]
+            self.assertEqual(tile['links'], tile['linkLabels'])
+            detail = tile['details'][0]
+            self.assertEqual(tile['statusLines'], [
+                '🟢 Access',
+                '🟢 Reachable',
+                ('🟢' if state == 'provisioned' else '🔴') + ' Authentication prompt',
+                'REST, MCP',
+            ])
+            self.assertLess(detail.index('Authentication prompt'), detail.index('https://'))
+            self.assertNotIn('Copy URL', detail)
+            self.assertEqual(tile['cardHref'], tile['url'])
+            self.assertNotIn('Login successful', detail)
+
+    def test_mixed_interfaces_keep_full_links_and_prefer_mcp(self):
+        from jinja2 import Environment, FileSystemLoader
+        from dashboard_dom import simulate_dashboard
+        self.write("cache/3070.json", {"kind": "html", "scheme": "https"})
+        self.api_payload["discovered"] = [{"id": "rest", "port": 3070,
+            "protocol": "rest", "path": "/api/v1", "status": "authentication-required"}]
+        for view in self.api_payload["views"].values():
+            view["services"]["3070"]["endpoints"] = [
+                endpoint for endpoint in view["services"]["3070"]["endpoints"] if endpoint["protocol"] == "mcp"]
+        self.write("cache/CLOUDFLARE-API-routes.json", self.api_payload)
+        page = Environment(loader=FileSystemLoader(ROOT / "templates"), autoescape=True).get_template("index.html").render(data=self.dashboard())
+        tile = simulate_dashboard(page)["api-oauth"]["visible"][0]
+        self.assertEqual(tile["statusLines"], ["🟢 Access", "🟢 Reachable", "🟢 Authentication prompt", "HTTP, REST, MCP"])
+        self.assertEqual(tile["links"], ["https://oauth.api-3070.example.com/mcp",
+            "https://3070.example.com/api/v1", "https://3070.example.com"])
+        self.assertEqual(tile["cardHref"], tile["links"][0])
+        self.assertEqual(tile["links"], tile["linkLabels"])
+
+    def test_discovery_landing_page_has_no_http_type_or_browser_link(self):
+        from jinja2 import Environment, FileSystemLoader
+        from dashboard_dom import simulate_dashboard
+        self.write("cache/3070.json", {"kind": "html", "scheme": "https", "browser_page": False})
+        page = Environment(loader=FileSystemLoader(ROOT / "templates"), autoescape=True).get_template("index.html").render(data=self.dashboard())
+        tile = simulate_dashboard(page)["api-oauth"]["visible"][0]
+        self.assertEqual(tile["statusLines"][-1], "REST, MCP")
+        self.assertEqual(tile["statusLines"][1], "🟢 Reachable")
+        self.assertNotIn("https://3070.example.com", tile["links"])
+        self.assertEqual(tile["cardHref"], "https://oauth.api-3070.example.com/mcp")
+
+    def test_filtered_scan_replaces_stale_errors_and_preserves_other_providers(self):
+        self.write('CITADEL_DATA/providers_state.json', {
+            'providers': {'cloudflare': {'status': 'error'}, 'CLOUDFLARE-API': {'status': 'error'},
+                          'tailscale': {'status': 'error'}},
+            'enabled_providers': ['cloudflare', 'CLOUDFLARE-API', 'tailscale'],
+            'errors': ['Provider cloudflare failed', 'Provider CLOUDFLARE-API: old error', 'Provider tailscale failed']})
+        args = ['dispatch.py', '--enabled-dir', str(self.root / 'extensions/enabled'),
+                '--services-file', str(self.root / 'CITADEL_DATA/services.json'), '--cache-dir', str(self.root / 'cache'),
+                '--config-ini', str(self.root / 'config.ini'), '--state-file', str(self.root / 'CITADEL_DATA/providers_state.json'),
+                '--tailscale-file', str(self.root / 'tailscale.json'), '--provider', 'CLOUDFLARE-API']
+        with patch.object(sys, 'argv', args), patch.object(dispatch.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '', '')):
+            self.assertEqual(dispatch.main(), 0)
+        state = json.loads((self.root / 'CITADEL_DATA/providers_state.json').read_text())
+        self.assertEqual(state['errors'], ['Provider tailscale failed'])
+        self.assertEqual(state['providers']['cloudflare']['status'], 'ok')
+        self.assertEqual(state['providers']['tailscale']['status'], 'error')
 
 
 if __name__ == "__main__":

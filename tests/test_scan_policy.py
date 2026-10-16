@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "functions"))
 sys.path.insert(0, str(ROOT / "functions/providers"))
 import scan_policy
-from scan_policy import existing_icon, hide_webui_http
+from scan_policy import existing_icon, hide_webui_http, is_browser_page
 from providers.common import routable_services
 import core
 
@@ -23,6 +23,12 @@ class ScanPolicyTests(unittest.TestCase):
             for port in (2000, 4096, 11000)
         ]
         self.instance = "a" * 32
+
+    def test_explicit_discovery_page_marker_keeps_real_web_interfaces(self):
+        self.assertFalse(is_browser_page("<html><head><meta content='mcp-discovery' name='citadel-page-role'></head></html>"))
+        self.assertTrue(is_browser_page("<html><title>Vikunja</title><body>Web app and MCP endpoint</body></html>"))
+        self.assertTrue(is_browser_page("<html><title>MCP dashboard</title><body>Real browser UI</body></html>"))
+        self.assertTrue(is_browser_page("<!-- <meta name='citadel-page-role' content='mcp-discovery'> --><html>App</html>"))
 
     def test_same_instance_https_hides_tile_not_backend(self):
         with patch.object(scan_policy, "probe_webui_instance", return_value=self.instance):

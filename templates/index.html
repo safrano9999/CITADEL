@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CITADEL</title>
 <link rel="icon" type="image/svg+xml" href="/citadel.svg">
-<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/style.css?v=20261016-2">
 </head>
 <body
     data-default-mode="{{ data.default_mode|e }}"
@@ -38,7 +38,7 @@
         </label>
 
         <button id="page-refresh-btn" class="btn-default" type="button">Refresh</button>
-        <a class="btn-default" href="/cloudflare-api">API-Freigaben</a>
+        <a class="btn-default" href="/cloudflare-api">API Access</a>
         {% if data.cloudflare_available and data.edit_token_required %}
         <label id="cloudflare-token-control" class="control cloudflare-token-control" hidden>
             <span>Token:</span>
@@ -68,17 +68,23 @@
         {% for svc in data.http_tiles %}
         {% set port = svc.port|string %}
         {% set scheme = svc.scheme|default('http') %}
-        <article class="tile" tabindex="0"
+        <article class="tile"
             {% if data.default_mode in ['api-bearer', 'api-oauth'] and not (svc.provider_endpoints|default({})).get(data.default_mode) %}hidden{% endif %}
             data-port="{{ port|e }}"
             data-cloudflare-subdomains="{{ svc.cloudflare_rule.subdomains|join(',')|e }}"
             data-cloudflare-whitelist="{{ '1' if svc.cloudflare_rule.whitelist else '0' }}"
             data-cloudflare-emails="{{ svc.cloudflare_rule.emails|tojson|forceescape }}"
+            data-access-configured="{{ '1' if svc.access_configured|default(false) else '0' }}"
+            data-service-reachable="{{ '1' if svc.service_reachable|default(false) else '0' }}"
+            data-browser-http="{{ '1' if svc.browser_http|default(false) else '0' }}"
+            data-interface-links="{{ svc.interface_links|default({})|tojson|forceescape }}"
             data-api-endpoints="{{ svc.provider_endpoints|default({})|tojson|forceescape }}"
             {% for pid in data.provider_order %}
             data-url-{{ pid|e }}="{{ svc.provider_urls.get(pid, '')|e }}"
             {% endfor %}
         >
+            <a class="tile-link" target="_blank" rel="noopener noreferrer" hidden
+                aria-label="Open {{ svc.display_name|default(svc.name|default('Port ' ~ port))|e }}"></a>
             {% if svc.icon %}
                 <img class="tile-icon" src="/{{ svc.icon|e }}" alt="{{ svc.display_name|default(svc.name|default('Service'))|e }}">
             {% else %}
@@ -107,7 +113,7 @@
         {% endfor %}
     </section>
     {% endif %}
-    <p id="api-empty" hidden>Keine API- oder MCP-Endpunkte erkannt.</p>
+    <p id="api-empty" hidden>No API or MCP endpoints detected.</p>
 
     {% if data.other_ports %}
     <div id="other-ports" {% if data.default_mode in ['api-bearer', 'api-oauth'] %}hidden{% endif %}>
@@ -232,8 +238,13 @@ function getTileUrl(tile, mode) {
   return tile.getAttribute(`data-url-${mode}`) || '';
 }
 
+function interfaceLinks(tile, mode) {
+  try { return JSON.parse(tile.dataset.interfaceLinks || '{}')[mode] || []; } catch { return []; }
+}
+
 function chooseTileUrl(tile, preferredMode) {
-  return getTileUrl(tile, preferredMode);
+  const links = interfaceLinks(tile, preferredMode);
+  return links.length ? links[0].url : getTileUrl(tile, preferredMode);
 }
 
 function compactUrl(url) {
@@ -269,6 +280,9 @@ function applyMode(mode) {
     if (!tile.hidden) visibleServices++;
 
     tile.dataset.activeUrl = choice;
+    const tileLink = tile.querySelector('.tile-link');
+    tileLink.href = choice || '';
+    tileLink.hidden = !choice || (cloudflareMode && cloudflareEditing);
     tile.classList.toggle('no-link', !choice && !apiMode);
     tile.classList.toggle('api-pending', apiMode && !choice);
     tile.classList.toggle('cloudflare-editing', cloudflareMode && cloudflareEditing);
@@ -289,32 +303,49 @@ function applyMode(mode) {
       list.replaceChildren();
       list.hidden = !endpoints.length;
       label.hidden = Boolean(endpoints.length);
-      for (const endpoint of endpoints) {
+      if (endpoints.length) {
+        // Access is per port; reachability comes from the service scan.
+        // The auth challenge belongs to the primary managed API URL.
+        const primary = endpoints.find(endpoint => endpoint.url && endpoint.url === choice) || {};
         const row = document.createElement('div');
-        if (!endpoint.url) {
-          const status = endpoint.status === 'authentication-required' ? 'Backend-Zugang erforderlich'
-            : endpoint.status === 'unsupported' ? 'Automatische Freigabe nicht unterstützt'
-            : 'Erkannt · noch nicht veröffentlicht';
-          row.textContent = `${String(endpoint.protocol).toUpperCase()} ${endpoint.path} · ${status}`;
-          list.append(row);
-          continue;
+        const statuses = document.createElement('div');
+        statuses.className = 'api-statuses';
+        const status = (label, ok, title) => {
+          const line = document.createElement('span');
+          line.textContent = `${ok ? '🟢' : '🔴'} ${label}`;
+          line.title = title;
+          statuses.append(line);
+        };
+        status('Access', tile.dataset.accessConfigured === '1' || endpoints.some(endpoint => endpoint.access_configured),
+          'Green when at least one interface on this port has access configured.');
+        status('Reachable', tile.dataset.serviceReachable === '1',
+          'The service responded over HTTP/HTTPS during the last scan, independently of API access or OAuth.');
+        status('Authentication prompt', Boolean(primary.url && primary.status === 'provisioned'),
+          'Anonymous authentication challenge at the tile link; no login or authenticated API call is tested.');
+        const names = {http: 'HTTP', rest: 'REST', graphql: 'GraphQL', mcp: 'MCP', rpc: 'RPC'};
+        const protocols = new Set(endpoints.map(endpoint => endpoint.protocol));
+        if (tile.dataset.browserHttp === '1') protocols.add('http');
+        const types = Object.keys(names).filter(protocol => protocols.has(protocol)).map(protocol => names[protocol]);
+        const protocolLine = document.createElement('span');
+        protocolLine.textContent = types.join(', ');
+        statuses.append(protocolLine);
+        row.append(statuses);
+        const seen = new Set();
+        for (const endpoint of interfaceLinks(tile, mode)) {
+          const url = endpoint.url;
+          if (seen.has(url)) continue;
+          seen.add(url);
+          const link = document.createElement('a');
+          link.href = url;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.textContent = url;
+          link.title = `${names[endpoint.protocol] || endpoint.protocol} · ${endpoint.managed ? 'API access URL' : 'Direct service URL'}`;
+          const address = document.createElement('div');
+          address.className = 'api-endpoint-url';
+          address.append(link);
+          row.append(address);
         }
-        const link = document.createElement('a');
-        link.href = endpoint.url;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        link.textContent = `${String(endpoint.protocol).toUpperCase()} ${endpoint.path}`;
-        link.addEventListener('click', event => event.stopPropagation());
-        const copy = document.createElement('button');
-        copy.type = 'button';
-        copy.textContent = 'Copy URL';
-        copy.addEventListener('click', async event => {
-          event.stopPropagation();
-          try { await navigator.clipboard.writeText(endpoint.url); copy.textContent = 'Copied'; }
-          catch { copy.textContent = 'Copy from link'; }
-        });
-        row.append(link, document.createTextNode(' '), copy);
-        if (endpoint.status !== 'provisioned') row.append(document.createTextNode(endpoint.status === 'pending-auth' ? ' · Auth pending' : ' · TLS pending'));
         list.append(row);
       }
     }
@@ -338,17 +369,6 @@ function renderModeDefaultHint(mode) {
     return;
   }
   modeDefaultHint.textContent = `Saved default: ${option.textContent}`;
-}
-
-function openTile(tile) {
-  if (cloudflareEditing) {
-    return;
-  }
-  const url = tile.dataset.activeUrl || '';
-  if (!url) {
-    return;
-  }
-  window.open(url, '_blank', 'noopener');
 }
 
 function currentCloudflareState() {
@@ -429,16 +449,6 @@ async function saveCloudflareRules() {
   cloudflareInitialState = currentCloudflareState();
   cloudflareDirty = false;
 }
-
-tiles.forEach(tile => {
-  tile.addEventListener('click', () => openTile(tile));
-  tile.addEventListener('keydown', event => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      openTile(tile);
-    }
-  });
-});
 
 if (pageRefreshBtn) {
   pageRefreshBtn.addEventListener('click', () => location.reload());

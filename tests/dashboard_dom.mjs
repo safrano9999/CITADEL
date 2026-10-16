@@ -12,13 +12,14 @@ function element() {
 const tiles = input.tiles.map(attrs => {
   const tile = element();
   const classes = new Set();
-  const label = element(), endpoints = element();
-  tile.dataset = {port: attrs['data-port'], apiEndpoints: attrs['data-api-endpoints']};
+  const label = element(), endpoints = element(), cardLink = element();
+  tile.dataset = {port: attrs['data-port'], apiEndpoints: attrs['data-api-endpoints'], interfaceLinks: attrs['data-interface-links'], browserHttp: attrs['data-browser-http'], serviceReachable: attrs['data-service-reachable'], accessConfigured: attrs['data-access-configured']};
   tile.getAttribute = name => attrs[name];
-  tile.querySelector = selector => ({'.tile-url': label, '.api-endpoints': endpoints})[selector] ?? null;
+  tile.querySelector = selector => ({'.tile-url': label, '.api-endpoints': endpoints, '.tile-link': cardLink})[selector] ?? null;
   tile.classList = {toggle(name, active) { active ? classes.add(name) : classes.delete(name); }};
   tile.classes = classes;
   tile.endpoints = endpoints;
+  tile.cardLink = cardLink;
   return tile;
 });
 const selection = {...element(), options: input.modes.map(value => ({value}))};
@@ -31,6 +32,8 @@ const document = {body: {dataset: {defaultMode: input.defaultMode}},
 const context = vm.createContext({document,
   localStorage: {getItem: () => null}, window: {open() {}}, console});
 vm.runInContext(input.script, context, {timeout: 1000});
+function descendants(node) { return [node, ...(node.children ?? []).flatMap(descendants)]; }
+function text(node) { return descendants(node).map(child => child.textContent || '').join(' '); }
 const results = {};
 for (const mode of [...input.modes, input.defaultMode]) {
   vm.runInContext(`applyMode(${JSON.stringify(mode)})`, context, {timeout: 1000});
@@ -39,8 +42,11 @@ for (const mode of [...input.modes, input.defaultMode]) {
     visible: tiles.filter(tile => !tile.hidden).map(tile => ({
       port: Number(tile.dataset.port), grey: tile.classes.has('no-link'),
       url: tile.dataset.activeUrl,
-      details: tile.endpoints.children.map(row => row.textContent),
-      links: tile.endpoints.children.flatMap(row => row.children ?? []).filter(node => node?.href).map(node => node.href),
+      cardHref: tile.cardLink.hidden ? null : tile.cardLink.href,
+      details: tile.endpoints.children.map(text),
+      statusLines: tile.endpoints.children.flatMap(descendants).filter(node => node.className === 'api-statuses').flatMap(node => node.children.map(child => child.textContent)),
+      links: tile.endpoints.children.flatMap(descendants).filter(node => node?.href).map(node => node.href),
+      linkLabels: tile.endpoints.children.flatMap(descendants).filter(node => node?.href).map(node => node.textContent),
     }))};
 }
 process.stdout.write(JSON.stringify(results));

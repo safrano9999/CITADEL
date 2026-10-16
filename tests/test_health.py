@@ -73,7 +73,7 @@ class HealthTests(unittest.TestCase):
         with patch.object(webui.core, "BASE_DIR", self.base):
             self.assertEqual(webui.health_json("tailscale")["status"], "PASS")
             page = webui.health_page("tailscale")
-            self.assertIn("Index-Zustand", page)
+            self.assertIn("Saved index state", page)
             self.assertIn("✅", page)
             with self.assertRaises(webui.HTTPException) as error:
                 webui.health_json("../bad")

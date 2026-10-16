@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import concurrent.futures
 import http.client
+import socket
+import ssl
 from pathlib import Path
 import sys
 
@@ -40,8 +42,12 @@ def route_readiness(hostname):
             if challenge.startswith("Bearer ") and ("resource_metadata=" in challenge if hostname.startswith("oauth.") else content_type.startswith("application/json")):
                 return "provisioned"
         return "pending-auth"
-    except (OSError, ValueError, http.client.HTTPException):
+    except socket.gaierror:
+        return "pending-dns"
+    except ssl.SSLError:
         return "pending-tls"
+    except (OSError, ValueError, http.client.HTTPException):
+        return "unreachable"
     finally:
         connection.close()
 
@@ -62,6 +68,7 @@ def output(table, *, considered, authenticated, modes=(), inventory=(), errors=(
         port = str(host["port"])
         endpoints = [{"id": route["id"], "protocol": route["protocol"], "path": route["path"],
                       "url": f"https://{hostname}{route['path']}",
+                      "access_configured": bool(authenticated),
                       "status": ("provisioned" if readiness[hostname] is True else "pending-tls" if readiness[hostname] is False
                                  else readiness[hostname])}
                      for route in host["routes"]]

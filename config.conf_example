@@ -84,6 +84,11 @@ CITADEL_CLOUDFLARE_SERVERSIDE_PERSISTENCE=1
 #choices: 0 1
 #default-preset: 0
 CITADEL_CLOUDFLARE_API_OAUTH=0
+# Published authentication modes: both (default), bearer, or oauth.
+# OAuth also requires CITADEL_CLOUDFLARE_API_OAUTH=1 and client callbacks.
+#choices: both bearer oauth
+#default-preset: both
+CITADEL_CLOUDFLARE_API_MODE=both
 
 #default-preset: insert later
 CITADEL_CLOUDFLARE_DOMAIN=

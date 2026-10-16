@@ -26,25 +26,34 @@
 }
 
 .api-endpoints > div {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  display: grid;
+  min-width: 0;
   gap: 6px;
   color: var(--muted);
 }
 
+.api-statuses { display: grid; gap: 4px; }
+.api-endpoint-url { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.api-endpoint-url a { flex: 1 1 200px; min-width: 0; font-weight: 600; }
 .api-endpoints a {
   color: var(--accent);
   overflow-wrap: anywhere;
 }
 
-.api-endpoints button {
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: var(--card);
-  color: var(--ink);
-  padding: 3px 6px;
-  cursor: pointer;
+/* A native link covers the card; individual endpoint links stay selectable. */
+.tile-link {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+}
+.tile-link:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+.api-endpoint-url a {
+  position: relative;
+  z-index: 2;
 }
 
 * {

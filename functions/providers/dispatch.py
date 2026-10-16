@@ -89,7 +89,7 @@ def main() -> int:
         provider_dirs.append(synthetic_cleanup)
     cloudflare_run = None
 
-    previous_state = read_json(args.state_file, {}) if adding() else {}
+    previous_state = read_json(args.state_file, {}) if adding() or requested else {}
     state = {
         "generated_at": now_iso(),
         "enabled_providers": [],
@@ -300,11 +300,18 @@ def main() -> int:
                     state["errors"].append(message)
                 print(f"    stderr: {line}")
 
-    if adding():
+    if adding() or requested:
+        refreshed = set(state["providers"]) | set(requested)
         state["providers"] = {**previous_state.get("providers", {}), **state["providers"]}
         for key in ("enabled_providers", "considered_providers", "available_providers",
                     "enabled_exports", "considered_exports", "available_exports"):
-            state[key] = list(dict.fromkeys(previous_state.get(key, []) + state[key]))
+            state[key] = list(dict.fromkeys([pid for pid in previous_state.get(key, []) if pid not in refreshed] + state[key]))
+        # Keep failures for untouched providers, but discard stale failures for
+        # providers that this run has reconciled successfully.
+        for error in previous_state.get("errors", []):
+            match = re.match(r"Provider ([A-Za-z0-9._-]+)(?: |:)", error)
+            if match and match[1] not in refreshed and error not in state["errors"]:
+                state["errors"].append(error)
     write_json(args.state_file, state)
     considered_count = len(state["considered_providers"])
     available_count = len(state["available_providers"])

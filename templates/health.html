@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CITADEL · Health</title><link rel="icon" href="/citadel.svg">
@@ -15,12 +15,12 @@
 <body>
 {% set icons = {'PASS': '✅', 'FAIL': '❌', 'SKIP': '⏭️', 'NOT_TESTED': '➖'} %}
 <header><img src="/citadel.svg" alt=""><h1>CITADEL Health</h1></header>
-<p><a href="/">Zur Übersicht</a> · <a href="/api/health{% if selection %}?extensions={{ selection|urlencode }}{% endif %}">JSON</a></p>
+<p><a href="/">Dashboard</a> · <a href="/api/health{% if selection %}?extensions={{ selection|urlencode }}{% endif %}">JSON</a></p>
 <h2>{{ icons[data.status] }} {{ data.status }}</h2>
-<p>Index-Zeitpunkt: <strong>{{ data.last_index_at or 'Keine Daten' }}</strong></p>
-<p class="muted">Gespeicherter Index-Zustand. Diese Seite startet keinen Scan und prüft keine URLs live.
-  Die externe CLI prüft die Erreichbarkeit aus Sicht ihres ausführenden Rechners.</p>
-<form method="get"><label>Extensions (kommagetrennt): <input name="extensions" value="{{ selection }}" placeholder="tailscale,cloudflare"></label> <button>Anzeigen</button></form>
+<p>Last indexed: <strong>{{ data.last_index_at or 'No data' }}</strong></p>
+<p class="muted">Saved index state. This page does not start a scan or check URLs live.
+  The external CLI checks reachability from the machine running it.</p>
+<form method="get"><label>Extensions (comma-separated): <input name="extensions" value="{{ selection }}" placeholder="tailscale,cloudflare"></label> <button>Show</button></form>
 {% for error in data.errors %}<p>❌ {{ error }}</p>{% endfor %}
 {% for extension in data.extensions %}
 <section><h2>{{ icons[extension.status] }} {{ extension.id }} · {{ extension.status }}</h2><p>{{ extension.detail }}</p>

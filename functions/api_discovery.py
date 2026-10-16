@@ -109,9 +109,11 @@ class LocalProbes:
         response = None
         try:
             try:
-                # Some frameworks generate their schema on demand. Keep the
-                # overall listener deadline while allowing that bounded read.
-                response = self.opener.open(request, timeout=min(3.0 if path in DOC_PATHS else 1.0, remaining))
+                # Streamable HTTP bridges may start their stdio child during
+                # initialize. Allow that startup while retaining the overall
+                # listener deadline and the short timeout for other probes.
+                timeout = 8.0 if mcp_initialize else 3.0 if path in DOC_PATHS else 1.0
+                response = self.opener.open(request, timeout=min(timeout, remaining))
             except urllib.error.HTTPError as exc:
                 response = exc
             result = Probe(response.code, {k.lower(): v for k, v in response.headers.items()}, b"")

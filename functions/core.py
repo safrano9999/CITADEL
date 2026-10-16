@@ -9,6 +9,8 @@ from pathlib import Path
 from webui_transport import tcp_address
 from runtime_state import data_directory, provider_output
 
+from cloudflare_api_access import load_access
+
 from cloudflare_policy import (
     cloudflare_rules,
     default_subdomains,
@@ -155,8 +157,8 @@ def _load_providers() -> dict:
 
     if not enabled_dirs:
         alerts.append(
-            "Keine Extension in extensions/enabled gefunden. "
-            "Bitte mindestens localhost/subnet/tailscale aktivieren."
+            "No extensions found in extensions/enabled. "
+            "Enable at least localhost, subnet or tailscale."
         )
 
     considered = [str(x) for x in providers_state.get("considered_providers") or []]
@@ -200,20 +202,22 @@ def _load_providers() -> dict:
                 for port, route in (view.get("services") or {}).items():
                     if not isinstance(route, dict):
                         continue
-                    endpoints = [{key: endpoint.get(key) for key in ("id", "protocol", "path", "url", "status")}
+                    endpoints = [{**{key: endpoint.get(key) for key in ("id", "protocol", "path", "url", "status")},
+                                  "access_configured": endpoint.get("access_configured", bool(routes.get("remote_verified")))}
                                  for endpoint in route.get("endpoints", []) if isinstance(endpoint, dict)]
                     detected.setdefault(str(port), {}).update({endpoint["id"]: endpoint for endpoint in endpoints})
                 for port, endpoints in detected.items():
                     values = sorted(endpoints.values(), key=lambda endpoint: (endpoint["protocol"], endpoint["path"]))
                     provider_endpoints_by_port.setdefault(mode, {})[port] = values
                     provider_urls_by_port.setdefault(mode, {})[port] = next((endpoint["url"] for endpoint in values if endpoint.get("url")), "")
-            for message in [*(routes.get("errors") or []), *(routes.get("warnings") or [])]:
+            for message in [*(routes.get("errors") or []), *(message for message in (routes.get("warnings") or [])
+                           if message != "Add preserves deployed credentials; changes require a full scan")]:
                 if message:
                     alerts.append(f"[{pid}] {message}")
             # Unverified probes stay in the discovery inventory. A guessed path
             # returning a login page/401 does not belong in the API service list.
             if routes.get("considered") and not routes.get("services"):
-                alerts.append(f"[{pid}] Beim letzten Scan keine API-Routen veroeffentlicht.")
+                alerts.append(f"[{pid}] No API routes published during the last scan.")
             continue
 
         label = str(routes.get("label") or ext.get("label") or pid.capitalize())
@@ -253,13 +257,13 @@ def _load_providers() -> dict:
 
         if is_considered and not is_available:
             alerts.append(
-                f"[{pid}] beim letzten Scan beruecksichtigt, "
-                "aber ohne aktive Routen."
+                f"[{pid}] included in the last scan, "
+                "but no active routes."
             )
 
     if not provider_options:
         alerts.append(
-            "Keine Provider aus extensions/enabled wurden im letzten Scan beruecksichtigt."
+            "No providers from extensions/enabled were included in the last scan."
         )
 
     api_state = _read_json(provider_output(BASE_DIR, "CLOUDFLARE-API"), {})
@@ -320,6 +324,13 @@ def build_dashboard() -> dict:
     if LAST_SCAN_FILE.is_file():
         last_scan = LAST_SCAN_FILE.read_text().strip() or None
 
+    # Only expose a per-port boolean, never the access entries or credentials.
+    try:
+        access_ports = {identity.split('_', 1)[0][1:]
+                        for identity, entries in load_access(BASE_DIR).items() if entries.strip()}
+    except (ValueError, OSError):
+        access_ports = set()
+
     # Build tile URL maps for template
     for tile in http_tiles:
         port = str(int(tile.get("port", 0)))
@@ -341,9 +352,34 @@ def build_dashboard() -> dict:
                 url = (tile.get("urls") or {}).get(pid, "")
             tile_urls[pid] = url
         tile["provider_urls"] = tile_urls
+        tile["access_configured"] = port in access_ports
+        probe = _read_json(BASE_DIR / "cache" / f"{port}.json", {})
+        probe = probe if isinstance(probe, dict) else {}
+        tile["browser_http"] = probe.get("kind") == "html" and probe.get("browser_page") is not False
+        tile["service_reachable"] = (probe.get("scheme") in {"http", "https"}
+                                     and probe.get("kind") in {"html", "openai-v1", "http-service"})
         tile["provider_endpoints"] = {
                     mode: ports.get(port, []) for mode, ports in providers.get("provider_endpoints_by_port", {}).items()
         }
+        # Display known direct interfaces too, without pretending that an
+        # unpublished API has a managed OAuth route.
+        browser_url = next((tile_urls.get(mode) or (tile.get("urls") or {}).get(mode)
+                            for mode in ("cloudflare", "tailscale", "subnet", "localhost")
+                            if tile_urls.get(mode) or (tile.get("urls") or {}).get(mode)), "")
+        priority = {"mcp": 0, "rest": 1, "graphql": 1, "rpc": 1}
+        tile["interface_links"] = {}
+        for mode, endpoints in tile["provider_endpoints"].items():
+            links = []
+            for endpoint in sorted(endpoints, key=lambda item: (priority.get(item.get("protocol"), 2), item.get("path", ""))):
+                url = endpoint.get("url")
+                if not url and browser_url and str(endpoint.get("path", "")).startswith("/"):
+                    url = browser_url.rstrip("/") + endpoint["path"]
+                if url:
+                    links.append({"protocol": endpoint["protocol"], "url": url,
+                                  "managed": bool(endpoint.get("url"))})
+            if tile["browser_http"] and browser_url:
+                links.append({"protocol": "http", "url": browser_url, "managed": False})
+            tile["interface_links"][mode] = links
 
     http_tiles.sort(key=lambda tile: (not tile["featured"], _service_port(tile)))
 

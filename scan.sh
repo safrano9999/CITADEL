@@ -487,6 +487,8 @@ atomic_write_json(sys.argv[5], {
     fi
     HTML="$(cat "$TMP_HTML")"
     rm -f "$TMP_HTML"
+    BROWSER_PAGE="$(printf '%s' "$HTML" | PYTHONPATH="$FUNCTIONS_DIR" python3 -c \
+        'import sys; from scan_policy import is_browser_page; print(int(is_browser_page(sys.stdin.read())))')"
     TITLE="$(echo "$HTML" | python3 -c "
 import re
 import sys
@@ -551,8 +553,9 @@ atomic_write_json(sys.argv[5], {
         'scheme': sys.argv[3],
         'network_ip': sys.argv[4] or None,
         'kind': 'html',
+        'browser_page': sys.argv[7] == '1',
     })
-" "$TITLE" "$ICON_NAME" "$SCHEME" "$NETWORK_IP" "$CACHE_FILE" "$PROVIDERS_DIR"
+" "$TITLE" "$ICON_NAME" "$SCHEME" "$NETWORK_IP" "$CACHE_FILE" "$PROVIDERS_DIR" "$BROWSER_PAGE"
 
     printf " %-20s" "${ICON_NAME:-(no icon)}"
     [[ -n "$TITLE" ]] && echo "\"$TITLE\"${NET_LABEL}" || echo "(no title)${NET_LABEL}"
@@ -697,13 +700,12 @@ fi
 echo "=== Applying Enabled Extensions ==="
 if [[ -f "$PROVIDERS_DIR/dispatch.py" ]]; then
     if [[ -n "$PROVIDER_FILTER" ]]; then
-        FILTERED_STATE_FILE="$RUNTIME_DIR/citadel-${PROVIDER_FILTER}-provider-state.json"
         python3 "$PROVIDERS_DIR/dispatch.py" \
             --enabled-dir "$ENABLED_EXT_DIR" \
             --services-file "$SERVICES_FILE" \
             --cache-dir "$CACHE_DIR" \
             --config-ini "$CONFIG" \
-            --state-file "$FILTERED_STATE_FILE" \
+            --state-file "$PROVIDERS_STATE_FILE" \
             --tailscale-file "$TAILSCALE_FILE" \
             --provider "$PROVIDER_FILTER" \
             --strict

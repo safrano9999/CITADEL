@@ -54,6 +54,18 @@ class APIPolicyTests(unittest.TestCase):
                 self.assertEqual(settings(self.root, self.config.get).modes, ())
                 self.write(f"extensions/enabled/{name}/extension.json", {"enabled": True})
 
+    def test_oauth_only_mode_requires_oauth_and_preserves_backend_mapping(self):
+        from cloudflare_api_access import parse_entries, probe_credentials
+        self.config.update(CITADEL_CLOUDFLARE_API_MODE="oauth", CITADEL_CLOUDFLARE_API_OAUTH="1")
+        self.assertEqual(settings(self.root, self.config.get).modes, ("api-oauth",))
+        access = parse_entries("user@example.com;backend-token")
+        self.assertEqual(probe_credentials({"route": access})["route"]["authorization"], "Bearer backend-token")
+        self.config[OAUTH] = "0"
+        self.assertEqual(settings(self.root, self.config.get).modes, ())
+        self.config["CITADEL_CLOUDFLARE_API_MODE"] = "invalid"
+        with self.assertRaises(ValueError):
+            settings(self.root, self.config.get)
+
     def test_invalid_boolean_fails(self):
         with self.assertRaises(ValueError):
             settings(self.root, {OAUTH: "yes"}.get)
