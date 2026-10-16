@@ -8,6 +8,7 @@ last_scan.txt
 ports.filter.json
 /CLOUDFLARE-API_access.json
 /CLOUDFLARE-API_discovery.json
+/CLOUDFLARE_OAUTH_Whitelist.json
 config.ini
 config.conf
 .env

@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "functions"))
 
 from cloudflare_api_policy import (
-    OAUTH, credential_headers, endpoint_path,
+    OAUTH, OAUTH_WHITELIST, credential_headers, endpoint_path,
     excluded_ports, hostnames, route_id, settings,
 )
 from cloudflare_api_access import parse_entries
@@ -26,8 +26,8 @@ class APIPolicyTests(unittest.TestCase):
         for name in ("cloudflare", "CLOUDFLARE-API"):
             self.write(f"extensions/enabled/{name}/extension.json", {"enabled": True})
         self.write("CLOUDFLARE-API_ignore.json", {"ports": []})
-        self.write("CITADEL_DATA/cloudflare-api/policy.json", {"oauth": {
-            "allowed_redirect_uris": ["https://client.example/callback"]}})
+        self.write(OAUTH_WHITELIST, {
+            "allowed_redirect_uris": ["https://client.example/callback"]})
         self.config = {"CLOUDFLARE_EMAIL": "owner@example.com"}
 
     def write(self, name, payload):
@@ -60,12 +60,65 @@ class APIPolicyTests(unittest.TestCase):
 
     def test_missing_oauth_policy_never_falls_back_to_public(self):
         self.config[OAUTH] = "1"
-        (self.root / "CITADEL_DATA/cloudflare-api/policy.json").unlink()
+        (self.root / OAUTH_WHITELIST).unlink()
         policy = settings(self.root, self.config.get)
         self.assertEqual(policy.modes, ("api-bearer",))
         self.assertTrue(policy.errors)
-        self.write("CITADEL_DATA/cloudflare-api/policy.json", {"oauth": {"allow_loopback": True}})
+        self.write(OAUTH_WHITELIST, {"allow_loopback": True})
         self.assertEqual(settings(self.root, self.config.get).modes, ("api-bearer", "api-oauth"))
+
+    def test_whitelist_is_authoritative_and_applies_to_every_oauth_app(self):
+        from cloudflare_api_state import access_spec
+        self.config[OAUTH] = "1"
+        self.write("CITADEL_DATA/cloudflare-api/policy.json", {"oauth": {
+            "allowed_redirect_uris": ["https://old.example/callback"],
+            "allow_localhost": True}})
+        uris = ["https://client.example/callback", "https://client.example/connector/oauth/*"]
+        self.write(OAUTH_WHITELIST, {"allowed_redirect_uris": uris + uris,
+                                    "allow_loopback": True})
+        for port in (3005, 4000):
+            policy = settings(self.root, self.config.get)
+            app, _ = access_spec("a" * 24, "oauth", port, f"oauth.api-{port}.example.com",
+                                 policy, emails=["owner@example.com"])
+            dcr = app["oauth_configuration"]["dynamic_client_registration"]
+            self.assertEqual(dcr["allowed_uris"], uris)
+            self.assertFalse(dcr["allow_any_on_localhost"])
+            self.assertTrue(dcr["allow_any_on_loopback"])
+        self.write(OAUTH_WHITELIST, {"allowed_redirect_uris": uris[1:]})
+        self.assertEqual(settings(self.root, self.config.get).allowed_redirect_uris, tuple(uris[1:]))
+        (self.root / OAUTH_WHITELIST).unlink()
+        # An obsolete runtime policy must not silently restore removed grants.
+        self.assertFalse(settings(self.root, self.config.get).oauth)
+
+    def test_whitelist_rejects_unsafe_or_ambiguous_callbacks(self):
+        self.config[OAUTH] = "1"
+        for uri in ("http://client.example/callback", "https://*.example/callback",
+                    "https://client.example/*", "https://client.example/call*",
+                    "https://client.example/a/*/callback", "https://client.example:bad/cb",
+                    "https://client.example:0/cb", "https://user@client.example/cb",
+                    "https://@client.example/cb", "https://client.example/cb?next=x",
+                    "https://client.example/cb#", "https://client.example/cb\x7f",
+                    "https://client.example/a/../*", "https://client.example/a/%2e%2e/*",
+                    "https://client.example/a//cb", "https://client.example\\\\evil/cb", None):
+            with self.subTest(uri=uri), self.assertRaises(ValueError):
+                self.write(OAUTH_WHITELIST, {"allowed_redirect_uris": [uri]})
+                settings(self.root, self.config.get)
+        for payload in ({"allowed_redirect_uris": "https://client.example/cb"},
+                        {"allowed_redirect_uris": ["https://client.example/cb"] * 101},
+                        {"allow_loopback": "true"}, {"allow_localhost": 1},
+                        {"oauth": {}}, {"allow_all": True}):
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                self.write(OAUTH_WHITELIST, payload)
+                settings(self.root, self.config.get)
+        path = self.root / OAUTH_WHITELIST
+        for text in ("broken", "[]", '{"allow_loopback":true,"allow_loopback":false}'):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                path.write_text(text)
+                settings(self.root, self.config.get)
+        path.unlink()
+        path.symlink_to(self.write("other.json", {"allow_loopback": True}))
+        with self.assertRaises(ValueError):
+            settings(self.root, self.config.get)
 
     def test_ignore_accepts_only_whole_integer_ports(self):
         self.write("CLOUDFLARE-API_ignore.json", {"ports": [3005, 3005, 443]})

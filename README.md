@@ -750,21 +750,44 @@ permission stops publication; it does not create a public fallback.
 [Worker permissions](https://developers.cloudflare.com/workers/authorization/workers/),
 [service-token permission](https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/service_tokens/methods/create/)
 
-For OAuth, add email grants to the discovered route and create
-`CITADEL_DATA/cloudflare-api/policy.json`. For a remote web client, use
-its exact documented HTTPS callback:
+For OAuth, add email grants to the discovered route and copy
+`CLOUDFLARE_OAUTH_Whitelist.json.example` to
+`CLOUDFLARE_OAUTH_Whitelist.json` beside `scan.sh`. This central file controls
+client callbacks for **every API-OAuth route**; it contains no backend tokens:
 
 ```json
 {
-  "oauth": {
-    "allowed_redirect_uris": ["https://your-client.example/oauth/callback"],
-    "allow_localhost": false,
-    "allow_loopback": false
-  }
+  "allowed_redirect_uris": [
+    "https://claude.ai/api/mcp/auth_callback",
+    "https://chatgpt.com/connector_platform_oauth_redirect",
+    "https://chatgpt.com/connector/oauth/*"
+  ],
+  "allow_localhost": false,
+  "allow_loopback": false
 }
 ```
 
-Replace the illustrative URI with the actual client's URI; no broad wildcards.
+[Claude's hosted apps](https://claude.com/docs/connectors/building/authentication#callback-urls)
+share the first callback.
+[ChatGPT](https://developers.openai.com/plugins/build/auth#redirect-url) uses either
+the stable callback or a callback ID below `/connector/oauth/`, depending on the
+authorization server's issuer-identification support. The narrow path wildcard
+covers those IDs; replace it with the exact callback from the connection's
+management page if you want to permit only that connection. No wildcard host or
+site-wide `/*` is accepted. Other clients are added here by their documented HTTPS
+callback; Citadel contains no client-specific routing logic.
+
+Select OAuth and automatic client registration (DCR) in Claude or ChatGPT.
+The callback whitelist permits registration, not access to a backend: Cloudflare
+still checks the user's email/OTP and the route's email grant still selects its
+backend credential from `CLOUDFLARE-API_access.json`.
+
+The active whitelist is gitignored and preserved during refresh. It replaces
+`CITADEL_DATA/cloudflare-api/policy.json`: move the former `oauth` object's fields
+into the new file. The old file is no longer read. Missing or empty callback
+configuration disables OAuth publication; malformed configuration fails the scan.
+Edits replace the remote callback list on the next successful scan.
+
 For OpenCode's `127.0.0.1` callback, deliberately set `allow_loopback` to `true`;
 `allowed_redirect_uris` can be empty if no web clients are used. This Cloudflare
 option permits loopback callbacks, not only OpenCode's particular port or path.
@@ -900,7 +923,7 @@ stream without whole-response buffering; session IDs are encrypted and bound to
 the authenticated identity, route and applied grant revision. The rate control is 120 requests per
 minute per bearer/identity at each Cloudflare location, not a global quota.
 
-Back up `.env`, `config.conf`, the root access, ignore and discovery files, and the private
+Back up `.env`, `config.conf`, the root access, ignore, discovery and OAuth whitelist files, and the private
 `CITADEL_DATA/cloudflare-api/` directory. Its `runtime.json` contains the session
 key and origin service secret; it is not disposable cache. Losing it requires
 restoration or explicit credential recovery, not automatic OAuth app replacement.
@@ -911,7 +934,8 @@ Container installations persist `CITADEL_DATA` through the existing data mount.
 The ignore file lives beside `scan.sh`, not inside that data directory. Supply
 and retain it in the writable Citadel runtime tree (normally
 `/opt/safrano9999/CITADEL/CLOUDFLARE-API_ignore.json`), or mount it there from the
-host when using an immutable tree. Citadel's refresh preserves the access, discovery and ignore files and the
+host when using an immutable tree. Keep `CLOUDFLARE_OAUTH_Whitelist.json` at that root too.
+Citadel's refresh preserves the access, discovery, ignore and OAuth whitelist files and the
 enabled/disabled extension selection. Persist or mount the private access file
 at the repository root as well; it is not part of the `CITADEL_DATA` mount.
 
