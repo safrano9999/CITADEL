@@ -9,7 +9,7 @@ RUN apk add --no-cache \
       python3 py3-dotenv py3-fastapi py3-jinja2 uvicorn \
       py3-uvloop py3-httptools py3-watchfiles py3-websockets py3-yaml \
       bash coreutils findutils grep sed gawk curl jq iproute2-ss util-linux \
-      ca-certificates tini tailscale=1.98.10-r0 \
+      ca-certificates tini tailscale=1.98.10-r1 \
  && test "$(apk --print-arch)" = x86_64 \
  && curl --fail --location --retry 3 \
       "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64" \
