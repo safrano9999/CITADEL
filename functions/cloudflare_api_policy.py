@@ -18,6 +18,7 @@ from cloudflare_policy import normalize_hostname
 
 EXTENSION = "CLOUDFLARE-API"
 OAUTH = "CITADEL_CLOUDFLARE_API_OAUTH"
+OAUTH_GRANT_DURATION = "CITADEL_CLOUDFLARE_OAUTH_GRANT_DURATION"
 AUTH_MODE = "CITADEL_CLOUDFLARE_API_MODE"
 OAUTH_WHITELIST = "CLOUDFLARE_OAUTH_Whitelist.json"
 MODE_LABELS = {"api-bearer": "API-Bearer", "api-oauth": "API-OAuth"}
@@ -144,6 +145,7 @@ class APISettings:
     allow_loopback: bool = False
     errors: tuple[str, ...] = ()
     bearer: bool = True
+    oauth_grant_duration: str = "24h"
 
     @property
     def modes(self) -> tuple[str, ...]:
@@ -162,6 +164,9 @@ def settings(root: Path, get: Callable[[str, str], str]) -> APISettings:
     if mode not in {"both", "bearer", "oauth"}:
         raise ValueError(f"{AUTH_MODE} must be both, bearer or oauth")
     oauth = raw_oauth == "1" and mode != "bearer"
+    duration = get(OAUTH_GRANT_DURATION, "24h").strip() or "24h"
+    if not re.fullmatch(r"[1-9][0-9]{0,2}h", duration) or int(duration[:-1]) > 720:
+        raise ValueError(f"{OAUTH_GRANT_DURATION} must be whole hours between 1h and 720h")
     excluded = excluded_ports(root)
     options = read_object(root / OAUTH_WHITELIST) if oauth else {}
     if not isinstance(options, dict) or set(options) - {
@@ -198,4 +203,5 @@ def settings(root: Path, get: Callable[[str, str], str]) -> APISettings:
         oauth = False
     return APISettings(enabled=True, oauth=oauth, bearer=mode != "oauth", excluded=excluded,
                        allowed_redirect_uris=tuple(dict.fromkeys(uris)),
-                       allow_localhost=local, allow_loopback=loopback, errors=tuple(errors))
+                       allow_localhost=local, allow_loopback=loopback, errors=tuple(errors),
+                       oauth_grant_duration=duration)

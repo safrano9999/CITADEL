@@ -84,6 +84,13 @@ CITADEL_CLOUDFLARE_SERVERSIDE_PERSISTENCE=1
 #choices: 0 1
 #default-preset: 0
 CITADEL_CLOUDFLARE_API_OAUTH=0
+
+# Creation preset for new Managed OAuth applications only; existing grants are preserved.
+# Whole hours from 1h to 720h. 24h = one day; 720h = thirty days.
+# Access tokens remain short-lived and are renewed through the OAuth refresh token.
+#default-preset: 24h
+CITADEL_CLOUDFLARE_OAUTH_GRANT_DURATION=24h
+
 # Published authentication modes: both (default), bearer, or oauth.
 # OAuth also requires CITADEL_CLOUDFLARE_API_OAUTH=1 and client callbacks.
 #choices: both bearer oauth

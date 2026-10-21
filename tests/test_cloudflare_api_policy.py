@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "functions"))
 
 from cloudflare_api_policy import (
-    OAUTH, OAUTH_WHITELIST, credential_headers, endpoint_path,
+    OAUTH, OAUTH_GRANT_DURATION, OAUTH_WHITELIST, credential_headers, endpoint_path,
     excluded_ports, hostnames, route_id, settings,
 )
 from cloudflare_api_access import parse_entries
@@ -78,6 +78,24 @@ class APIPolicyTests(unittest.TestCase):
         self.assertTrue(policy.errors)
         self.write(OAUTH_WHITELIST, {"allow_loopback": True})
         self.assertEqual(settings(self.root, self.config.get).modes, ("api-bearer", "api-oauth"))
+
+    def test_new_oauth_grant_duration_default_override_and_validation(self):
+        from cloudflare_api_state import access_spec
+        self.config[OAUTH] = "1"
+        for configured, expected in ((None, "24h"), ("", "24h"), ("24h", "24h"), ("720h", "720h")):
+            if configured is None:
+                self.config.pop(OAUTH_GRANT_DURATION, None)
+            else:
+                self.config[OAUTH_GRANT_DURATION] = configured
+            policy = settings(self.root, self.config.get)
+            app, _ = access_spec("a" * 24, "oauth", 3005, "oauth.api-3005.example.com",
+                                 policy, emails=["owner@example.com"])
+            self.assertEqual(app["oauth_configuration"]["grant"], {
+                "access_token_lifetime": "5m", "session_duration": expected})
+        for invalid in ("0h", "721h", "-1h", "024h", "30d", "forever", "1h;bad"):
+            self.config[OAUTH_GRANT_DURATION] = invalid
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, OAUTH_GRANT_DURATION):
+                settings(self.root, self.config.get)
 
     def test_whitelist_is_authoritative_and_applies_to_every_oauth_app(self):
         from cloudflare_api_state import access_spec

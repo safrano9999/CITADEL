@@ -527,6 +527,15 @@ class APIReconciler:
                                             emails=self.table["hosts"].get(hostname, {}).get("emails", []))
         self.specs[app_spec["name"]] = policy_spec["name"]
         app = self.owned_apps.get(app_spec["name"])
+        if app is not None and role == "oauth":
+            # This is a creation preset, not a migration of issued grants or client sessions.
+            existing_grant = (app.get("oauth_configuration") or {}).get("grant")
+            if isinstance(existing_grant, dict):
+                app_spec["oauth_configuration"]["grant"] = deepcopy(existing_grant)
+            else:
+                app_spec["oauth_configuration"].pop("grant", None)
+            if "session_duration" in app:
+                app_spec["session_duration"] = app["session_duration"]
         policy = self.owned_policies.get(policy_spec["name"])
         if self.add and app and role == "oauth":
             return app  # Existing identity settings are append-only too.

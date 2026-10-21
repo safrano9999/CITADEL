@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 import json
 from pathlib import Path
 import sys
@@ -224,6 +225,46 @@ class APILifecycleTests(unittest.TestCase):
         self.apply()
         self.assertEqual(self.api.events, [])
         self.assertEqual([(app["id"], app["aud"]) for app in self.api.apps], identities)
+
+    def test_grant_preset_change_keeps_existing_apps_and_performs_no_writes(self):
+        config = self.settings()
+        self.apply(config)
+        before = deepcopy(self.api.apps)
+        self.api.events.clear()
+        self.apply(replace(config, oauth_grant_duration="720h"))
+        self.assertEqual(self.api.events, [])
+        self.assertEqual(self.api.apps, before)
+
+    def test_new_oauth_app_uses_configured_grant_preset(self):
+        self.apply(replace(self.settings(), oauth_grant_duration="720h"))
+        oauth = next(app for app in self.api.apps if "oauth_configuration" in app)
+        self.assertEqual(oauth["oauth_configuration"]["grant"], {
+            "access_token_lifetime": "5m", "session_duration": "720h"})
+
+    def test_callback_update_keeps_existing_grant_and_app_identity(self):
+        config = self.settings()
+        self.apply(config)
+        oauth = next(app for app in self.api.apps if "oauth_configuration" in app)
+        original_grant = {"access_token_lifetime": "10m", "session_duration": "336h"}
+        oauth["oauth_configuration"]["grant"] = deepcopy(original_grant)
+        identity = (oauth["id"], oauth["aud"])
+        self.api.events.clear()
+        self.apply(replace(config, oauth_grant_duration="720h",
+                           allowed_redirect_uris=("https://new.example/callback",)))
+        oauth = next(app for app in self.api.apps if "oauth_configuration" in app)
+        self.assertEqual((oauth["id"], oauth["aud"]), identity)
+        self.assertEqual(oauth["oauth_configuration"]["grant"], original_grant)
+        self.assertNotIn("app_delete", [kind for kind, _ in self.api.events])
+
+    def test_legacy_implicit_grant_is_not_overwritten_by_preset(self):
+        config = self.settings()
+        self.apply(config)
+        oauth = next(app for app in self.api.apps if "oauth_configuration" in app)
+        oauth["oauth_configuration"].pop("grant")
+        self.api.events.clear()
+        self.apply(replace(config, oauth_grant_duration="720h"))
+        self.assertEqual(self.api.events, [])
+        self.assertNotIn("grant", oauth["oauth_configuration"])
 
     def test_origin_wildcard_collision_fails_before_writes(self):
         self.api.apps.append({"id": "foreign", "name": "Other application", "domain": "origin-api-*.example.com"})

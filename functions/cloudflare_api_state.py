@@ -68,7 +68,7 @@ def access_spec(owner: str, role: str, port: int, hostname: str, settings: APISe
         app["oauth_configuration"] = {"enabled": True, "dynamic_client_registration": {
             "enabled": True, "allow_any_on_localhost": settings.allow_localhost,
             "allow_any_on_loopback": settings.allow_loopback, "allowed_uris": list(settings.allowed_redirect_uris)},
-            "grant": {"access_token_lifetime": "5m", "session_duration": "24h"}}
+            "grant": {"access_token_lifetime": "5m", "session_duration": settings.oauth_grant_duration}}
     else:
         raise ValueError("Unsupported Access application role")
     return app, policy

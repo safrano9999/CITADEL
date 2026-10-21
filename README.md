@@ -693,6 +693,7 @@ in the private JSON or the **API Access** page described below.
 #choices: 0 1
 #default-preset: 0
 CITADEL_CLOUDFLARE_API_OAUTH=0
+CITADEL_CLOUDFLARE_OAUTH_GRANT_DURATION=24h
 CITADEL_CLOUDFLARE_API_MODE=both
 ```
 
@@ -701,6 +702,15 @@ Set `CITADEL_CLOUDFLARE_API_MODE=oauth` and
 `both` preserves the existing behavior; `bearer` publishes only bearer routes.
 Backend bearer mappings remain available in OAuth-only mode. A full scan applies
 mode changes and removes previously published routes for disabled modes.
+
+`CITADEL_CLOUDFLARE_OAUTH_GRANT_DURATION` is the creation preset for the OAuth
+grant (refresh-token session) on newly created API-OAuth applications. The default
+is `24h`; use whole hours from `1h` to `720h` (`720h` is thirty days). Access tokens
+remain at five minutes and clients can renew them without another OTP while the
+grant is valid. Changing this preset does not modify existing applications' grant
+settings, recreate their identities, or revoke issued grants. Full and Add scans
+preserve existing grant values, including when callback settings are updated.
+This is independent of browser/global Access session durations.
 
 API tiles show exactly four lines: **Access**, **Reachable**,
 **Authentication prompt**, and a plain comma-separated protocol list such as
