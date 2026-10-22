@@ -1,4 +1,10 @@
+# syntax=docker/dockerfile:1.7
 # Source of truth: SCRIPTS/githubactions. Generated copies are overwritten.
+# Verified ensurepip seed only; the application remains pip-free.
+FROM scratch AS python-trust
+ADD --checksum=sha256:fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70 \
+    https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl /pip-26.2.2-py3-none-any.whl
+
 FROM docker.io/library/alpine:3.24.3@sha256:b3413572228e34bd1c9245f5565e6cd127005655e8a7899aef33d8e83255c9e6
 
 ARG CLOUDFLARED_VERSION=2026.9.3
@@ -20,6 +26,9 @@ RUN apk upgrade --no-cache \
  && cloudflared --version \
  && python3 -s -c 'import dotenv, fastapi, jinja2, uvicorn' \
  && python3 -s -c "import ssl; certs = ssl.create_default_context().get_ca_certs(); names = {v for c in certs for rdn in c['subject'] for k, v in rdn if k == 'commonName'}; assert len(certs) > 50; assert {'emSign ECC Root CA - G3', 'AAA Certificate Services', 'emSign Root CS CA - G3'}.isdisjoint(names)"
+
+RUN --mount=type=bind,from=python-trust,target=/tmp/python-trust \
+    python3 -c "import ensurepip, pathlib, shutil, sysconfig; seed = pathlib.Path(sysconfig.get_config_var('WHEEL_PKG_DIR') or pathlib.Path(ensurepip.__file__).with_name('_bundled')); [p.unlink() for p in seed.glob('pip-*.whl')]; shutil.copy('/tmp/python-trust/pip-26.2.2-py3-none-any.whl', seed); assert ensurepip.version() == '26.2.2'"
 
 WORKDIR /opt/safrano9999/CITADEL
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 FASTAPI_HOST=0.0.0.0
