@@ -1,11 +1,19 @@
 # Source of truth: SCRIPTS/githubactions. Generated copies are overwritten.
 name: Citadel Alpine image
+run-name: "Citadel Alpine image [monitor:${{ inputs.monitor_id }}:true]"
 
 on:
   push:
     tags: ["20*.*.*"]
   workflow_dispatch:
     inputs:
+      monitor_id:
+        description: Event monitor correlation id
+        type: string
+        default: ""
+      monitor_final:
+        type: boolean
+        default: true
       image_tag:
         description: "YYYY.MM.N; empty selects the next monthly number"
         type: string

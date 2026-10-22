@@ -5,11 +5,12 @@ ARG CLOUDFLARED_VERSION=2026.9.3
 ARG CLOUDFLARED_SHA256=77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2
 
 # Stable Alpine repositories only; system Python packages, no pip/venv/compiler.
-RUN apk add --no-cache \
+RUN apk upgrade --no-cache \
+ && apk add --no-cache \
       python3 py3-dotenv py3-fastapi py3-jinja2 uvicorn \
       py3-uvloop py3-httptools py3-watchfiles py3-websockets py3-yaml \
       bash coreutils findutils grep sed gawk curl jq iproute2-ss util-linux \
-      ca-certificates tini tailscale=1.98.10-r1 \
+      'ca-certificates>=20261020-r0' 'ca-certificates-bundle>=20261020-r0' tini tailscale=1.98.10-r1 \
  && test "$(apk --print-arch)" = x86_64 \
  && curl --fail --location --retry 3 \
       "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64" \
@@ -17,7 +18,8 @@ RUN apk add --no-cache \
  && echo "${CLOUDFLARED_SHA256}  /usr/local/bin/cloudflared" | sha256sum -c - \
  && chmod 0755 /usr/local/bin/cloudflared \
  && cloudflared --version \
- && python3 -s -c 'import dotenv, fastapi, jinja2, uvicorn'
+ && python3 -s -c 'import dotenv, fastapi, jinja2, uvicorn' \
+ && python3 -s -c "import ssl; certs = ssl.create_default_context().get_ca_certs(); names = {v for c in certs for rdn in c['subject'] for k, v in rdn if k == 'commonName'}; assert len(certs) > 50; assert {'emSign ECC Root CA - G3', 'AAA Certificate Services', 'emSign Root CS CA - G3'}.isdisjoint(names)"
 
 WORKDIR /opt/safrano9999/CITADEL
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 FASTAPI_HOST=0.0.0.0
