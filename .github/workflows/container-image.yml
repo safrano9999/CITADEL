@@ -107,8 +107,14 @@ jobs:
         env:
           IMAGE_TAG: ${{ steps.version.outputs.tag }}
         run: |
-          docker push "$IMAGE:$IMAGE_TAG"
-          docker push "$IMAGE:latest"
+          set -euo pipefail
+          for ref in "$IMAGE:$IMAGE_TAG" "$IMAGE:latest"; do
+            for attempt in 1 2 3; do
+              if docker push "$ref"; then break; fi
+              if [ "$attempt" -eq 3 ]; then exit 1; fi
+              sleep "$((attempt * 3))"
+            done
+          done
 
       - name: Verify public package visibility
         env:
