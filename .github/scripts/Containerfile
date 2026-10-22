@@ -28,7 +28,9 @@ RUN apk upgrade --no-cache \
  && python3 -s -c "import ssl; certs = ssl.create_default_context().get_ca_certs(); names = {v for c in certs for rdn in c['subject'] for k, v in rdn if k == 'commonName'}; assert len(certs) > 50; assert {'emSign ECC Root CA - G3', 'AAA Certificate Services', 'emSign Root CS CA - G3'}.isdisjoint(names)"
 
 RUN --mount=type=bind,from=python-trust,target=/tmp/python-trust \
-    python3 -c "import ensurepip, pathlib, shutil, sysconfig; seed = pathlib.Path(sysconfig.get_config_var('WHEEL_PKG_DIR') or pathlib.Path(ensurepip.__file__).with_name('_bundled')); [p.unlink() for p in seed.glob('pip-*.whl')]; shutil.copy('/tmp/python-trust/pip-26.2.2-py3-none-any.whl', seed); assert ensurepip.version() == '26.2.2'"
+    python3 -c "import ensurepip, pathlib, shutil, sysconfig; seed = pathlib.Path(sysconfig.get_config_var('WHEEL_PKG_DIR') or pathlib.Path(ensurepip.__file__).with_name('_bundled')); [p.unlink() for p in seed.glob('pip-*.whl')]; shutil.copy('/tmp/python-trust/pip-26.2.2-py3-none-any.whl', seed); source = pathlib.Path(ensurepip.__file__); text = source.read_text(); old = ensurepip._PIP_VERSION; assert text.count(old) == 1; source.write_text(text.replace(old, '26.2.2')); ensurepip._PIP_VERSION = '26.2.2'; assert ensurepip.version() == '26.2.2'"
+
+RUN python3 -c "import ensurepip; assert ensurepip.version() == '26.2.2'"
 
 WORKDIR /opt/safrano9999/CITADEL
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 FASTAPI_HOST=0.0.0.0
