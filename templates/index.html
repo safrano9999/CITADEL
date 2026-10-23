@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CITADEL</title>
 <link rel="icon" type="image/svg+xml" href="/citadel.svg">
-<link rel="stylesheet" href="/assets/style.css?v=20261023-2">
+<link rel="stylesheet" href="/assets/style.css?v=20261023-3">
 </head>
 <body
     data-default-mode="{{ data.default_mode|e }}"
@@ -362,17 +362,14 @@ function applyMode(mode) {
         status('Reachable', tile.dataset.serviceReachable === '1',
           'The service responded over HTTP/HTTPS during the last scan, independently of API access or OAuth.');
         status('Authentication prompt', Boolean(primary.url && primary.status === 'provisioned'),
-          'Anonymous authentication challenge at the tile link; no login or authenticated API call is tested.');
+          'Last checked anonymous authentication challenge at the tile link; no login or authenticated API call is tested.');
         const names = {http: 'HTTP', rest: 'REST', graphql: 'GraphQL', mcp: 'MCP', rpc: 'RPC'};
-        const protocols = new Set(endpoints.map(endpoint => endpoint.protocol));
-        if (tile.dataset.browserHttp === '1') protocols.add('http');
-        const types = Object.keys(names).filter(protocol => protocols.has(protocol)).map(protocol => names[protocol]);
-        const protocolLine = document.createElement('span');
-        protocolLine.textContent = types.join(', ');
-        statuses.append(protocolLine);
         row.append(statuses);
         const seen = new Set();
-        for (const endpoint of interfaceLinks(tile, mode)) {
+        const order = Object.keys(names);
+        const links = [...interfaceLinks(tile, mode)].sort((a, b) =>
+          order.indexOf(a.protocol) - order.indexOf(b.protocol));
+        for (const endpoint of links) {
           const url = endpoint.url;
           if (seen.has(url)) continue;
           seen.add(url);
@@ -384,7 +381,10 @@ function applyMode(mode) {
           link.title = `${names[endpoint.protocol] || endpoint.protocol} · ${endpoint.managed ? 'API access URL' : 'Direct service URL'}`;
           const address = document.createElement('div');
           address.className = 'api-endpoint-url';
-          address.append(link);
+          const protocol = document.createElement('span');
+          protocol.className = 'api-endpoint-protocol';
+          protocol.textContent = `${names[endpoint.protocol] || endpoint.protocol}:`;
+          address.append(protocol, link);
           row.append(address);
         }
         list.append(row);

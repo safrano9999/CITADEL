@@ -56,6 +56,7 @@ function snapshot() {
       statusLines: tile.endpoints.children.flatMap(descendants).filter(node => node.className === 'api-statuses').flatMap(node => node.children.map(child => child.textContent)),
       links: tile.endpoints.children.flatMap(descendants).filter(node => node?.href).map(node => node.href),
       linkLabels: tile.endpoints.children.flatMap(descendants).filter(node => node?.href).map(node => node.textContent),
+      protocolLabels: tile.endpoints.children.flatMap(descendants).filter(node => node.className === 'api-endpoint-protocol').map(node => node.textContent),
     }))};
 }
 for (const mode of [...input.modes, input.defaultMode]) {

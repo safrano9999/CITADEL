@@ -97,8 +97,8 @@ class APIIntegrationTests(unittest.TestCase):
             self.assertEqual([tile["port"] for tile in tiles], [3070])
             self.assertEqual(set(tiles[0]["links"]), {f"https://{host}/mcp", f"https://{host}/api/v1"})
             self.assertFalse(tiles[0]["grey"])
-            self.assertEqual(len(tiles[0]["statusLines"]), 4)
-            self.assertEqual(tiles[0]["statusLines"][-1], "REST, MCP")
+            self.assertEqual(len(tiles[0]["statusLines"]), 3)
+            self.assertEqual(tiles[0]["protocolLabels"], ["REST:", "MCP:"])
 
     def test_health_keeps_both_modes_and_does_not_claim_authenticated_protocol_success(self):
         result = snapshot(self.root, ["CLOUDFLARE-API"])
@@ -178,7 +178,7 @@ class APIIntegrationTests(unittest.TestCase):
                              ["🔴 Access", "🟢 Reachable", "🔴 Authentication prompt"])
             self.assertTrue(all(not tile["links"] for tile in modes[mode]["visible"][1:]))
             self.assertEqual(modes[mode]["visible"][1]["statusLines"],
-                             ["🔴 Access", "🔴 Reachable", "🔴 Authentication prompt", "REST"])
+                             ["🔴 Access", "🔴 Reachable", "🔴 Authentication prompt"])
         self.assertEqual(len(modes["cloudflare"]["visible"]), 5)
         self.assertFalse(modes["cloudflare"]["otherHidden"])
 
@@ -336,7 +336,6 @@ class APIIntegrationTests(unittest.TestCase):
                 '🟢 Access',
                 '🟢 Reachable',
                 ('🟢' if state == 'provisioned' else '🔴') + ' Authentication prompt',
-                'REST, MCP',
             ])
             self.assertLess(detail.index('Authentication prompt'), detail.index('https://'))
             self.assertNotIn('Copy URL', detail)
@@ -355,10 +354,11 @@ class APIIntegrationTests(unittest.TestCase):
         self.write("cache/CLOUDFLARE-API-routes.json", self.api_payload)
         page = Environment(loader=FileSystemLoader(ROOT / "templates"), autoescape=True).get_template("index.html").render(data=self.dashboard())
         tile = simulate_dashboard(page)["api-oauth"]["visible"][0]
-        self.assertEqual(tile["statusLines"], ["🟢 Access", "🟢 Reachable", "🟢 Authentication prompt", "HTTP, REST, MCP"])
-        self.assertEqual(tile["links"], ["https://oauth.api-3070.example.com/mcp",
-            "https://3070.example.com/api/v1", "https://3070.example.com"])
-        self.assertEqual(tile["cardHref"], tile["links"][0])
+        self.assertEqual(tile["statusLines"], ["🟢 Access", "🟢 Reachable", "🟢 Authentication prompt"])
+        self.assertEqual(tile["protocolLabels"], ["HTTP:", "REST:", "MCP:"])
+        self.assertEqual(tile["links"], ["https://3070.example.com",
+            "https://3070.example.com/api/v1", "https://oauth.api-3070.example.com/mcp"])
+        self.assertEqual(tile["cardHref"], "https://oauth.api-3070.example.com/mcp")
         self.assertEqual(tile["links"], tile["linkLabels"])
 
     def test_discovery_landing_page_has_no_http_type_or_browser_link(self):
@@ -367,7 +367,7 @@ class APIIntegrationTests(unittest.TestCase):
         self.write("cache/3070.json", {"kind": "html", "scheme": "https", "browser_page": False})
         page = Environment(loader=FileSystemLoader(ROOT / "templates"), autoescape=True).get_template("index.html").render(data=self.dashboard())
         tile = simulate_dashboard(page)["api-oauth"]["visible"][0]
-        self.assertEqual(tile["statusLines"][-1], "REST, MCP")
+        self.assertEqual(tile["protocolLabels"], ["REST:", "MCP:"])
         self.assertEqual(tile["statusLines"][1], "🟢 Reachable")
         self.assertNotIn("https://3070.example.com", tile["links"])
         self.assertEqual(tile["cardHref"], "https://oauth.api-3070.example.com/mcp")

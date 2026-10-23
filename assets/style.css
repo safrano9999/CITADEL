@@ -33,8 +33,9 @@
 }
 
 .api-statuses { display: grid; gap: 4px; }
-.api-endpoint-url { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
-.api-endpoint-url a { flex: 1 1 200px; min-width: 0; font-weight: 600; }
+.api-endpoint-url { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: start; gap: 6px; min-width: 0; }
+.api-endpoint-protocol { font-weight: 600; }
+.api-endpoint-url a { min-width: 0; font-weight: 600; }
 .api-endpoints a {
   color: var(--accent);
   overflow-wrap: anywhere;
