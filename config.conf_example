@@ -61,6 +61,10 @@ TS_USERSPACE=0
 #default-preset: 1
 CITADEL_LOGO_PERSISTENT=1
 
+# Maximum HTML report download size in MiB; empty uses 5.
+#default-preset: 5
+CITADEL_REPORT_MAX_MB=
+
 # Optional: leave empty to disable subnet routes.
 CITADEL_SUBNET_IP=
 

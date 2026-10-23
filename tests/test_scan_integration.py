@@ -32,11 +32,16 @@ class ScanIntegrationTests(unittest.TestCase):
                     fixture["icon_requests"] += 1
                 body = ("<svg xmlns='http://www.w3.org/2000/svg'/>" if icon else
                         f'<html><head><title>{fixture["title"]}</title><link rel="icon" href="/icon.svg"></head></html>').encode()
+                if not icon:
+                    body += b' ' * fixture.get('padding', 0)
                 self.send_response(200)
                 self.send_header("Content-Type", "image/svg+xml" if icon else "text/html")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(body)
+                try:
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -52,7 +57,7 @@ class ScanIntegrationTests(unittest.TestCase):
             ext = base / "extensions/enabled/localhost"
             ext.mkdir(parents=True)
             (ext / "extension.json").write_text('{"provider":"localhost"}')
-            (base / "config.conf").write_text("CITADEL_LOGO_PERSISTENT=1\nCITADEL_HIDE_HTTP_WEBUI_DUPE=1\nCITADEL_HTTPS_ONLY=0\nCITADEL_SUBNET_IP=\n")
+            (base / "config.conf").write_text("CITADEL_LOGO_PERSISTENT=1\nCITADEL_HIDE_HTTP_WEBUI_DUPE=1\nCITADEL_HTTPS_ONLY=0\nCITADEL_SUBNET_IP=\nCITADEL_REPORT_MAX_MB=\n")
             bin_dir = base / "bin"
             bin_dir.mkdir()
             ss = bin_dir / "ss"
@@ -113,6 +118,13 @@ class ScanIntegrationTests(unittest.TestCase):
             env["CITADEL_LOGO_PERSISTENT"] = "0"
             scan()
             self.assertEqual(fixture["icon_requests"], 2)
+            fixture['padding'] = 2 * 1048576
+            fixture['title'] = 'Large report with default limit'
+            self.assertEqual(scan()['http_services'][0]['title'], fixture['title'])
+            fixture['padding'] = 6 * 1048576
+            fixture['title'] = 'Large report &amp; configured limit'
+            env['CITADEL_REPORT_MAX_MB'] = '15'
+            self.assertEqual(scan()['http_services'][0]['title'], 'Large report & configured limit')
             fixture["reject_http"] = True
             rejected = scan()
             self.assertEqual(rejected["http_services"], [])

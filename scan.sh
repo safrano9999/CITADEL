@@ -71,7 +71,10 @@ PROVIDERS_STATE_FILE="$DATA_DIR/providers_state.json"
 TIMESTAMP_FILE="$DATA_DIR/last_scan.txt"
 RUNTIME_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
 SCAN_LOCK_FILE="${CITADEL_SCAN_LOCK_FILE:-$RUNTIME_DIR/citadel-scan-${UID}.lock}"
-MAX_FETCH_BYTES=1048576
+REPORT_MAX_MB="$(PYTHONPATH="$SCRIPT_DIR" python3 -c \
+    'from python_header import get_int; print(get_int("CITADEL_REPORT_MAX_MB", 5))')"
+[[ "$REPORT_MAX_MB" -gt 0 ]] || { echo "CITADEL_REPORT_MAX_MB must be positive" >&2; exit 2; }
+MAX_FETCH_BYTES=$((REPORT_MAX_MB * 1048576))
 
 mkdir -p "$(dirname "$SCAN_LOCK_FILE")"
 exec {SCAN_LOCK_FD}>"$SCAN_LOCK_FILE"
@@ -494,7 +497,8 @@ import re
 import sys
 html = sys.stdin.read()
 m = re.search(r'<title[^>]*>([^<]+)</title>', html, re.IGNORECASE)
-print(m.group(1).strip() if m else '')
+from html import unescape
+print(unescape(m.group(1).strip()) if m else '')
 " || true)"
 
     FAVICON_CANDIDATES="$(echo "$HTML" | python3 -c '
