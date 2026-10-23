@@ -65,8 +65,8 @@
     {% if data.http_tiles %}
     <div class="section-title" id="services-title">Services</div>
     <div class="grid protocol-filters" id="protocol-filters" role="group" aria-label="Service filters" hidden>
-        <button class="protocol-filter" type="button" data-protocol-filter="mcp" aria-pressed="true" hidden>MCP · 1</button>
-        <button class="protocol-filter" type="button" data-protocol-filter="api" aria-pressed="true" hidden>API · 1</button>
+        <button class="protocol-filter" type="button" data-protocol-filter="mcp" aria-pressed="true" hidden>MCP</button>
+        <button class="protocol-filter" type="button" data-protocol-filter="api" aria-pressed="true" hidden>API</button>
     </div>
     <section class="grid" id="services-grid">
         {% for svc in data.http_tiles %}
@@ -277,7 +277,7 @@ function applyMode(mode) {
     const category = button.dataset.protocolFilter;
     button.hidden = !tiles.some(tile => splitCsv(tile.dataset.protocolFilters).includes(category));
     button.setAttribute('aria-pressed', String(enabledProtocols[category]));
-    button.textContent = `${category.toUpperCase()} · ${Number(enabledProtocols[category])}`;
+    button.textContent = category.toUpperCase();
   }
   if (protocolFilters) protocolFilters.hidden = apiMode || filterButtons.every(button => button.hidden);
   if (cloudflareEditBtn) {
@@ -295,7 +295,8 @@ function applyMode(mode) {
     let endpoints = [];
     try { endpoints = JSON.parse(tile.dataset.apiEndpoints || '{}')[mode] || []; } catch {}
     const categories = splitCsv(tile.dataset.protocolFilters);
-    const filtered = !apiMode && categories.length > 0 && !categories.some(category => enabledProtocols[category]);
+    const filtered = !apiMode && tile.dataset.browserHttp !== '1' && categories.length > 0
+      && !categories.some(category => enabledProtocols[category]);
     tile.hidden = (apiMode && !endpoints.length) || filtered;
     if (filtered && filteredRows) {
       const row = document.createElement('tr');

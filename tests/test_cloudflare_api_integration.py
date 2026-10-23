@@ -375,12 +375,13 @@ class APIIntegrationTests(unittest.TestCase):
     def test_protocol_switches_move_tiles_to_list_and_leave_auth_views_unchanged(self):
         from jinja2 import Environment, FileSystemLoader
         from dashboard_dom import simulate_dashboard
-        protocols = {3070: ['mcp', 'rest'], 3071: ['mcp'], 3072: ['rest'], 3073: [], 3074: []}
+        protocols = {3070: ['mcp', 'rest'], 3071: ['mcp'], 3072: ['rest'], 3073: [], 3074: [], 3075: ['rest']}
         self.write('CITADEL_DATA/services.json', {
             'http_services': [{'port': port, 'scheme': 'https', 'name': f'Service {port}'} for port in protocols],
             'other_ports': [{'port': 22, 'service': 'ssh'}]})
         for port in protocols:
-            self.write(f'cache/{port}.json', {'scheme': 'https', 'kind': 'openai-v1' if port == 3074 else 'html'})
+            kind = 'openai-v1' if port == 3074 else 'http-service' if port in (3071, 3072) else 'html'
+            self.write(f'cache/{port}.json', {'scheme': 'https', 'kind': kind})
         self.browser_payload['services'] = {str(port): {'url': f'https://{port}.example.com'} for port in protocols}
         self.write('cache/cloudflare-routes.json', self.browser_payload)
         for view in self.api_payload['views'].values():
@@ -392,7 +393,7 @@ class APIIntegrationTests(unittest.TestCase):
         self.write('cache/CLOUDFLARE-API-routes.json', self.api_payload)
         dashboard = self.dashboard()
         self.assertEqual({tile['port']: tile['protocol_filters'] for tile in dashboard['http_tiles']},
-                         {3070: ['mcp', 'api'], 3071: ['mcp'], 3072: ['api'], 3073: [], 3074: ['api']})
+                         {3070: ['mcp', 'api'], 3071: ['mcp'], 3072: ['api'], 3073: [], 3074: ['api'], 3075: ['api']})
         page = Environment(loader=FileSystemLoader(ROOT / 'templates'), autoescape=True).get_template('index.html').render(data=dashboard)
         result = simulate_dashboard(page, actions=[
             {'mode': 'cloudflare', 'toggle': 'mcp'},
@@ -402,20 +403,23 @@ class APIIntegrationTests(unittest.TestCase):
             {'mode': 'cloudflare', 'toggle': 'api'},
         ])
         self.assertEqual([button['pressed'] for button in result['cloudflare']['filters']], ['true', 'true'])
+        self.assertEqual([button['text'] for button in result['cloudflare']['filters']], ['MCP', 'API'])
         first, both, oauth, bearer, mcp, restored = result['actions']
-        self.assertEqual([tile['port'] for tile in first['visible']], [3070, 3072, 3073, 3074])
+        self.assertEqual([tile['port'] for tile in first['visible']], [3070, 3072, 3073, 3074, 3075])
         self.assertIn('Service 3071', first['filtered'][0]['text'])
         self.assertEqual(first['filtered'][0]['links'], ['https://3071.example.com'])
-        self.assertEqual([tile['port'] for tile in both['visible']], [3073])
-        self.assertEqual(len(both['filtered']), 4)
+        # Real WebUIs remain tiles, including those with MCP and/or REST.
+        self.assertEqual([tile['port'] for tile in both['visible']], [3070, 3073, 3075])
+        self.assertEqual(len(both['filtered']), 3)
         self.assertEqual([button['pressed'] for button in both['filters']], ['false', 'false'])
+        self.assertEqual([button['text'] for button in both['filters']], ['MCP', 'API'])
         for view in (oauth, bearer):
-            self.assertEqual([tile['port'] for tile in view['visible']], [3070, 3071, 3072])
+            self.assertEqual([tile['port'] for tile in view['visible']], [3070, 3071, 3072, 3075])
             self.assertTrue(view['filtersHidden'])
             self.assertTrue(view['otherHidden'])
             self.assertEqual(view['filtered'], [])
-        self.assertEqual([tile['port'] for tile in mcp['visible']], [3070, 3071, 3073])
-        self.assertEqual(len(restored['visible']), 5)
+        self.assertEqual([tile['port'] for tile in mcp['visible']], [3070, 3071, 3073, 3075])
+        self.assertEqual(len(restored['visible']), 6)
         self.assertEqual(restored['filtered'], [])
         self.assertFalse(restored['otherHidden'])
 
