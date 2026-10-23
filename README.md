@@ -983,7 +983,8 @@ at the repository root as well; it is not part of the `CITADEL_DATA` mount.
 Normal scans and Cloudflare-specific scans use one shared reconciliation for
 browser routes and API modes. Unchanged scans preserve Worker and Access IDs.
 `--add` preserves deployed routes, policies and credentials and reports changes
-requiring a full scan. Full scans remove excluded ports or disabled modes after
+requiring a full scan. Each full scan is the source of truth: missing or
+unresponsive endpoints, excluded ports and disabled modes are removed after
 first denying them in the Worker. Moving the extension back to `disabled` also
 requires a successful full scan to remove remote bindings. An empty deny-only
 Worker may remain to preserve installation ownership.
@@ -992,7 +993,7 @@ Without a working `CLOUDFLARE_API_TOKEN`, removal is **pending**, and remote
 state is **unverified**. Removing the local bearer alone does not revoke its
 deployed copy. Do not delete the management token or private state before
 cleanup. A malformed ignore file, incomplete remote inventory, ownership
-collision or incomplete rediscovery prevents destructive reconciliation.
+collision prevents destructive reconciliation.
 
 The dashboard's `provisioned` status means that HTTPS and the anonymous machine
 auth challenge were verified. It does not mean a client's token exchange or

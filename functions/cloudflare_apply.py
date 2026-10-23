@@ -340,16 +340,6 @@ class APIReconciler:
         if self.remote is not None and f"citadel-owner:{self.owner}" not in self.remote.get("tags", []):
             raise CloudflareAPIError("Worker name is occupied by a foreign resource")
         self.previous = table_from_settings(self.remote)
-        ready_ids = {route["id"] for host in self.table["hosts"].values() for route in host["routes"]}
-        timed_out_ports = {row["port"] for row in self.plan["diagnostics"] if row.get("http_status") == 0}
-        access_changed = any(
-            route.get("access_revision") != revisions.get(route["id"])
-            or host["mode"] not in settings.modes or host["port"] in settings.excluded
-            or not (getattr(credentials.get(route["id"]), "bearer" if host["mode"] == "api-bearer" else "oauth", None))
-            for host in self.previous["hosts"].values() for route in host["routes"])
-        if not add and not access_changed and any(route["id"] not in ready_ids and host["port"] in timed_out_ports
-                           for host in self.previous["hosts"].values() for route in host["routes"]):
-            raise CloudflareAPIError("API discovery is incomplete; previously published routes were preserved")
         self.domains = api.worker_domains(account)
         self.tokens = api.service_tokens(account)
         self.subdomain = api.worker_subdomain(account, self.name) if self.remote is not None else None

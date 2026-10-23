@@ -83,15 +83,21 @@ def listener_ready() -> bool:
 
 @contextmanager
 def bind_unix_socket(path: Path) -> Iterator[socket.socket]:
-    """Bind without replacing any existing path, including stale/live sockets.
+    """Replace an existing Unix socket and bind the WebUI at the same path.
 
     Create only the immediate socket directory, respecting the caller's umask
     and existing permissions. Missing ancestors must be provisioned separately.
-    Passing the bound descriptor to Uvicorn avoids its Unix-path replacement
-    behavior. Clean shutdown removes only the socket created by this invocation;
-    after an unclean exit, an operator must inspect/remove the stale socket.
+    Regular files, directories and symlinks are not replaced. Clean shutdown
+    removes only the socket created by this invocation.
     """
     path.parent.mkdir(mode=0o755, exist_ok=True)
+    try:
+        existing = path.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        if stat.S_ISSOCK(existing.st_mode):
+            path.unlink()
     owned = None
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
         try:

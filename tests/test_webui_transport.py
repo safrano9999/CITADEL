@@ -149,21 +149,25 @@ class UnixSocketOwnershipTests(unittest.TestCase):
             self.assertEqual(path.lstat().st_ino, before.st_ino)
         self.assertEqual(target.read_text(), "preserve")
 
-    def test_refuses_live_and_stale_sockets(self):
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as existing:
-            existing.bind(str(self.path))
-            existing.listen(1)
-            inode = self.path.stat().st_ino
-            with self.assertRaises(OSError):
-                with bind_unix_socket(self.path):
-                    self.fail("unexpected bind")
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.connect(str(self.path))
-            self.assertEqual(self.path.stat().st_ino, inode)
-        with self.assertRaises(OSError):
-            with bind_unix_socket(self.path):
-                self.fail("unexpected bind")
-        self.assertEqual(self.path.stat().st_ino, inode)
+    def test_replaces_live_and_stale_sockets(self):
+        for live in (True, False):
+            with self.subTest(live=live), socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as existing:
+                existing.bind(str(self.path))
+                if live:
+                    existing.listen(1)
+                else:
+                    existing.close()
+                with bind_unix_socket(self.path) as listener:
+                    listener.listen(1)
+                    listener.settimeout(1)
+                    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                        client.connect(str(self.path))
+                        client.sendall(b"new listener")
+                        connection, _ = listener.accept()
+                        with connection:
+                            connection.settimeout(1)
+                            self.assertEqual(connection.recv(32), b"new listener")
+                self.assertFalse(self.path.exists())
 
     def test_cleanup_preserves_replacement_file_and_live_socket(self):
         with bind_unix_socket(self.path):

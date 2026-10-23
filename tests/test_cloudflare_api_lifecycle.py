@@ -164,11 +164,11 @@ class APILifecycleTests(unittest.TestCase):
         return APISettings(enabled=True, oauth=oauth, excluded=frozenset(excluded),
                            allowed_redirect_uris=("https://client.example/callback",))
 
-    def apply(self, settings=None, *, add=False):
+    def apply(self, settings=None, *, add=False, endpoints=None):
         settings = settings if settings is not None else self.settings()
         snapshot = remote_inventory(self.api, "account", "zone", "tunnel")
         participant = APIReconciler(self.api, self.root, "account", "zone", "tunnel",
-            api_routes([self.endpoint], settings, "example.com", self.access), settings, self.access, snapshot, add=add)
+            api_routes([self.endpoint] if endpoints is None else endpoints, settings, "example.com", self.access), settings, self.access, snapshot, add=add)
         desired = combine_routes(self.browser, participant.plan["origins"])
         prepare_tunnel(self.api, "account", "zone", "tunnel", desired, True, add,
                        inventory=snapshot, preflight_only=True)
@@ -209,14 +209,6 @@ class APILifecycleTests(unittest.TestCase):
         self.assertNotIn("owner@example.com", secret)
         self.assertIn("new-user-backend", secret)
         self.assertNotIn("new-client", secret)
-
-    def test_discovery_timeout_does_not_prevent_explicit_revocation(self):
-        config = self.settings()
-        self.apply(config)
-        self.endpoint.update(status="unknown", http_status=0)
-        self.access = {}
-        self.apply(config)
-        self.assertEqual(table_from_settings(self.api.worker)["hosts"], {})
 
     def test_repeat_scan_preserves_app_ids_and_performs_no_writes(self):
         self.apply()
@@ -287,13 +279,20 @@ class APILifecycleTests(unittest.TestCase):
         origin = next(entry for entry in self.api.config["ingress"] if entry.get("hostname", "").startswith("origin-api-"))
         self.assertTrue(origin["originRequest"]["access"]["required"])
 
-    def test_incomplete_rediscovery_preserves_existing_routes_without_writes(self):
-        self.apply()
-        self.api.events.clear()
-        self.endpoint.update(status="unknown", http_status=0)
-        with self.assertRaises(CloudflareAPIError):
-            self.apply()
-        self.assertEqual(self.api.events, [])
+    def test_full_scan_removes_missing_or_unresponsive_endpoints(self):
+        config = self.settings()
+        for endpoints in ([], [{**self.endpoint, "status": "unknown", "http_status": 0}],
+                          [{**self.endpoint, "status": "unknown", "http_status": 502}]):
+            with self.subTest(endpoints=endpoints):
+                self.apply(config)
+                browser = next(app for app in self.api.apps if app["domain"] == "8000.example.com")
+                self.apply(config, endpoints=endpoints)
+                self.assertEqual(table_from_settings(self.api.worker)["hosts"], {})
+                self.assertEqual(self.api.domains, [])
+                self.assertEqual(self.api.tokens, [])
+                self.assertEqual(self.api.apps, [browser])
+                self.assertEqual([entry.get("hostname") for entry in self.api.config["ingress"]],
+                                 ["8000.example.com", None])
 
     def test_both_public_modes_share_one_worker_and_machine_protected_origin(self):
         participant = self.apply()
