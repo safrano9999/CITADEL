@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CITADEL</title>
 <link rel="icon" type="image/svg+xml" href="/citadel.svg">
-<link rel="stylesheet" href="/assets/style.css?v=20261023-1">
+<link rel="stylesheet" href="/assets/style.css?v=20261023-2">
 </head>
 <body
     data-default-mode="{{ data.default_mode|e }}"
@@ -64,6 +64,10 @@
 
     {% if data.http_tiles %}
     <div class="section-title" id="services-title">Services</div>
+    <div class="grid protocol-filters" id="protocol-filters" role="group" aria-label="Service filters" hidden>
+        <button class="protocol-filter" type="button" data-protocol-filter="mcp" aria-pressed="true" hidden>MCP · 1</button>
+        <button class="protocol-filter" type="button" data-protocol-filter="api" aria-pressed="true" hidden>API · 1</button>
+    </div>
     <section class="grid" id="services-grid">
         {% for svc in data.http_tiles %}
         {% set port = svc.port|string %}
@@ -71,6 +75,9 @@
         <article class="tile"
             {% if data.default_mode in ['api-bearer', 'api-oauth'] and not (svc.provider_endpoints|default({})).get(data.default_mode) %}hidden{% endif %}
             data-port="{{ port|e }}"
+            data-protocol-filters="{{ svc.protocol_filters|default([])|join(',')|e }}"
+            data-service-name="{{ svc.display_name|default(svc.name|default('Port ' ~ port))|e }}"
+            data-process="{{ svc.process|default('—', true)|e }}"
             data-cloudflare-subdomains="{{ svc.cloudflare_rule.subdomains|join(',')|e }}"
             data-cloudflare-whitelist="{{ '1' if svc.cloudflare_rule.whitelist else '0' }}"
             data-cloudflare-emails="{{ svc.cloudflare_rule.emails|tojson|forceescape }}"
@@ -115,8 +122,7 @@
     {% endif %}
     <p id="api-empty" hidden>No API or MCP endpoints detected.</p>
 
-    {% if data.other_ports %}
-    <div id="other-ports" {% if data.default_mode in ['api-bearer', 'api-oauth'] %}hidden{% endif %}>
+    <div id="other-ports" data-has-ports="{{ '1' if data.other_ports else '0' }}" {% if not data.other_ports or data.default_mode in ['api-bearer', 'api-oauth'] %}hidden{% endif %}>
     <div class="section-title">Other Listening Ports</div>
     <section class="other-wrap">
         <table class="other-table">
@@ -128,6 +134,7 @@
                     <th>Process</th>
                 </tr>
             </thead>
+            <tbody id="filtered-services"></tbody>
             <tbody>
                 {% for p in data.other_ports %}
                 <tr>
@@ -141,7 +148,6 @@
         </table>
     </section>
     </div>
-    {% endif %}
     </div>
 
 </main>
@@ -157,6 +163,9 @@ const cloudflareEditBtn = document.getElementById('cloudflare-edit-btn');
 const cloudflareSaveBtn = document.getElementById('cloudflare-save-btn');
 const modeDefaultHint = document.getElementById('mode-default-hint');
 const tiles = Array.from(document.querySelectorAll('.tile'));
+const protocolFilters = document.getElementById('protocol-filters');
+const filterButtons = Array.from(document.querySelectorAll('[data-protocol-filter]'));
+const enabledProtocols = {mcp: true, api: true};
 const defaultMode = document.body.dataset.defaultMode || 'localhost';
 const providerOrder = {{ data.provider_order|tojson }};
 const editTokenRequired = {{ 'true' if data.edit_token_required else 'false' }};
@@ -261,7 +270,16 @@ function applyMode(mode) {
   const apiMode = mode === 'api-bearer' || mode === 'api-oauth';
   let visibleServices = 0;
   const otherPorts = document.getElementById('other-ports');
-  if (otherPorts) otherPorts.hidden = apiMode;
+  const filteredRows = document.getElementById('filtered-services');
+  if (filteredRows) filteredRows.replaceChildren();
+  let filteredServices = 0;
+  for (const button of filterButtons) {
+    const category = button.dataset.protocolFilter;
+    button.hidden = !tiles.some(tile => splitCsv(tile.dataset.protocolFilters).includes(category));
+    button.setAttribute('aria-pressed', String(enabledProtocols[category]));
+    button.textContent = `${category.toUpperCase()} · ${Number(enabledProtocols[category])}`;
+  }
+  if (protocolFilters) protocolFilters.hidden = apiMode || filterButtons.every(button => button.hidden);
   if (cloudflareEditBtn) {
     cloudflareEditBtn.hidden = !cloudflareMode;
   }
@@ -276,7 +294,28 @@ function applyMode(mode) {
     const choice = chooseTileUrl(tile, mode);
     let endpoints = [];
     try { endpoints = JSON.parse(tile.dataset.apiEndpoints || '{}')[mode] || []; } catch {}
-    tile.hidden = apiMode && !endpoints.length;
+    const categories = splitCsv(tile.dataset.protocolFilters);
+    const filtered = !apiMode && categories.length > 0 && !categories.some(category => enabledProtocols[category]);
+    tile.hidden = (apiMode && !endpoints.length) || filtered;
+    if (filtered && filteredRows) {
+      const row = document.createElement('tr');
+      for (const [index, text] of [`:${tile.dataset.port}`, tile.dataset.serviceName, choice, tile.dataset.process].entries()) {
+        const cell = document.createElement('td');
+        if (index === 2 && choice) {
+          const link = document.createElement('a');
+          link.href = choice;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.textContent = choice;
+          cell.append(link);
+        } else {
+          cell.textContent = text || '—';
+        }
+        row.append(cell);
+      }
+      filteredRows.append(row);
+      filteredServices++;
+    }
     if (!tile.hidden) visibleServices++;
 
     tile.dataset.activeUrl = choice;
@@ -350,6 +389,7 @@ function applyMode(mode) {
       }
     }
   });
+  if (otherPorts) otherPorts.hidden = apiMode || (otherPorts.dataset.hasPorts !== '1' && !filteredServices);
 
   const title = document.getElementById('services-title');
   if (title) title.textContent = `${apiMode ? 'API / MCP' : 'Services'} (${visibleServices})`;
@@ -357,6 +397,14 @@ function applyMode(mode) {
   if (empty) empty.hidden = !apiMode || visibleServices > 0;
 
   updateCloudflareSaveState();
+}
+
+for (const button of filterButtons) {
+  button.addEventListener('click', () => {
+    const category = button.dataset.protocolFilter;
+    enabledProtocols[category] = !enabledProtocols[category];
+    applyMode(modeSel ? modeSel.value : defaultMode);
+  });
 }
 
 function renderModeDefaultHint(mode) {

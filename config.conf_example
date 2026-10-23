@@ -65,6 +65,10 @@ CITADEL_LOGO_PERSISTENT=1
 #default-preset: 5
 CITADEL_REPORT_MAX_MB=
 
+# HTTP status codes excluded from service discovery; empty uses 404,502.
+#default-preset: 404,502
+CITADEL_BLACKLIST_STATUS=
+
 # Optional: leave empty to disable subnet routes.
 CITADEL_SUBNET_IP=
 

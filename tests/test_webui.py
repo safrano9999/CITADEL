@@ -28,10 +28,11 @@ class WebUiScanBoundaryTests(unittest.TestCase):
         self.assertNotIn("<script>", rendered)
         self.assertIn("&lt;script&gt;", rendered)
 
-    def test_mobile_tiles_use_one_shrinkable_column(self):
+    def test_mobile_tiles_keep_fluid_columns_and_single_column_editors(self):
         stylesheet = Path(webui.__file__).resolve().parent / "assets" / "style.css"
-        mobile = stylesheet.read_text().split("@media (max-width: 760px)", 1)[1]
-        self.assertRegex(mobile, r"\.grid\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)")
+        css = stylesheet.read_text()
+        mobile = css.split("@media (max-width: 760px)", 1)[1]
+        self.assertRegex(css, r"\.grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fill, minmax\(min\(170px, 100%\), 1fr\)\)")
         self.assertRegex(mobile, r"\.tile\.cloudflare-editing\s*\{[^}]*grid-column:\s*auto")
 
     def test_mobile_header_matches_content_gutters(self):

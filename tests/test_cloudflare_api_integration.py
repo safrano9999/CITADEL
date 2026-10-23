@@ -372,6 +372,63 @@ class APIIntegrationTests(unittest.TestCase):
         self.assertNotIn("https://3070.example.com", tile["links"])
         self.assertEqual(tile["cardHref"], "https://oauth.api-3070.example.com/mcp")
 
+    def test_protocol_switches_move_tiles_to_list_and_leave_auth_views_unchanged(self):
+        from jinja2 import Environment, FileSystemLoader
+        from dashboard_dom import simulate_dashboard
+        protocols = {3070: ['mcp', 'rest'], 3071: ['mcp'], 3072: ['rest'], 3073: [], 3074: []}
+        self.write('CITADEL_DATA/services.json', {
+            'http_services': [{'port': port, 'scheme': 'https', 'name': f'Service {port}'} for port in protocols],
+            'other_ports': [{'port': 22, 'service': 'ssh'}]})
+        for port in protocols:
+            self.write(f'cache/{port}.json', {'scheme': 'https', 'kind': 'openai-v1' if port == 3074 else 'html'})
+        self.browser_payload['services'] = {str(port): {'url': f'https://{port}.example.com'} for port in protocols}
+        self.write('cache/cloudflare-routes.json', self.browser_payload)
+        for view in self.api_payload['views'].values():
+            original = view['services']['3070']
+            view['services'] = {str(port): {**original, 'endpoints': [
+                {**endpoint, 'url': endpoint['url'].replace('3070', str(port))}
+                for endpoint in original['endpoints'] if endpoint['protocol'] in types]}
+                for port, types in protocols.items() if types}
+        self.write('cache/CLOUDFLARE-API-routes.json', self.api_payload)
+        dashboard = self.dashboard()
+        self.assertEqual({tile['port']: tile['protocol_filters'] for tile in dashboard['http_tiles']},
+                         {3070: ['mcp', 'api'], 3071: ['mcp'], 3072: ['api'], 3073: [], 3074: ['api']})
+        page = Environment(loader=FileSystemLoader(ROOT / 'templates'), autoescape=True).get_template('index.html').render(data=dashboard)
+        result = simulate_dashboard(page, actions=[
+            {'mode': 'cloudflare', 'toggle': 'mcp'},
+            {'mode': 'cloudflare', 'toggle': 'api'},
+            {'mode': 'api-oauth'}, {'mode': 'api-bearer'},
+            {'mode': 'cloudflare', 'toggle': 'mcp'},
+            {'mode': 'cloudflare', 'toggle': 'api'},
+        ])
+        self.assertEqual([button['pressed'] for button in result['cloudflare']['filters']], ['true', 'true'])
+        first, both, oauth, bearer, mcp, restored = result['actions']
+        self.assertEqual([tile['port'] for tile in first['visible']], [3070, 3072, 3073, 3074])
+        self.assertIn('Service 3071', first['filtered'][0]['text'])
+        self.assertEqual(first['filtered'][0]['links'], ['https://3071.example.com'])
+        self.assertEqual([tile['port'] for tile in both['visible']], [3073])
+        self.assertEqual(len(both['filtered']), 4)
+        self.assertEqual([button['pressed'] for button in both['filters']], ['false', 'false'])
+        for view in (oauth, bearer):
+            self.assertEqual([tile['port'] for tile in view['visible']], [3070, 3071, 3072])
+            self.assertTrue(view['filtersHidden'])
+            self.assertTrue(view['otherHidden'])
+            self.assertEqual(view['filtered'], [])
+        self.assertEqual([tile['port'] for tile in mcp['visible']], [3070, 3071, 3073])
+        self.assertEqual(len(restored['visible']), 5)
+        self.assertEqual(restored['filtered'], [])
+        self.assertFalse(restored['otherHidden'])
+
+    def test_protocol_buttons_only_appear_for_present_categories(self):
+        from jinja2 import Environment, FileSystemLoader
+        from dashboard_dom import simulate_dashboard
+        dashboard = self.dashboard()
+        for categories in ([], ['mcp'], ['api']):
+            dashboard['http_tiles'][0]['protocol_filters'] = categories
+            page = Environment(loader=FileSystemLoader(ROOT / 'templates'), autoescape=True).get_template('index.html').render(data=dashboard)
+            view = simulate_dashboard(page)['cloudflare']
+            self.assertEqual(view['filtersHidden'], not categories)
+            self.assertEqual([button['category'] for button in view['filters'] if not button['hidden']], categories)
     def test_filtered_scan_replaces_stale_errors_and_preserves_other_providers(self):
         self.write('CITADEL_DATA/providers_state.json', {
             'providers': {'cloudflare': {'status': 'error'}, 'CLOUDFLARE-API': {'status': 'error'},

@@ -75,6 +75,13 @@ REPORT_MAX_MB="$(PYTHONPATH="$SCRIPT_DIR" python3 -c \
     'from python_header import get_int; print(get_int("CITADEL_REPORT_MAX_MB", 5))')"
 [[ "$REPORT_MAX_MB" -gt 0 ]] || { echo "CITADEL_REPORT_MAX_MB must be positive" >&2; exit 2; }
 MAX_FETCH_BYTES=$((REPORT_MAX_MB * 1048576))
+BLACKLIST_STATUS="$(PYTHONPATH="$SCRIPT_DIR" python3 -c '
+from python_header import get
+codes = [code.strip() for code in (get("CITADEL_BLACKLIST_STATUS") or "404,502").split(",")]
+if any(not code.isascii() or not code.isdigit() or len(code) != 3 or not 100 <= int(code) <= 599 for code in codes):
+    raise SystemExit("CITADEL_BLACKLIST_STATUS requires comma-separated HTTP status codes (100–599)")
+print("," + ",".join(codes) + ",")
+')"
 
 mkdir -p "$(dirname "$SCAN_LOCK_FILE")"
 exec {SCAN_LOCK_FD}>"$SCAN_LOCK_FILE"
@@ -342,7 +349,7 @@ root_http_status() {
 }
 
 is_discoverable_status() {
-    [[ "$1" =~ ^[1-5][0-9][0-9]$ && "$1" != "404" ]]
+    [[ "$1" =~ ^[1-5][0-9][0-9]$ && "$BLACKLIST_STATUS" != *",$1,"* ]]
 }
 
 probe_http() {
@@ -350,7 +357,7 @@ probe_http() {
     [[ "$host" == "127.0.0.1" ]] && ssl="$LOCAL_SSL" || ssl="$NET_SSL"
     url="https://${host}:${port}"
     status="$(root_http_status "$url" "$ssl")"
-    [[ "$status" != "404" ]] || return 0
+    [[ -z "$status" || "$BLACKLIST_STATUS" != *",$status,"* ]] || return 0
     if ! is_discoverable_status "$status"; then
         url="http://${host}:${port}"
         status="$(root_http_status "$url" "$ssl")"

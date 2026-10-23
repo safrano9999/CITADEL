@@ -34,7 +34,7 @@ class ScanIntegrationTests(unittest.TestCase):
                         f'<html><head><title>{fixture["title"]}</title><link rel="icon" href="/icon.svg"></head></html>').encode()
                 if not icon:
                     body += b' ' * fixture.get('padding', 0)
-                self.send_response(200)
+                self.send_response(200 if icon else fixture.get("status", 200))
                 self.send_header("Content-Type", "image/svg+xml" if icon else "text/html")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
@@ -125,6 +125,20 @@ class ScanIntegrationTests(unittest.TestCase):
             fixture['title'] = 'Large report &amp; configured limit'
             env['CITADEL_REPORT_MAX_MB'] = '15'
             self.assertEqual(scan()['http_services'][0]['title'], 'Large report & configured limit')
+            fixture['padding'] = 0
+            # A live proxy with a missing backend must not retain a web route.
+            for status in (404, 502):
+                fixture['status'] = status
+                self.assertEqual(scan()['http_services'], [])
+                self.assertEqual(json.loads((base / 'CITADEL_DATA/localhost-routes.json').read_text())['services'], {})
+            # The configured CSV replaces the default; auth responses still count.
+            env['CITADEL_BLACKLIST_STATUS'] = ' 404 , 503 '
+            self.assertEqual(scan()['http_services'][0]['port'], port)
+            fixture['status'] = 401
+            self.assertEqual(scan()['http_services'][0]['port'], port)
+            fixture['status'] = 503
+            self.assertEqual(scan()['http_services'], [])
+            fixture['status'] = 200
             fixture["reject_http"] = True
             rejected = scan()
             self.assertEqual(rejected["http_services"], [])

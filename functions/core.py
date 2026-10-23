@@ -361,6 +361,10 @@ def build_dashboard() -> dict:
         tile["provider_endpoints"] = {
                     mode: ports.get(port, []) for mode, ports in providers.get("provider_endpoints_by_port", {}).items()
         }
+        protocols = {endpoint.get("protocol") for endpoints in tile["provider_endpoints"].values()
+                     for endpoint in endpoints}
+        tile["protocol_filters"] = (["mcp"] if "mcp" in protocols else []) + (
+            ["api"] if protocols & {"rest", "graphql", "rpc"} or probe.get("kind") == "openai-v1" else [])
         # Display known direct interfaces too, without pretending that an
         # unpublished API has a managed OAuth route.
         browser_url = next((tile_urls.get(mode) or (tile.get("urls") or {}).get(mode)
