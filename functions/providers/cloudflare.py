@@ -32,7 +32,7 @@ from cloudflare_plan import api_routes, browser_routes, combine_routes, merge_in
 from cloudflare_api_policy import APISettings, settings as api_settings
 from api_discovery_rules import load_rules
 from cloudflare_api_access import load_access, parse_entries, probe_credentials, scaffold, mark_applied
-from cloudflare_api_routes import discover as discover_api, output as api_output
+from cloudflare_api_routes import discover as discover_api, output as api_output, retained_mcp_routes
 
 
 def load_project_getter(root: Path) -> Callable[[str, str], str]:
@@ -92,6 +92,7 @@ def main() -> int:
     api_table = {"schema": 1, "hosts": {}}
     api_errors, api_warnings, api_diagnostics = [], [], []
     endpoints, access, access_document = [], {}, {}
+    api, retained, retained_statuses = None, [], {}
     api_verified = False
     api_hint = (root / "CITADEL_DATA/cloudflare-api/runtime.json").exists()
 
@@ -105,13 +106,18 @@ def main() -> int:
     try:
         api_config = api_settings(root, get)
         api_errors.extend(api_config.errors)
-        # Local detection is independent of remote publication. Keep the fresh
-        # inventory available to the API views even when Cloudflare is down.
+        # Existing MCP routes come from the deployed Worker; other endpoints
+        # are discovered against the current local listeners.
         if token and api_config.modes:
             access_document = load_access(root)
             access = {key: parse_entries(csv) for key, csv in access_document.items()}
+            if api_config.keep_mcp_routes and not missing:
+                api = CloudflareAPI(token)
+                retained, retained_statuses = retained_mcp_routes(
+                    api, root, account_id, zone_id, tunnel_id, api_config)
             endpoints = discover_api(services, api_config, probe_credentials(access),
-                                     int(get("CITADEL_WEBUI_PORT", "11000") or "11000"), rules=load_rules(root))
+                                     int(get("CITADEL_WEBUI_PORT", "11000") or "11000"),
+                                     rules=load_rules(root), retained=retained)
         if token and api_config.enabled:
             scaffold(root, endpoints)
         write_json(root / "cache/cloudflare-api-inventory.json", {"generated_at": now_iso(), "endpoints": endpoints})
@@ -123,7 +129,7 @@ def main() -> int:
             if raw not in ("0", "1", "false", "true", "no", "yes", "off", "on"):
                 raise ValueError("CITADEL_CLOUDFLARE_SERVERSIDE_PERSISTENCE must be a boolean")
             persistent = parse_bool(raw)
-            api = CloudflareAPI(token)
+            api = api or CloudflareAPI(token)
             api.verify_token()
             authenticated = True
             if missing:
@@ -238,6 +244,7 @@ def main() -> int:
     api_payload = api_output(api_table, considered=bool((token and api_config.modes) or api_table["hosts"]),
                              authenticated=api_verified, modes=api_config.modes,
                              inventory=endpoints,
+                             retained_statuses=retained_statuses,
                              errors=api_errors, warnings=api_warnings,
                              diagnostics=api_diagnostics)
     api_payload["cleanup_pending"] = bool(api_hint and not api_verified)

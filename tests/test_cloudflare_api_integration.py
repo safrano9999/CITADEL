@@ -433,6 +433,23 @@ class APIIntegrationTests(unittest.TestCase):
             view = simulate_dashboard(page)['cloudflare']
             self.assertEqual(view['filtersHidden'], not categories)
             self.assertEqual([button['category'] for button in view['filters'] if not button['hidden']], categories)
+
+    def test_retained_mcp_stays_in_auth_views_without_reviving_a_web_tile(self):
+        from jinja2 import Environment, FileSystemLoader
+        from dashboard_dom import simulate_dashboard
+        self.write('CITADEL_DATA/services.json', {'http_services': []})
+        for view in self.api_payload['views'].values():
+            for endpoint in view['services']['3070']['endpoints']:
+                endpoint['retained'] = endpoint['protocol'] == 'mcp'
+        self.write('cache/CLOUDFLARE-API-routes.json', self.api_payload)
+        dashboard = self.dashboard()
+        self.assertEqual(len(dashboard['http_tiles']), 1)
+        self.assertTrue(dashboard['http_tiles'][0]['api_only'])
+        page = Environment(loader=FileSystemLoader(ROOT / 'templates'), autoescape=True).get_template('index.html').render(data=dashboard)
+        views = simulate_dashboard(page)
+        self.assertEqual(views['cloudflare']['visible'], [])
+        self.assertTrue(views['cloudflare']['filtersHidden'])
+        self.assertEqual([tile['port'] for tile in views['api-oauth']['visible']], [3070])
     def test_filtered_scan_replaces_stale_errors_and_preserves_other_providers(self):
         self.write('CITADEL_DATA/providers_state.json', {
             'providers': {'cloudflare': {'status': 'error'}, 'CLOUDFLARE-API': {'status': 'error'},

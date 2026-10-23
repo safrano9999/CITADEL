@@ -215,7 +215,7 @@ def documentation_links(response: Probe, source_url: str) -> list[str]:
     return list(dict.fromkeys(paths))[:4]
 
 
-def discover_service(service: dict, credentials: dict, *, probe=None, admin_ports=(), rules=()) -> list[dict]:
+def discover_service(service: dict, credentials: dict, *, probe=None, admin_ports=(), rules=(), skip_mcp_paths=()) -> list[dict]:
     port, scheme = service.get("port"), service.get("scheme")
     if type(port) is not int or not 1 <= port <= 65535 or scheme not in {"http", "https"}:
         raise ValueError("Invalid scanned HTTP listener")
@@ -269,6 +269,8 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
                    "Local declaration unverified: read-only JSON probe did not match")
 
     for path in MCP_PATHS:
+        if path in skip_mcp_paths:
+            continue
         key = route_id(port, "mcp", path)
         response = probe(path, "POST", {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
             "protocolVersion": PROTOCOL_VERSION, "capabilities": {},

@@ -46,6 +46,20 @@ class DiscoveryTests(unittest.TestCase):
                 self.assertTrue(all(call[2]["method"] == "initialize" for call in self.calls if call[1] == "POST"))
                 self.assertLessEqual(len(self.calls), MAX_REQUESTS)
 
+    def test_retained_mcp_path_is_not_probed_and_new_mcp_paths_are_discovered(self):
+        calls = []
+        def probe(path, method="GET", payload=None, headers=None, **kwargs):
+            calls.append(path)
+            if path == "/mcp":
+                raise AssertionError("Published route must not be probed")
+            if path == "/api/mcp":
+                return reply({"jsonrpc": "2.0", "id": 1, "result": {
+                    "protocolVersion": "2025-06-18", "serverInfo": {}, "capabilities": {}}})
+            return Probe(404, {}, b"")
+        rows = discover_service(self.service, {}, probe=probe, skip_mcp_paths=("/mcp",))
+        self.assertNotIn("/mcp", calls)
+        self.assertTrue(any(row["path"] == "/api/mcp" and row["status"] == "ready" for row in rows))
+
     def test_html_and_auth_status_are_not_protocol_proof(self):
         rows = self.discover({"/mcp": Probe(200, {"content-type": "text/html"}, b"<html>Login</html>"),
                               "/api/mcp": reply({"error": "Unauthorized"}, 401)})

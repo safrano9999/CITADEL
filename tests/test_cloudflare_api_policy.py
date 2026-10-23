@@ -46,6 +46,17 @@ class APIPolicyTests(unittest.TestCase):
         self.config["CITADEL_CLOUDFLARE_API_BEARER"] = "ignored-legacy-value"
         self.assertEqual(settings(self.root, self.config.get).modes, ("api-bearer", "api-oauth"))
 
+    def test_keep_mcp_routes_defaults_to_one_and_accepts_explicit_zero(self):
+        for value, expected in ((None, True), ("", True), ("1", True), ("0", False)):
+            if value is None:
+                self.config.pop("CITADEL_KEEP_API_MCP_ROUTES", None)
+            else:
+                self.config["CITADEL_KEEP_API_MCP_ROUTES"] = value
+            self.assertEqual(settings(self.root, self.config.get).keep_mcp_routes, expected)
+        self.config["CITADEL_KEEP_API_MCP_ROUTES"] = "wrong"
+        with self.assertRaisesRegex(ValueError, "CITADEL_KEEP_API_MCP_ROUTES"):
+            settings(self.root, self.config.get)
+
     def test_extension_dependency_and_disable(self):
         self.config[OAUTH] = "1"
         for name in ("cloudflare", "CLOUDFLARE-API"):

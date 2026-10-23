@@ -146,6 +146,7 @@ class APISettings:
     errors: tuple[str, ...] = ()
     bearer: bool = True
     oauth_grant_duration: str = "24h"
+    keep_mcp_routes: bool = True
 
     @property
     def modes(self) -> tuple[str, ...]:
@@ -201,7 +202,10 @@ def settings(root: Path, get: Callable[[str, str], str]) -> APISettings:
     if oauth and not (uris or local or loopback):
         errors.append(f"OAuth requires client callbacks in {OAUTH_WHITELIST}")
         oauth = False
+    keep = (get("CITADEL_KEEP_API_MCP_ROUTES", "1") or "1").strip() or "1"
+    if keep not in {"0", "1"}:
+        raise ValueError("CITADEL_KEEP_API_MCP_ROUTES must be 0 or 1")
     return APISettings(enabled=True, oauth=oauth, bearer=mode != "oauth", excluded=excluded,
                        allowed_redirect_uris=tuple(dict.fromkeys(uris)),
                        allow_localhost=local, allow_loopback=loopback, errors=tuple(errors),
-                       oauth_grant_duration=duration)
+                       oauth_grant_duration=duration, keep_mcp_routes=keep == "1")

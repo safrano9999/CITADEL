@@ -105,6 +105,12 @@ CITADEL_CLOUDFLARE_OAUTH_GRANT_DURATION=24h
 #default-preset: both
 CITADEL_CLOUDFLARE_API_MODE=both
 
+# Keep published OAuth/Bearer MCP routes and skip their probes; empty uses 1.
+# Set 0 to rediscover them and remove endpoints that no longer respond.
+#choices: 0 1
+#default-preset: 1
+CITADEL_KEEP_API_MCP_ROUTES=
+
 #default-preset: insert later
 CITADEL_CLOUDFLARE_DOMAIN=
 

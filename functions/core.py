@@ -202,7 +202,7 @@ def _load_providers() -> dict:
                 for port, route in (view.get("services") or {}).items():
                     if not isinstance(route, dict):
                         continue
-                    endpoints = [{**{key: endpoint.get(key) for key in ("id", "protocol", "path", "url", "status")},
+                    endpoints = [{**{key: endpoint.get(key) for key in ("id", "protocol", "path", "url", "status", "retained")},
                                   "access_configured": endpoint.get("access_configured", bool(routes.get("remote_verified")))}
                                  for endpoint in route.get("endpoints", []) if isinstance(endpoint, dict)]
                     detected.setdefault(str(port), {}).update({endpoint["id"]: endpoint for endpoint in endpoints})
@@ -310,6 +310,12 @@ def build_dashboard() -> dict:
     # Providers
     providers = _load_providers()
     provider_order = providers["provider_order"]
+    known_ports = {str(tile.get("port")) for tile in http_tiles}
+    for ports in providers.get("provider_endpoints_by_port", {}).values():
+        for port, endpoints in ports.items():
+            if port not in known_ports and any(endpoint.get("retained") and endpoint.get("url") for endpoint in endpoints):
+                http_tiles.append({"port": int(port), "scheme": "https", "name": f"MCP :{port}", "api_only": True})
+                known_ports.add(port)
 
     # Default mode
     configured_default = str(ui_cfg.get("default_provider") or "localhost")

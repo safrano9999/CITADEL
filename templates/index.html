@@ -73,8 +73,9 @@
         {% set port = svc.port|string %}
         {% set scheme = svc.scheme|default('http') %}
         <article class="tile"
-            {% if data.default_mode in ['api-bearer', 'api-oauth'] and not (svc.provider_endpoints|default({})).get(data.default_mode) %}hidden{% endif %}
+            {% if (data.default_mode in ['api-bearer', 'api-oauth'] and not (svc.provider_endpoints|default({})).get(data.default_mode)) or (svc.api_only|default(false) and data.default_mode not in ['api-bearer', 'api-oauth']) %}hidden{% endif %}
             data-port="{{ port|e }}"
+            data-api-only="{{ '1' if svc.api_only|default(false) else '0' }}"
             data-protocol-filters="{{ svc.protocol_filters|default([])|join(',')|e }}"
             data-service-name="{{ svc.display_name|default(svc.name|default('Port ' ~ port))|e }}"
             data-process="{{ svc.process|default('—', true)|e }}"
@@ -275,7 +276,7 @@ function applyMode(mode) {
   let filteredServices = 0;
   for (const button of filterButtons) {
     const category = button.dataset.protocolFilter;
-    button.hidden = !tiles.some(tile => splitCsv(tile.dataset.protocolFilters).includes(category));
+    button.hidden = !tiles.some(tile => tile.dataset.apiOnly !== '1' && splitCsv(tile.dataset.protocolFilters).includes(category));
     button.setAttribute('aria-pressed', String(enabledProtocols[category]));
     button.textContent = category.toUpperCase();
   }
@@ -295,9 +296,9 @@ function applyMode(mode) {
     let endpoints = [];
     try { endpoints = JSON.parse(tile.dataset.apiEndpoints || '{}')[mode] || []; } catch {}
     const categories = splitCsv(tile.dataset.protocolFilters);
-    const filtered = !apiMode && tile.dataset.browserHttp !== '1' && categories.length > 0
+    const filtered = !apiMode && tile.dataset.apiOnly !== '1' && tile.dataset.browserHttp !== '1' && categories.length > 0
       && !categories.some(category => enabledProtocols[category]);
-    tile.hidden = (apiMode && !endpoints.length) || filtered;
+    tile.hidden = (apiMode && !endpoints.length) || (!apiMode && tile.dataset.apiOnly === '1') || filtered;
     if (filtered && filteredRows) {
       const row = document.createElement('tr');
       for (const [index, text] of [`:${tile.dataset.port}`, tile.dataset.serviceName, choice, tile.dataset.process].entries()) {
