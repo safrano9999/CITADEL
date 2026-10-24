@@ -68,7 +68,7 @@ jobs:
         id: version
         env:
           GH_TOKEN: ${{ github.token }}
-          IMAGE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.image_tag }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
           REPLACE_EXISTING: ${{ github.event_name == 'workflow_dispatch' && inputs.replace_existing }}
         run: |
           version="$(python .github/scripts/resolve-image-tag.py)"
