@@ -22,6 +22,7 @@ case "$repo" in
   SPANKER) files=(README.md assets openclaw.plugin.json package.json requirements.txt index.js scripts spanker) ;;
   WELCOME) files=(README.md openclaw.plugin.json package.json requirements.txt index.js scripts readme_welcome.py python_header.py) ;;
   NOTE) files=(README.md openclaw.plugin.json package.json requirements.txt index.js prompt_default.md scripts note functions) ;;
+  OPENCLAW-MCP-SERVER-BRIDGE) files=(README.md META_GOAL.md openclaw.plugin.json package.json dist) ;;
   NEXTCLOUD) files=(README.md calendar_fetch.py nextcloud_sync.py config.json openclaw.plugin.json package.json requirements.txt index.js scripts runtime) ;;
   *) echo "Unsupported OpenClaw plugin repo: $repo" >&2; exit 2 ;;
 esac
