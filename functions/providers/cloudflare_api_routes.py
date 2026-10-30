@@ -65,9 +65,17 @@ def discover(services, settings, credentials, admin_port, *, rules=(), retained=
         raise ValueError("Invalid HTTP listener inventory")
     rows = [row for row in rows if row["port"] not in settings.excluded
             and (not parse_bool(services.get("https_only")) or row.get("scheme") == "https")]
+
+    def probe_service(row):
+        try:
+            return discover_service(row, credentials, admin_ports=[admin_port], rules=rules,
+                skip_mcp_paths=[endpoint["path"] for endpoint in retained if endpoint["port"] == row["port"]])
+        except (OSError, http.client.HTTPException) as exc:
+            print(f"[api-discovery] Skipping port {row['port']}: {type(exc).__name__}", file=sys.stderr)
+            return []
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-        results = list(pool.map(lambda row: discover_service(row, credentials, admin_ports=[admin_port], rules=rules,
-            skip_mcp_paths=[endpoint["path"] for endpoint in retained if endpoint["port"] == row["port"]]), rows))
+        results = list(pool.map(probe_service, rows))
     endpoints = {endpoint["id"]: endpoint for group in results for endpoint in group}
     endpoints.update({endpoint["id"]: endpoint for endpoint in retained})
     return sorted(endpoints.values(), key=lambda row: row["id"])

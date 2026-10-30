@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import http.client
+import io
 import json
 import sys
 import unittest
@@ -7,13 +9,14 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "functions"))
+sys.path[:0] = [str(ROOT / "functions"), str(ROOT / "functions/providers")]
 
 from api_discovery import (
     GRAPHQL_QUERY, MAX_REQUESTS, MISSING_PATH, TOOLS_INVOKE_PATH, LocalProbes, Probe, discover_service, documentation_links,
     json_message, openapi_operations,
 )
-from cloudflare_api_policy import route_id
+from cloudflare_api_policy import APISettings, route_id
+from cloudflare_api_routes import discover
 
 
 def reply(data, status=200):
@@ -22,6 +25,30 @@ def reply(data, status=200):
 
 class DiscoveryTests(unittest.TestCase):
     service = {"port": 3070, "scheme": "https", "title": "Blender bridge"}
+
+    def test_malformed_listener_is_skipped_with_stderr_and_other_ports_continue(self):
+        requests = []
+
+        def open_request(request, **kwargs):
+            requests.append(request.full_url)
+            if request.full_url.startswith("http://127.0.0.1:6543/"):
+                raise http.client.BadStatusLine("E\x00private backend error\n")
+            document = request.full_url.endswith("/openapi.json")
+            response = Mock(code=200 if document else 404,
+                            headers={"Content-Type": "application/json"})
+            response.read1.side_effect = io.BytesIO(json.dumps({
+                "openapi": "3.1.0", "paths": {"/health": {"get": {}}}}).encode()).read1
+            return response
+
+        services = {"http_services": [{"port": 6543, "scheme": "http"}, self.service]}
+        with patch("urllib.request.OpenerDirector.open", side_effect=open_request), \
+                patch("sys.stderr", new_callable=io.StringIO) as stderr, \
+                patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            rows = discover(services, APISettings(enabled=True), {}, 11000)
+        self.assertEqual([(row["port"], row["status"]) for row in rows], [(3070, "ready")])
+        self.assertEqual(sum(":6543/" in url for url in requests), 1)
+        self.assertEqual(stderr.getvalue(), "[api-discovery] Skipping port 6543: BadStatusLine\n")
+        self.assertEqual(stdout.getvalue(), "")
 
     def discover(self, responses, credentials=None):
         self.calls = []
