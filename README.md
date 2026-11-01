@@ -480,7 +480,7 @@ policy, logos, known disabled extension selections and runtime volume links,
 but replaces the code tree completely. Previous trees remain as backups.
 Missing Python dependencies are installed as Fedora packages, never in a venv.
 
-For an explicit live refresh, run `python3 -s /path/to/00-refresh.py --live`
+For an explicit live refresh, run `python3 -E /path/to/00-refresh.py --live`
 inside the container. It refuses an active scan, validates the clone first,
 and restarts only Citadel's WebUI. It does not scan, reset routes, restart
 Caddy, recreate the container or build an image. Run the subsequent scan and
@@ -1259,7 +1259,7 @@ Install dependencies, then run the same source checks used by the release
 workflow:
 
 ```bash
-/usr/bin/python3 -s -m unittest discover -s tests
+/usr/bin/python3 -E -m unittest discover -s tests
 node --check index.js
 bash -n scan.sh
 bash -n unroute.sh

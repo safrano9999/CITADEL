@@ -125,7 +125,7 @@ class CitadelSystemdRuntimeTests(unittest.TestCase):
                     if line.startswith(("ExecStart=", "ExecStartPost="))]
         self.assertEqual(len(commands), 2)
         for command in commands:
-            self.assertTrue(command.startswith("/usr/bin/python3 webui.py"))
+            self.assertTrue(command.startswith("/usr/bin/python3 -E webui.py"))
             self.assertNotIn(" -s ", command)
             self.assertNotIn(".venv", command)
 

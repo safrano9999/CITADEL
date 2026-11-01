@@ -50,17 +50,17 @@ class DaemonInstallerTests(unittest.TestCase):
 
     def test_unix_service_uses_shared_python_entrypoint(self) -> None:
         unit = self.render("unix")
-        self.assertIn("ExecStart=/usr/bin/python3 -s ", unit)
+        self.assertIn("ExecStart=/usr/bin/python3 -E ", unit)
         self.assertIn("/webui.py\n", unit)
         self.assertNotIn("RuntimeDirectory", unit)
         self.assertNotIn("--uds", unit)
         self.assertNotIn(".venv", unit)
 
-    def test_tcp_service_uses_system_python_without_user_packages(self) -> None:
+    def test_tcp_service_uses_system_python_without_ambient_python_environment(self) -> None:
         for transport in (None, "", "tcp"):
             with self.subTest(transport=transport):
                 unit = self.render(transport)
-                self.assertIn("ExecStart=/usr/bin/python3 -s ", unit)
+                self.assertIn("ExecStart=/usr/bin/python3 -E ", unit)
                 self.assertIn("/webui.py\n", unit)
                 self.assertNotIn("RuntimeDirectory=", unit)
 

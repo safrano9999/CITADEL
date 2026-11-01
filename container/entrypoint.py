@@ -139,7 +139,7 @@ def main():
         configure_optional_clients(ROOT)
         start_tailscale(runtime, ROOT)
         start_cloudflare(runtime, ROOT)
-        runtime.start(sys.executable, "-s", str(ROOT / "webui.py"))
+        runtime.start(sys.executable, "-E", str(ROOT / "webui.py"))
         runtime.wait_ready(listener_ready)
         scan = subprocess.Popen(["/bin/bash", str(ROOT / "scan.sh")])
         while True:

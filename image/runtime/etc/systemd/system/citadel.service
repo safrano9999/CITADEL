@@ -10,13 +10,13 @@ WorkingDirectory=/opt/safrano9999/CITADEL
 PassEnvironment=CITADEL_WEBUI_TRANSPORT CITADEL_WEBUI_SOCKET XDG_RUNTIME_DIR CITADEL_WEBUI_PORT CITADEL_HIDE_HTTP_WEBUI_DUPE CITADEL_LOGO_PERSISTENT CITADEL_SUBNET_IP CITADEL_CLOUDFLARE_DOMAIN CITADEL_CLOUDFLARE_ACCOUNT_ID CITADEL_CLOUDFLARE_ZONE_ID CITADEL_CLOUDFLARE_TUNNEL_ID CLOUDFLARE_API_TOKEN CLOUDFLARE_EMAIL CLOUDFLARE_TUNNEL_TOKEN TS_STATE_DIR TS_AUTHKEY TS_HOSTNAME FASTAPI_HOST CODEANALYST_PORT JUGO_PORT USE_TMUX TMUX_SHELL JUGO_TMUX_SESSION_PREFIX DB_TYPE DB_PATH DB_URL DB_PORT DB_NAME_JUGO DB_USER_JUGO DB_PW_JUGO DEEPL_API_KEY XAI_API_KEY OPENAI_API_KEY GEMINI_API_KEY ELEVENLABS_API_KEY GOOGLE_TTS_CREDENTIALS OPENAI_V1_PROVIDER OPENAI_V1_URL OPENAI_V1_PORT OPENAI_V1_KEY OPENAI_V1_STREAM BIP39_PORT CLAUDE_CODE_OAUTH_TOKEN CITADEL_TAILSCALE_SERVE CADDYFILE_START CADDYFILE_STEPS
 # Preserve the image's existing TCP bind address; Unix mode ignores it.
 Environment=FASTAPI_HOST=0.0.0.0
-# Fedora's -s also hides system-wide pip packages in /usr/local. The cascade
-# installs dependencies there; the standalone RPM image keeps its own -s CMD.
-ExecStart=/usr/bin/python3 webui.py
+# Use the fixed system interpreter while ignoring ambient PYTHON* variables;
+# retain the interpreter's normal global site-package search path.
+ExecStart=/usr/bin/python3 -E webui.py
 PassEnvironment=CITADEL_CLOUDFLARE_SERVERSIDE_PERSISTENCE
 PassEnvironment=CITADEL_CLOUDFLARE_API_OAUTH
 PassEnvironment=CADDYFILE_BACKEND
-ExecStartPost=/usr/bin/python3 webui.py --wait-ready /usr/local/libexec/fedora45-wait-ready
+ExecStartPost=/usr/bin/python3 -E webui.py --wait-ready /usr/local/libexec/fedora45-wait-ready
 Restart=on-failure
 
 [Install]

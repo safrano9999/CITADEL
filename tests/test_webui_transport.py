@@ -217,7 +217,7 @@ class LiveUnixTransportTests(unittest.TestCase):
                         config = "CITADEL_WEBUI_TRANSPORT=invalid\nCITADEL_WEBUI_SOCKET=relative\n"
                         environment.update(CITADEL_WEBUI_TRANSPORT="unix", CITADEL_WEBUI_SOCKET=str(path), container="podman")
                     (root / "config.conf").write_text(config + "CITADEL_WEBUI_PORT=unused-invalid\n")
-                    process = subprocess.Popen([sys.executable, "-s", str(root / "webui.py")], cwd=root,
+                    process = subprocess.Popen([sys.executable, "-E", str(root / "webui.py")], cwd=root,
                                                env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                     output = ""
                     try:

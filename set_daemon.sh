@@ -21,10 +21,10 @@ PYTHON_BIN="$(command -v "${PYTHON_BIN:-/usr/bin/python3}")"
 # as it does outside systemd. Rendering needs no config parsing or socket setup.
 # python_header reads this directory's config.conf and .env directly. Do not
 # copy them or inject FASTAPI_HOST: injection intentionally changes the bind.
-EXEC_START="$PYTHON_BIN -s $SCRIPT_DIR/webui.py"
+EXEC_START="$PYTHON_BIN -E $SCRIPT_DIR/webui.py"
 
 if ! "$RENDER_ONLY"; then
-    "$PYTHON_BIN" -s -c 'import dotenv, fastapi, jinja2, uvicorn' || {
+    "$PYTHON_BIN" -E -c 'import dotenv, fastapi, jinja2, uvicorn' || {
         echo "Install CITADEL's system Python dependencies before installing the service (see README)." >&2
         exit 1
     }

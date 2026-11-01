@@ -284,7 +284,7 @@ def active_state(unit):
 
 
 def check_dependencies():
-    command = ["/usr/bin/python3", "-s", "-c", "import dotenv, fastapi, jinja2, uvicorn"]
+    command = ["/usr/bin/python3", "-E", "-c", "import dotenv, fastapi, jinja2, uvicorn"]
     try:
         run(command)
     except subprocess.CalledProcessError:
