@@ -57,6 +57,8 @@ def configure_optional_clients(root):
     # indirectly through the scanner either. Recreating the container resets this.
     for provider, keys in (("tailscale", ("TS_AUTHKEY",)),
                            ("cloudflare", ("CLOUDFLARE_API_TOKEN", "CLOUDFLARE_TUNNEL_TOKEN"))):
+        if provider == "tailscale" and Path("/var/run/tailscale/tailscaled.sock").exists():
+            continue
         if not any(os.environ.get(key, "").strip() for key in keys):
             source = root / "extensions/enabled" / provider
             if source.exists():
@@ -73,10 +75,10 @@ def tailscale_state():
 
 
 def start_tailscale(runtime, root):
-    if not os.environ.get("TS_AUTHKEY", "").strip() or not enabled(root, "tailscale"):
-        return
     # A mounted host socket is reused, never replaced or owned by this process.
     external = Path("/var/run/tailscale/tailscaled.sock").exists()
+    if not enabled(root, "tailscale") or (not external and not os.environ.get("TS_AUTHKEY", "").strip()):
+        return
     if not external:
         state_dir = root / "CITADEL_TAILSCALE"
         state_dir.mkdir(mode=0o700, exist_ok=True)
