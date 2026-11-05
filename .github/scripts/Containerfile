@@ -8,7 +8,7 @@ ADD --checksum=sha256:fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254
 FROM docker.io/library/alpine:3.24.3@sha256:b3413572228e34bd1c9245f5565e6cd127005655e8a7899aef33d8e83255c9e6
 
 ARG CLOUDFLARED_VERSION=2026.9.3
-ARG CLOUDFLARED_SHA256=77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2
+ARG TARGETARCH
 
 # Stable Alpine repositories only; system Python packages, no pip/venv/compiler.
 RUN apk upgrade --no-cache \
@@ -17,11 +17,14 @@ RUN apk upgrade --no-cache \
       py3-uvloop py3-httptools py3-watchfiles py3-websockets py3-yaml \
       bash coreutils findutils grep sed gawk curl jq iproute2-ss util-linux \
       'ca-certificates>=20261020-r0' 'ca-certificates-bundle>=20261020-r0' tini tailscale=1.98.10-r1 \
- && test "$(apk --print-arch)" = x86_64 \
+ && case "$TARGETARCH" in \
+      amd64) cloudflared_sha=77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2 ;; \
+      arm64) cloudflared_sha=aaeb2d7d0da3614634c7e03ab13487a1522c2e79165ed2929cfe23d5e95b326d ;; \
+      *) exit 1 ;; esac \
  && curl --fail --location --retry 3 \
-      "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64" \
+      "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-${TARGETARCH}" \
       -o /usr/local/bin/cloudflared \
- && echo "${CLOUDFLARED_SHA256}  /usr/local/bin/cloudflared" | sha256sum -c - \
+ && echo "${cloudflared_sha}  /usr/local/bin/cloudflared" | sha256sum -c - \
  && chmod 0755 /usr/local/bin/cloudflared \
  && cloudflared --version \
  && python3 -s -c 'import dotenv, fastapi, jinja2, uvicorn' \

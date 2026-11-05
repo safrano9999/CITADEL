@@ -28,9 +28,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-test-push:
-    if: github.repository_owner == 'safrano9999'
+  prepare:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Resolve immutable monthly version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          REPLACE_EXISTING: ${{ github.event_name == 'workflow_dispatch' && inputs.replace_existing }}
+        run: echo "tag=$(python .github/scripts/resolve-image-tag.py)" >> "$GITHUB_OUTPUT"
+  build-test-push:
+    needs: prepare
+    if: github.repository_owner == 'safrano9999'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-latest
+            caddy_sha: b8bec15d14fb033562af9f207850027bcbaa1f891edc9efe00d38bf39e1bf9944f8b6b8eba041ddd4c171cd70c905174c704d705be2f23bc678fe1eaf37a2485
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+            caddy_sha: 5466234be3e988071cef937aedbdd94c15b6f75cf7307397e67c2641219ac9bfe2c2bb3b31fc05bc68d3b6398bbe50abfa16ccf3b127318ccac31115ad26507c
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -38,6 +65,7 @@ jobs:
     env:
       DOCKER_BUILD_RECORD_UPLOAD: "false"
       IMAGE: ghcr.io/safrano9999/citadel
+      IMAGE_TAG: ${{ needs.prepare.outputs.tag }}-${{ matrix.architecture }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -59,20 +87,10 @@ jobs:
 
       - name: Verify generated HTTPS routes with Caddy
         run: |
-          curl --fail --location --retry 3 https://github.com/caddyserver/caddy/releases/download/v2.8.4/caddy_2.8.4_linux_amd64.tar.gz -o "$RUNNER_TEMP/caddy.tar.gz"
-          echo "b8bec15d14fb033562af9f207850027bcbaa1f891edc9efe00d38bf39e1bf9944f8b6b8eba041ddd4c171cd70c905174c704d705be2f23bc678fe1eaf37a2485  $RUNNER_TEMP/caddy.tar.gz" | sha512sum -c -
+          curl --fail --location --retry 3 https://github.com/caddyserver/caddy/releases/download/v2.8.4/caddy_2.8.4_linux_${{ matrix.architecture }}.tar.gz -o "$RUNNER_TEMP/caddy.tar.gz"
+          echo "${{ matrix.caddy_sha }}  $RUNNER_TEMP/caddy.tar.gz" | sha512sum -c -
           tar -xzf "$RUNNER_TEMP/caddy.tar.gz" -C "$RUNNER_TEMP" caddy
           CADDY_TEST_BIN="$RUNNER_TEMP/caddy" python -m unittest discover -s tests -p test_caddy_https.py -v
-
-      - name: Resolve immutable monthly version
-        id: version
-        env:
-          GH_TOKEN: ${{ github.token }}
-          IMAGE_TAG: ${{ inputs.image_tag }}
-          REPLACE_EXISTING: ${{ github.event_name == 'workflow_dispatch' && inputs.replace_existing }}
-        run: |
-          version="$(python .github/scripts/resolve-image-tag.py)"
-          echo "tag=$version" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
@@ -81,20 +99,18 @@ jobs:
         with:
           context: .
           file: .github/scripts/Containerfile
-          platforms: linux/amd64
+          platforms: linux/${{ matrix.architecture }}
           load: true
           push: false
-          tags: |
-            ${{ env.IMAGE }}:${{ steps.version.outputs.tag }}
-            ${{ env.IMAGE }}:latest
+          tags: ${{ env.IMAGE }}:${{ env.IMAGE_TAG }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ steps.version.outputs.tag }}
+            org.opencontainers.image.version=${{ needs.prepare.outputs.tag }}
 
       - name: Smoke-test TCP, Unix socket and optional state
         env:
-          IMAGE_REF: ${{ env.IMAGE }}:${{ steps.version.outputs.tag }}
+          IMAGE_REF: ${{ env.IMAGE }}:${{ env.IMAGE_TAG }}
         run: bash .github/scripts/smoke-image.sh
 
       - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
@@ -104,11 +120,9 @@ jobs:
           password: ${{ github.token }}
 
       - name: Publish tested image
-        env:
-          IMAGE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -euo pipefail
-          for ref in "$IMAGE:$IMAGE_TAG" "$IMAGE:latest"; do
+          for ref in "$IMAGE:$IMAGE_TAG"; do
             for attempt in 1 2 3; do
               if docker push "$ref"; then break; fi
               if [ "$attempt" -eq 3 ]; then exit 1; fi
@@ -126,4 +140,24 @@ jobs:
             echo 'Image pushed, but PUBLIC RELEASE PENDING: https://github.com/users/safrano9999/packages/container/citadel/settings' >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          echo 'Public image: `${{ env.IMAGE }}:${{ steps.version.outputs.tag }}` and `:latest`' >> "$GITHUB_STEP_SUMMARY"
+  publish-manifest:
+    needs: [prepare, build-test-push]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    env:
+      IMAGE: ghcr.io/safrano9999/citadel
+      IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+      - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Publish tested multi-architecture manifest
+        run: |
+          docker buildx imagetools create --tag "$IMAGE:$IMAGE_TAG" --tag "$IMAGE:latest" \
+            "$IMAGE:$IMAGE_TAG-amd64" "$IMAGE:$IMAGE_TAG-arm64"
+          docker buildx imagetools inspect "$IMAGE:$IMAGE_TAG" --raw \
+            | jq -e '[.manifests[].platform | select(.os == "linux") | .architecture] | unique | sort == ["amd64", "arm64"]'
