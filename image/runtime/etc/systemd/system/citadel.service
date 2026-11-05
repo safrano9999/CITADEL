@@ -14,6 +14,7 @@ Environment=FASTAPI_HOST=0.0.0.0
 # retain the interpreter's normal global site-package search path.
 ExecStart=/usr/bin/python3 -E webui.py
 PassEnvironment=CITADEL_CLOUDFLARE_SERVERSIDE_PERSISTENCE
+PassEnvironment=CITADEL_CLOUDFLARE_ACCESS_SESSION_DURATION
 PassEnvironment=CITADEL_CLOUDFLARE_API_OAUTH
 PassEnvironment=CADDYFILE_BACKEND
 ExecStartPost=/usr/bin/python3 -E webui.py --wait-ready /usr/local/libexec/fedora45-wait-ready

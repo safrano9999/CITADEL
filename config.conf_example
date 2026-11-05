@@ -87,6 +87,12 @@ CITADEL_USER_AGENT=Mozilla/5.0 (compatible; CITADEL/1.0)
 #default-preset: 1
 CITADEL_CLOUDFLARE_SERVERSIDE_PERSISTENCE=1
 
+# Browser Access login session, including email OTP. Applies to new and existing
+# browser applications on this tunnel; independent of API OAuth grant duration.
+# Whole hours from 1h to 720h; 720h = thirty days.
+#default-preset: 24h
+CITADEL_CLOUDFLARE_ACCESS_SESSION_DURATION=24h
+
 # OAuth for email entries in CLOUDFLARE-API_access.json. Bearer entries work independently.
 # Client callbacks: CLOUDFLARE_OAUTH_Whitelist.json (copy the .json.example).
 #choices: 0 1

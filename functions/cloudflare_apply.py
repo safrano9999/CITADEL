@@ -25,6 +25,14 @@ from cloudflare_api_state import (
 
 ACCESS_APP_PREFIX = "CITADEL "
 ACCESS_POLICY_PREFIX = "CITADEL email whitelist "
+ACCESS_SESSION_DURATION = "CITADEL_CLOUDFLARE_ACCESS_SESSION_DURATION"
+
+
+def access_session_duration() -> str:
+    duration = os.environ.get(ACCESS_SESSION_DURATION, "24h").strip() or "24h"
+    if not re.fullmatch(r"[1-9][0-9]{0,2}h", duration) or int(duration[:-1]) > 720:
+        raise ValueError(f"{ACCESS_SESSION_DURATION} must be whole hours between 1h and 720h")
+    return duration
 
 
 @contextmanager
@@ -50,7 +58,7 @@ def access_app_payload(hostname: str, policy_id: str) -> dict[str, Any]:
         "name": f"{ACCESS_APP_PREFIX}{hostname}",
         "domain": hostname,
         "type": "self_hosted",
-        "session_duration": "24h",
+        "session_duration": access_session_duration(),
         "auto_redirect_to_identity": False,
         "policies": [{"id": policy_id, "precedence": 1}],
     }
@@ -129,6 +137,7 @@ def prepare_tunnel(
     DNS is removed last and recreated first, so even an interrupted run can
     discover the remaining Access objects next time without a local ID ledger.
     """
+    access_session_duration()  # Validate before any remote changes, including new apps.
     snapshot = inventory if inventory is not None else remote_inventory(api, account_id, zone_id, tunnel_id)
     config = snapshot["config"]
     ingress = config.get("ingress", [])

@@ -513,6 +513,32 @@ class CloudflareActivationTests(unittest.TestCase):
                 self.assertEqual(set(payload["services"]), {"8000"})
                 self.assert_no_remote_mutations()
 
+    def test_browser_session_duration_updates_existing_app_without_replacing_it(self):
+        self.existing_protected_route()
+        with patch.dict(os.environ, {"CITADEL_CLOUDFLARE_ACCESS_SESSION_DURATION": "720h"}):
+            code, payload = self.run_provider()
+            self.assertEqual(code, 0, payload["errors"])
+            self.api.update_access_app.assert_called_once()
+            account, app_id, changes = self.api.update_access_app.call_args.args
+            self.assertEqual((account, app_id, changes["session_duration"]), ("account", "app", "720h"))
+            self.api.delete_access_app.assert_not_called()
+            self.api.create_access_app.assert_not_called()
+            self.api.access_apps.return_value[0].update(changes)
+            self.api.reset_mock()
+            self.assertEqual(self.run_provider()[0], 0)
+            self.assert_no_remote_mutations()
+
+    def test_invalid_browser_session_duration_never_mutates_remote_state(self):
+        self.existing_protected_route()
+        for value in ("0h", "721h", "30d", "forever"):
+            with self.subTest(value=value), patch.dict(os.environ, {
+                    "CITADEL_CLOUDFLARE_ACCESS_SESSION_DURATION": value}):
+                self.api.reset_mock()
+                code, payload = self.run_provider()
+                self.assertEqual(code, 1)
+                self.assertIn("ACCESS_SESSION_DURATION", " ".join(payload["errors"]))
+                self.assert_no_remote_mutations()
+
     def test_legacy_browser_ingress_gains_host_override_once_without_access_changes(self):
         self.existing_protected_route()
         self.api.tunnel_configuration.return_value["ingress"][0].pop("originRequest")
