@@ -109,6 +109,9 @@ def start_tailscale(runtime, root):
 def start_cloudflare(runtime, root):
     if not enabled(root, "cloudflare"):
         return
+    protocol = os.environ.get("TUNNEL_TRANSPORT_PROTOCOL", "").strip() or "http2"
+    if protocol not in {"auto", "http2", "quic"}:
+        raise ValueError("TUNNEL_TRANSPORT_PROTOCOL must be auto, http2 or quic")
     token = os.environ.get("CLOUDFLARE_TUNNEL_TOKEN", "")
     if not token and all(os.environ.get(key) for key in (
             "CLOUDFLARE_API_TOKEN", "CITADEL_CLOUDFLARE_ACCOUNT_ID", "CITADEL_CLOUDFLARE_TUNNEL_ID")):
@@ -120,7 +123,8 @@ def start_cloudflare(runtime, root):
         path = Path("/run/citadel/cloudflared.token")
         with open(path, "w", opener=lambda name, flags: os.open(name, flags, 0o600)) as handle:
             handle.write(token)
-        runtime.start("cloudflared", "tunnel", "--no-autoupdate", "run", "--token-file", str(path))
+        runtime.start("cloudflared", "tunnel", "--no-autoupdate", "--protocol", protocol,
+                      "run", "--token-file", str(path))
 
 
 def main():
