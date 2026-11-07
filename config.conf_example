@@ -81,6 +81,12 @@ CITADEL_HTTPS_ONLY=0
 #default-preset: Mozilla/5.0 (compatible; CITADEL/1.0)
 CITADEL_USER_AGENT=Mozilla/5.0 (compatible; CITADEL/1.0)
 
+# Bundled Alpine connector: HTTP/2 over TCP avoids QUIC timeouts when UDP is blocked.
+# Empty also uses http2. Host/systemd connectors need this in their own environment.
+#choices: http2 auto quic
+#default-preset: http2
+TUNNEL_TRANSPORT_PROTOCOL=http2
+
 # Keep unchanged Cloudflare-side DNS, Access and tunnel routes (no local volume).
 # 0 deletes/rebuilds all managed bindings on every scan.
 #choices: 0 1

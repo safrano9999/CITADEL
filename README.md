@@ -295,6 +295,7 @@ renders provider buttons, and can run the configured scanner.
 | `CITADEL_CLOUDFLARE_ZONE_ID` | empty | Existing Cloudflare zone ID |
 | `CITADEL_CLOUDFLARE_TUNNEL_ID` | empty | Existing named Tunnel ID |
 | `CLOUDFLARE_API_TOKEN` | empty | Scoped Cloudflare API token |
+| `TUNNEL_TRANSPORT_PROTOCOL` | `http2` | Bundled Alpine connector transport: `http2`, `auto` or `quic`; empty uses `http2` |
 | `CLOUDFLARE_EMAIL` | empty | Default Access email allowlist |
 | `CLOUDFLARE_TUNNEL_TOKEN` | empty | Token consumed by the separately managed connector |
 
@@ -614,6 +615,32 @@ invalid tokens or incomplete required configuration are reported. It manages:
 - DNS records for discovered services;
 - ingress entries on an existing named Tunnel;
 - optional Cloudflare Access email policies.
+
+The bundled Alpine connector defaults to **HTTP/2 over TCP**. This avoids repeated
+QUIC connection timeouts on networks where outbound UDP is blocked. Set
+`TUNNEL_TRANSPORT_PROTOCOL=auto` to use cloudflared's automatic selection or
+`quic` to require QUIC. Empty or omitted values use `http2`; unsupported values
+are rejected before starting the connector. The setting takes effect on the next
+container start and affects only the tunnel connection to Cloudflare.
+See [Cloudflare's transport parameter](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/run-parameters/#protocol).
+
+On bare metal and systemd-based images, the existing `cloudflared.service` owns
+the connector. Configure its environment separately; setting Citadel's
+`config.conf` does not change that service. For a user service, run
+`systemctl --user edit cloudflared.service` and add:
+
+```ini
+[Service]
+Environment=TUNNEL_TRANSPORT_PROTOCOL=http2
+```
+
+Then run `systemctl --user daemon-reload` and
+`systemctl --user restart cloudflared.service`. For a system service, use
+`sudo systemctl` without `--user`. If its existing `ExecStart` explicitly sets
+`--protocol`, change that argument too because command-line flags take precedence.
+A Citadel scan reconciles routes; it does not restart or repair the connector.
+An active process alone does not prove connectivity: check the connector log for
+`Registered tunnel connection` and verify a request through the public endpoint.
 
 `CITADEL_CLOUDFLARE_SERVERSIDE_PERSISTENCE=1` is the default preset. Every scan
 queries Cloudflare and retains unchanged DNS bindings, Access rules and Tunnel
