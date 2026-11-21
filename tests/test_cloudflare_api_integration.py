@@ -217,6 +217,8 @@ class APIIntegrationTests(unittest.TestCase):
                 patch.object(cloudflare, "discover_api", return_value=[endpoint]), \
                 patch.object(cloudflare, "api_output", side_effect=lambda *a, **kw: output(*a, **kw, verify=lambda _: True)):
             self.assertEqual(cloudflare.main(), 0)
+            for item in remote.domains:
+                self.assertIn('"{}"'.format(item["hostname"]), remote.ruleset["rules"][0]["expression"])
             policy_read.assert_called_once()  # Rules and defaults use the same local snapshot.
             self.assertEqual(len(remote.domains), 2)
             self.assertEqual(len(remote.apps), 3)  # Browser OTP, OAuth, machine origin.

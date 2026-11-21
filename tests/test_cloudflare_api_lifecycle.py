@@ -28,6 +28,7 @@ class FakeCloudflare:
         self.sequence = 0
         self.config = {"ingress": [{"service": "http_status:404"}]}
         self.records, self.apps, self.policies, self.tokens, self.domains = [], [], [], [], []
+        self.ruleset = None
         self.worker = None
         self.subdomain = {"enabled": False, "previews_enabled": False}
         self.fail = None
@@ -40,6 +41,17 @@ class FakeCloudflare:
         self.events.append((kind, deepcopy(value)))
         if kind == self.fail:
             raise CloudflareAPIError("injected failure")
+
+    def request(self, method, path, *, payload=None):
+        if method == "GET" and path.endswith("/phases/http_request_dynamic_redirect/entrypoint"):
+            return deepcopy(self.ruleset)
+        if method == "POST" and path == "/zones/zone/rulesets" and self.ruleset is None:
+            self.event("create_ruleset", payload)
+            self.ruleset = {**deepcopy(payload), "id": self.identity("ruleset")}
+            for rule in self.ruleset["rules"]:
+                rule["id"] = self.identity("rule")
+            return deepcopy(self.ruleset)
+        raise AssertionError(f"Unexpected ruleset operation {method} {path}")
 
     def tunnel_configuration(self, *_): return deepcopy(self.config)
     def dns_records(self, *_): return deepcopy(self.records)
