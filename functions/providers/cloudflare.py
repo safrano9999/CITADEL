@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from cloudflare_api import CloudflareAPI, CloudflareAPIError
-from cloudflare_redirect import SETTING as WWW_REDIRECT_SETTING, prepare_redirect, apply_redirect
+from cloudflare_redirect import (SETTING as WWW_REDIRECT_SETTING, HTTPS_SETTING,
+                                 prepare_redirect, prepare_https_redirect, apply_redirect)
 from common import (
     ROUTE_SCHEMA_VERSION,
     now_iso,
@@ -88,6 +89,7 @@ def main() -> int:
     running = False
     authenticated = False
     redirect_status: dict[str, Any] = {"action": "unmanaged"}
+    https_status = {"action": "unmanaged"}
     api_config = APISettings()
     api_table = {"schema": 1, "hosts": {}}
     api_errors, api_warnings, api_diagnostics = [], [], []
@@ -170,6 +172,20 @@ def main() -> int:
                 if enabled:
                     prepare_tunnel(api, account_id, zone_id, tunnel_id, desired, persistent, adding(),
                                    inventory=snapshot, preflight_only=True)
+                    tunnel_hosts = set(browser_desired)
+                    if adding():
+                        # Add preserves earlier bindings. Verify their DNS still belongs to this tunnel.
+                        owned_dns = {record["name"] for record in snapshot["records"]
+                                     if record.get("type") == "CNAME" and
+                                     str(record.get("content", "")).lower().rstrip(".") ==
+                                     f"{tunnel_id}.cfargotunnel.com".lower()}
+                        tunnel_hosts.update(entry["hostname"] for entry in snapshot["config"].get("ingress", [])
+                                            if entry.get("hostname") in owned_dns)
+                    if redirect_plan.get("rule"):
+                        tunnel_hosts.discard(domain)
+                    planned_hosts = tunnel_hosts | set(participant.plan["origins"]) | set(participant.table["hosts"])
+                    https_setting = get(HTTPS_SETTING, "1")
+                    https_plan = prepare_https_redirect(api, zone_id, tunnel_id, planned_hosts, https_setting)
                 participant.quiesce()
                 participant.protect()
                 desired = combine_routes(browser_desired, participant.plan["origins"])
@@ -191,6 +207,13 @@ def main() -> int:
                     mark_applied(root, access_document)
                 if enabled:
                     apply_redirect(api, zone_id, redirect_plan)
+                    # Publishing the www rule may have created the zone ruleset.
+                    # Protection can also omit an API host whose access setup failed.
+                    actual_hosts = tunnel_hosts | set(participant.plan["origins"]) | set(api_table["hosts"])
+                    if actual_hosts != planned_hosts or redirect_plan["action"] == "create":
+                        https_plan = prepare_https_redirect(api, zone_id, tunnel_id, actual_hosts, https_setting)
+                    apply_redirect(api, zone_id, https_plan)
+                    https_status = {k: https_plan[k] for k in ("action", "warning") if k in https_plan}
             for hostname, route in (browser_desired if enabled else {}).items():
                 routes.setdefault(
                     str(route["port"]),
@@ -237,6 +260,7 @@ def main() -> int:
         "route_schema": ROUTE_SCHEMA_VERSION,
         "origin_host": origin_host,
         "redirect_to_www": redirect_status,
+        "http_to_https": https_status,
         "services": routes,
         "errors": errors,
         "warnings": warnings,

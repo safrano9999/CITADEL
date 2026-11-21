@@ -3,6 +3,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import threading
 import unittest
+from unittest.mock import MagicMock, patch
 
 from functions import availability
 
@@ -47,6 +48,21 @@ class AvailabilityTests(unittest.TestCase):
                 actual, tooltip = availability.probe(self.url + path)
                 self.assertEqual(actual, state)
                 self.assertIn(detail, tooltip)
+
+    def test_https_upgrade_uses_final_response_and_rejects_downgrade(self):
+        def response(code, headers):
+            obj = MagicMock(status=code, headers=headers, reason="fixture")
+            obj.__enter__.return_value = obj
+            return obj
+        with patch.object(availability, "build_opener") as build:
+            opener = build.return_value
+            upgrade = response(308, {"Location": "https://example.com/p?q=1"})
+            for code, state in [(200, "up"), (503, "down")]:
+                opener.open.side_effect = [upgrade, response(code, {})]
+                self.assertEqual(availability.probe("http://example.com/p?q=1")[0], state)
+                self.assertEqual(opener.open.call_args.args[0].full_url, "https://example.com/p?q=1")
+            opener.open.side_effect = [upgrade, response(302, {"Location": "http://example.com/"})]
+            self.assertIn("outside", availability.probe("http://example.com/")[1])
 
     def test_only_requested_indexed_tiles_and_active_link_are_checked(self):
         dashboard = {"http_tiles": [

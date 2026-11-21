@@ -139,6 +139,10 @@ CITADEL_CLOUDFLARE_DOMAIN443=0
 #default-preset: 0
 CITADEL_CLOUDFLARE_REDIRECT_TO_WWW=0
 
+# Redirect HTTP to HTTPS on hostnames published by this tunnel.
+#default-preset: 1
+CITADEL_CLOUDFLARE_HTTP_TO_HTTPS=1
+
 #default-preset: insert later
 CITADEL_CLOUDFLARE_ACCOUNT_ID=
 #default-preset: insert later

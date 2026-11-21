@@ -1,4 +1,4 @@
-"""Reconcile Citadel's optional port-443 canonical-host redirect at Cloudflare."""
+"""Reconcile Citadel's hostname-scoped redirects at Cloudflare."""
 from __future__ import annotations
 
 import hashlib
@@ -8,6 +8,7 @@ from cloudflare_api import CloudflareAPI, CloudflareAPIError
 
 
 SETTING = "CITADEL_CLOUDFLARE_REDIRECT_TO_WWW"
+HTTPS_SETTING = "CITADEL_CLOUDFLARE_HTTP_TO_HTTPS"
 PHASE = "http_request_dynamic_redirect"
 
 
@@ -42,6 +43,33 @@ def prepare_redirect(api: CloudflareAPI, zone_id: str, tunnel_id: str, domain: s
             }},
             "enabled": True,
         }
+    return plan_rule(api, zone_id, ref, wanted, SETTING, enabled, add=add)
+
+
+def prepare_https_redirect(api, zone_id, tunnel_id, hosts, setting):
+    """Reconcile an exact hostname set, scoped to plaintext visitor requests."""
+    from cloudflare_policy import normalize_hostname
+    raw = setting.strip().lower()
+    if raw not in ("", "blank", "1", "true", "on", "yes", "0", "false", "off", "no"):
+        raise ValueError(f"{HTTPS_SETTING} must be a boolean")
+    enabled = raw not in ("0", "false", "off", "no")
+    ref = "citadel_https_" + hashlib.sha256(tunnel_id.encode()).hexdigest()[:24]
+    wanted = None
+    if enabled and hosts:
+        names = " ".join(f'"{normalize_hostname(name)}"' for name in sorted(hosts))
+        wanted = {
+            "ref": ref, "description": "CITADEL managed hosts: HTTP to HTTPS",
+            "expression": f'(http.request.full_uri wildcard "http://*" and http.host in {{{names}}})',
+            "action": "redirect", "enabled": True,
+            "action_parameters": {"from_value": {
+                "target_url": {"expression": 'concat("https://", http.host, http.request.uri.path)'},
+                "status_code": 308, "preserve_query_string": True,
+            }},
+        }
+    return plan_rule(api, zone_id, ref, wanted, HTTPS_SETTING, enabled)
+
+
+def plan_rule(api, zone_id, ref, wanted, setting, enabled, *, add=False):
     try:
         ruleset = api.request("GET", f"/zones/{zone_id}/rulesets/phases/{PHASE}/entrypoint")
     except CloudflareAPIError as exc:
@@ -55,7 +83,7 @@ def prepare_redirect(api: CloudflareAPI, zone_id: str, tunnel_id: str, domain: s
                     "Grant Zone > Dynamic URL Redirects > Edit."}
         elif exc.status_code == 403:
             raise CloudflareAPIError(
-                f"{SETTING} requires Zone > Dynamic URL Redirects > Edit (HTTP 403)", 403
+                f"{setting} requires Zone > Dynamic URL Redirects > Edit (HTTP 403)", 403
             ) from exc
         else:
             raise

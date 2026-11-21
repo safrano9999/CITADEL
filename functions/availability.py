@@ -47,11 +47,16 @@ def probe(url):
                 if response.headers.get("cf-mitigated", "").lower() == "challenge":
                     return "auth", f"{detail} — Cloudflare browser challenge. Backend behind challenge was not checked."
                 if code in (301, 302, 303, 307, 308) and response.headers.get("Location"):
+                    current = urlsplit(url)
                     url = urljoin(url, response.headers["Location"])
                     target = urlsplit(url)
                     if target.scheme == "https" and (target.hostname or "").endswith(".cloudflareaccess.com") and target.path.startswith("/cdn-cgi/access/login/") and target.username is None:
                         return "auth", f"{detail} — Cloudflare Access login at {target.hostname}. Backend behind login was not checked."
-                    if (target.scheme, target.netloc) != (initial.scheme, initial.netloc):
+                    upgrade = (current.scheme == "http" and target.scheme == "https"
+                               and target.hostname == current.hostname and target.username is None
+                               and ((current.port or 80) == 80 and (target.port or 443) == 443
+                                    or current.port is not None and current.port == target.port))
+                    if not upgrade and (target.scheme, target.netloc) != (current.scheme, current.netloc):
                         return "down", f"{detail} — redirect outside the indexed service"
                     continue
                 if code == 401 and response.headers.get("WWW-Authenticate"):

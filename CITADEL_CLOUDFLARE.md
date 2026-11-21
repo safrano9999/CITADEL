@@ -29,7 +29,7 @@ Token permissions:
 - `Zone` -> `DNS` -> `Edit`
 - `Zone` -> `Zone Settings` -> `Edit`
 - `Zone` -> `SSL and Certificates` -> `Edit`
-- `Zone` -> `Dynamic URL Redirects` -> `Edit` when using `CITADEL_CLOUDFLARE_REDIRECT_TO_WWW`
+- `Zone` -> `Dynamic URL Redirects` -> `Edit` for the default `CITADEL_CLOUDFLARE_HTTP_TO_HTTPS=1` or the optional `CITADEL_CLOUDFLARE_REDIRECT_TO_WWW`
 - `User` -> `User Details` -> `Read` if available
 
 Token resources:

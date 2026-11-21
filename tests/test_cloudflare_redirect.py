@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'functions'))
 sys.path.insert(0, str(ROOT / 'functions/providers'))
 from cloudflare_api import CloudflareAPIError
-from cloudflare_redirect import PHASE, prepare_redirect, apply_redirect
+from cloudflare_redirect import PHASE, prepare_redirect, prepare_https_redirect, apply_redirect
 
 
 class RedirectTests(unittest.TestCase):
@@ -91,6 +91,23 @@ class RedirectTests(unittest.TestCase):
         self.assertIn('cannot be verified', plan['warning'])
         self.api.request.side_effect = CloudflareAPIError('not found', 404)
         self.assertEqual(self.plan()['action'], 'create')
+
+    def test_https_redirect_is_scoped_to_managed_hosts_and_can_be_removed(self):
+        def plan(hosts, flag):
+            return prepare_https_redirect(self.api, 'zone', 'tunnel', hosts, flag)
+        hosts = {'12345.example.com', 'api.example.com'}
+        rule = plan(hosts, '1')['rule']
+        self.assertEqual(rule['expression'], '(http.request.full_uri wildcard "http://*" and '
+                         'http.host in {"12345.example.com" "api.example.com"})')
+        self.assertEqual(rule['action_parameters']['from_value'], {
+            'status_code': 308, 'preserve_query_string': True,
+            'target_url': {'expression': 'concat("https://", http.host, http.request.uri.path)'}})
+        self.api.request.return_value = self.ruleset([{'id': 'https', **rule}, {'id': 'other'}])
+        self.assertEqual(plan(hosts, '1')['action'], 'unchanged')
+        self.assertEqual(plan({'api.example.com'}, '1')['action'], 'update')
+        for names, flag in ((hosts, '0'), (set(), '1')):
+            result = plan(names, flag)
+            self.assertEqual((result['action'], result['rule_id']), ('delete', 'https'))
 
     def test_missing_permission_never_treated_as_missing_ruleset(self):
         self.api.request.side_effect = CloudflareAPIError('outage', 503)

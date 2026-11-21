@@ -290,6 +290,7 @@ renders provider buttons, and can run the configured scanner.
 | `CITADEL_CLOUDFLARE_SERVERSIDE_PERSISTENCE` | `1` | Keep unchanged Cloudflare bindings; 0 deletes/rebuilds all managed bindings each scan. Local CF output remains ephemeral. |
 | `CITADEL_CLOUDFLARE_WWW443` | `0` | Add `www.<domain>` for Cloudflare port 443 |
 | `CITADEL_CLOUDFLARE_DOMAIN443` | `0` | Add the bare domain for Cloudflare port 443 |
+| `CITADEL_CLOUDFLARE_HTTP_TO_HTTPS` | `1` | Redirect HTTP to HTTPS on this instance’s published Cloudflare hostnames with status 308, preserving host, path and query. Scanning with `0` removes this tunnel’s HTTPS rule. Requires Dynamic URL Redirects Edit. |
 | `CITADEL_CLOUDFLARE_REDIRECT_TO_WWW` | `0` | Redirect the bare domain to HTTPS www with HTTP 301; requires both 443 hostname flags and Dynamic URL Redirects Edit |
 | `CITADEL_CLOUDFLARE_ACCOUNT_ID` | empty | Existing Cloudflare account ID |
 | `CITADEL_CLOUDFLARE_ZONE_ID` | empty | Existing Cloudflare zone ID |

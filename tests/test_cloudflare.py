@@ -405,6 +405,7 @@ class CloudflareActivationTests(unittest.TestCase):
         }
         self.getter = Mock(side_effect=lambda key, default="": self.settings.get(key, default))
         self.api = create_autospec(CloudflareAPI, instance=True)
+        self.api.request.return_value = None  # No existing redirect ruleset.
         self.api.verify_token.return_value = None
         self.api.tunnel_connections.return_value = [{"id": "connection"}]
         self.api.zone.return_value = {"name": "example.net"}
@@ -461,6 +462,10 @@ class CloudflareActivationTests(unittest.TestCase):
         self.assertTrue(payload["authenticated"])
         self.assertEqual(payload["errors"], [])
         self.assertEqual(payload["services"]["8000"]["url"], "https://8000.services.example.net")
+        self.assertEqual(payload["http_to_https"]["action"], "create")
+        rule = self.api.request.call_args.kwargs["payload"]["rules"][0]
+        self.assertIn('http.host in {"8000.services.example.net"}', rule["expression"])
+        self.assertEqual(rule["action_parameters"]["from_value"]["status_code"], 308)
         self.api.verify_token.assert_called_once_with()
         self.api.tunnel_connections.assert_called_once_with("account", "tunnel")
         self.api.zone.assert_called_once_with("zone")
@@ -808,7 +813,7 @@ class CloudflareActivationTests(unittest.TestCase):
             self.assertLess(calls.index("update_tunnel_configuration"), calls.index("update_access_policy"))
             self.assertLess(calls.index("update_access_policy"), calls.index("delete_dns_record"))
             self.assertLess(calls.index("delete_dns_record"), calls.index("create_tunnel_dns"))
-            self.assertEqual(calls[-1], "update_tunnel_configuration")
+            self.assertEqual(calls[-2:], ["update_tunnel_configuration", "request"])
 
     def test_empty_scan_clears_the_configured_tunnel_without_a_routes_file(self):
         self.write("CITADEL_DATA/services.json", {"http_services": []})
