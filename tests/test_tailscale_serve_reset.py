@@ -1,5 +1,6 @@
 """Offline contract tests; the real Tailscale CLI is never called."""
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -22,10 +23,13 @@ class TailscaleServeResetTests(unittest.TestCase):
         self.log = self.directory / "calls"
         self.cli = self.directory / "tailscale"
         self.cli.write_text(
-            '#!/bin/sh\nprintf "%s\\n" "$@" >> "$RESET_TEST_LOG"\n'
+            '#!/bin/sh\nif [ "$1" = status ]; then printf \'{"BackendState":"Running"}\\n\'; exit 0; fi\n'
+            'printf "%s\\n" "$@" >> "$RESET_TEST_LOG"\n'
             'exit "${RESET_TEST_EXIT:-0}"\n'
         )
         self.cli.chmod(0o755)
+        for name in ("date", "sleep", "timeout", "jq"):
+            (self.directory / name).symlink_to(shutil.which(name))
         # An isolated PATH prevents accidental access to host Tailscale.
         self.env = {"PATH": str(self.directory), "RESET_TEST_LOG": str(self.log)}
 

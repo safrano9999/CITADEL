@@ -6,6 +6,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 MAX_ICON_CANDIDATES = 16
 ALLOWED_ICON_TYPES = {
     "image/gif": ".gif",
+    "image/jpeg": ".jpeg",
     "image/png": ".png",
     "image/svg+xml": ".svg",
     "image/vnd.microsoft.icon": ".ico",

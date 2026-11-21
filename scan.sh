@@ -394,7 +394,7 @@ try_fetch_icon() {
         chmod 644 "$dest"
         # A refreshed logo replaces all older formats for this exact port.
         local old_icon
-        for old_icon in "$ICONS_DIR/$port".{png,svg,webp,gif,ico}; do
+        for old_icon in "$ICONS_DIR/$port".{png,svg,webp,gif,ico,jpeg,jpg}; do
             [[ "$old_icon" == "$dest" ]] || rm -f -- "$old_icon"
         done
         echo "${port}${ext}"
@@ -604,7 +604,7 @@ for entry in os.scandir(cache_dir):
 
 http_services = []
 other_ports = []
-icon_exts = ('png', 'svg', 'webp', 'gif', 'ico')
+icon_exts = ('png', 'svg', 'webp', 'gif', 'ico', 'jpeg', 'jpg')
 
 for p in ss_raw:
     port = p.get('port')

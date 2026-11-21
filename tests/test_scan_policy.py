@@ -124,6 +124,13 @@ class ScanPolicyTests(unittest.TestCase):
             self.assertEqual(existing_icon(raw, 4096), "4096.svg")
             self.assertEqual(existing_icon(raw, 2000), "")
 
+    def test_jpeg_logo_lookup_does_not_depend_on_old_metadata(self):
+        with tempfile.TemporaryDirectory() as raw:
+            for port, extension in ((4015, "jpeg"), (4016, "jpg")):
+                name = f"{port}.{extension}"
+                Path(raw, name).write_bytes(b"\xff\xd8\xff\xd9")
+                self.assertEqual(existing_icon(raw, port), name)
+
 
 if __name__ == "__main__":
     unittest.main()

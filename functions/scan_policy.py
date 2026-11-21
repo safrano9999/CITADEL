@@ -36,7 +36,7 @@ def is_browser_page(html: str) -> bool:
 
 def existing_icon(directory: str | Path, port: int) -> str:
     """Logos survive independently of ephemeral scan metadata."""
-    for extension in ("png", "svg", "webp", "gif", "ico"):
+    for extension in ("png", "svg", "webp", "gif", "ico", "jpeg", "jpg"):
         name = f"{port}.{extension}"
         if (Path(directory) / name).is_file():
             return name
