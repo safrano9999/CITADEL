@@ -48,6 +48,13 @@
   z-index: 1;
   border-radius: inherit;
 }
+.availability-result {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 2;
+  cursor: help;
+}
 .tile-link:focus-visible {
   outline: 3px solid var(--accent);
   outline-offset: 3px;

@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "functions"))
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from starlette.datastructures import MutableHeaders
@@ -24,6 +24,7 @@ from starlette.types import Message, Receive, Scope, Send
 
 from python_header import get, get_port  # noqa: F401
 
+import availability
 import core
 import health
 from webui_transport import bind_unix_socket, unix_socket_path, probe_target
@@ -168,6 +169,16 @@ def index():
     return _jinja.get_template("index.html").render(
         data=data,
     )
+
+
+@app.get("/api/availability")
+def check_availability(mode: str, ports: str):
+    dashboard = core.build_dashboard()
+    if mode not in dashboard["provider_options"]:
+        raise HTTPException(400, "Unknown provider")
+    targets = availability.tile_urls(dashboard, mode, set(ports.split(",")))
+    return StreamingResponse(availability.stream(targets), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
 
 def _health_data(extensions: str):

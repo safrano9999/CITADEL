@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CITADEL</title>
 <link rel="icon" type="image/svg+xml" href="/citadel.svg">
-<link rel="stylesheet" href="/assets/style.css?v=20261023-3">
+<link rel="stylesheet" href="/assets/style.css?v=20261121-availability">
 </head>
 <body
     data-default-mode="{{ data.default_mode|e }}"
@@ -37,6 +37,7 @@
             <small id="mode-default-hint">Saved default: -</small>
         </label>
 
+        <button id="availability-btn" class="btn-default" type="button">Check availability</button>
         <button id="page-refresh-btn" class="btn-default" type="button">Refresh</button>
         <a class="btn-default" href="/cloudflare-api">API Access</a>
         {% if data.cloudflare_available and data.edit_token_required %}
@@ -99,6 +100,7 @@
                 <div class="tile-icon-placeholder">&#127968;</div>
             {% endif %}
 
+            <span class="availability-result" role="img" tabindex="0" hidden></span>
             <span class="tile-name">{{ svc.display_name|default(svc.name|default('Port ' ~ port))|e }}</span>
             <span class="tile-port">
                 {{ '🔒 ' if scheme == 'https' else '' }}:{{ svc.port|int }}
@@ -266,7 +268,69 @@ function compactUrl(url) {
   }
 }
 
+const availabilityButton = document.getElementById('availability-btn');
+let availabilitySource;
+
+function clearAvailability() {
+  availabilitySource?.close();
+  availabilitySource = undefined;
+  if (!availabilityButton) return;
+  availabilityButton.disabled = false;
+  availabilityButton.textContent = 'Check availability';
+  for (const tile of tiles) tile.querySelector('.availability-result').hidden = true;
+}
+
+function showAvailability(tile, symbol, detail) {
+  const marker = tile.querySelector('.availability-result');
+  marker.textContent = symbol;
+  marker.title = detail;
+  marker.setAttribute('aria-label', detail);
+  marker.hidden = false;
+}
+
+if (availabilityButton) {
+  window.addEventListener('pagehide', clearAvailability);
+  availabilityButton.addEventListener('click', () => {
+    clearAvailability();
+    const pending = new Map();
+    for (const tile of tiles) {
+      if (tile.hidden) continue;
+      if (!tile.dataset.activeUrl) {
+        showAvailability(tile, '⚪', 'No URL for the selected provider');
+        continue;
+      }
+      pending.set(tile.dataset.port, tile);
+      showAvailability(tile, '⏳', 'Waiting for availability result');
+    }
+    if (!pending.size) return;
+    availabilityButton.disabled = true;
+    availabilityButton.textContent = 'Checking…';
+    const params = new URLSearchParams({mode: modeSel?.value || defaultMode, ports: [...pending.keys()].join(',')});
+    const source = new EventSource('/api/availability?' + params);
+    availabilitySource = source;
+    source.onmessage = event => {
+      if (source !== availabilitySource) return;
+      const result = JSON.parse(event.data);
+      const tile = pending.get(result.port);
+      if (!tile) return;
+      showAvailability(tile, {up: '🟢', auth: '🟢🔒', down: '🔴'}[result.state], result.detail);
+      pending.delete(result.port);
+    };
+    function finish(detail) {
+      if (source !== availabilitySource) return;
+      source.close();
+      availabilitySource = undefined;
+      for (const tile of pending.values()) showAvailability(tile, '⚪', detail);
+      availabilityButton.disabled = false;
+      availabilityButton.textContent = 'Check availability';
+    }
+    source.addEventListener('done', () => finish('Route no longer present in the index'));
+    source.onerror = () => finish('Availability check connection interrupted');
+  });
+}
+
 function applyMode(mode) {
+  clearAvailability();
   const cloudflareMode = mode === 'cloudflare';
   const apiMode = mode === 'api-bearer' || mode === 'api-oauth';
   let visibleServices = 0;
