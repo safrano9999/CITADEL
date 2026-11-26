@@ -790,9 +790,13 @@ backend credential. A guessed path, HTML login or bare 401 does not. Inactive
 modes are hidden. A visible tile alone does not confirm a working connection.
 
 Discovery also checks `/api-doc/openapi.json`, `/api/schema/` and `/doc` for
-OpenAPI schemas. Schema requests allow up to three seconds inside the shared
-ten-second listener deadline. Up to 26 requests per listener are allowed,
-including at most three linked documents.
+OpenAPI schemas. The default schema timeout is three seconds with a ten-second
+listener deadline. For Swagger UI, discovery requests `/openapi.json` first and
+allows up to 18 seconds per schema within a 30-second listener deadline.
+A same-origin schema that documents model listing and chat completions identifies
+the OpenAI-compatible `/v1` client base even if other paths in the document use
+unsupported templates. Publishing this base requires its own route grant.
+The limit is 26 requests per listener, including at most three linked documents.
 
 The `/tools/invoke` HTTP RPC probe runs on every eligible listener, without
 matching an application name or port. It requires `GET` to return `405` with

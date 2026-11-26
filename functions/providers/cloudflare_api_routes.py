@@ -107,7 +107,7 @@ def output(table, *, considered, authenticated, modes=(), inventory=(), errors=(
     hosts = table.get("hosts", {})
     retained_ids = {row["id"] for row in inventory if row.get("retained")}
     readiness = {hostname: status for hostname, status in (retained_statuses or {}).items()
-                 if hostname in hosts and hosts[hostname].get("routes") and all(
+                 if status != "not-checked" and hostname in hosts and hosts[hostname].get("routes") and all(
                      route.get("protocol") == "mcp" and route.get("id") in retained_ids
                      for route in hosts[hostname]["routes"])}
     checked_hosts = [hostname for hostname in hosts if hostname not in readiness]

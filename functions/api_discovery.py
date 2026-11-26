@@ -75,11 +75,12 @@ def legacy_sse(probe: Probe) -> bool:
 
 
 class LocalProbes:
-    def __init__(self, scheme: str, port: int, *, seconds: float = 10):
+    def __init__(self, scheme: str, port: int, *, seconds: float = 10, schema_timeout: float = 3):
         if scheme not in {"http", "https"} or type(port) is not int or not 1 <= port <= 65535:
             raise ValueError("Invalid local listener")
         self.base = f"{scheme}://127.0.0.1:{port}"
         self.deadline = time.monotonic() + seconds
+        self.schema_timeout = schema_timeout
         self.count = 0
         # Caddy's local listeners may use an internal CA, as in the normal scan.
         self.opener = urllib.request.build_opener(
@@ -112,7 +113,7 @@ class LocalProbes:
                 # Streamable HTTP bridges may start their stdio child during
                 # initialize. Allow that startup while retaining the overall
                 # listener deadline and the short timeout for other probes.
-                timeout = 8.0 if mcp_initialize else 3.0 if path in DOC_PATHS else 1.0
+                timeout = 8.0 if mcp_initialize else self.schema_timeout if path in DOC_PATHS else 1.0
                 response = self.opener.open(request, timeout=min(timeout, remaining))
             except urllib.error.HTTPError as exc:
                 response = exc
@@ -222,7 +223,10 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
     titles = {str(service.get(key) or "").strip().lower() for key in ("name", "title")}
     if port in admin_ports or service.get("citadel_webui") or "citadel" in titles:
         return []
-    probe = probe or LocalProbes(scheme, port)
+    swagger_ui = any("swagger ui" in title for title in titles)
+    if probe is None:
+        # Some gateways build their multi-megabyte schema on the first request.
+        probe = LocalProbes(scheme, port, seconds=30, schema_timeout=18) if swagger_ui else LocalProbes(scheme, port)
     rows = {}
 
     def record(path, protocol, response, status, evidence, operations=(), *, detected=False):
@@ -271,7 +275,7 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
     # Swagger UI already identifies the documentation endpoint. Read it before
     # slower transport probes can exhaust the per-listener deadline.
     swagger_document = None
-    if any("swagger ui" in title for title in titles):
+    if swagger_ui:
         key = route_id(port, "rest", "/openapi.json")
         swagger_document = probe("/openapi.json", headers=credentials.get(key, {}))
 
