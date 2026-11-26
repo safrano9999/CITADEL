@@ -1,7 +1,6 @@
 .access-layout { max-width: 1000px; margin: auto; padding: 24px; }
 .access-login, .access-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 20px 0; }
-.access-layout input { min-width: 0; padding: 10px; border: 1px solid var(--muted); border-radius: 6px; background: var(--card); color: var(--ink); }
-.access-layout :focus-visible { outline: 2px solid var(--brand-blue); outline-offset: 2px; }
+.access-layout input { min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--ink); }
 .access-route { margin: 22px 0; padding: 20px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow-wrap: anywhere; }
 .access-route h2 { font-size: 1.1rem; }
 .access-id { color: var(--muted); font-family: monospace; }

@@ -1,0 +1,44 @@
+:root {
+  color-scheme: light;
+  --paper: #e7ebef;
+  --panel: #f7fafc;
+  --card: #fff;
+  --ink: #142235;
+  --muted: #536679;
+  --line: #ccd7e1;
+  --brand-blue: #1975d1;
+  --accent: #1262b2;
+  --wash: #e7f1fc;
+  --page-background: linear-gradient(155deg, #f7f9fb 0, var(--paper) 620px, #edf1f5 100%);
+  --shadow: 0 6px 24px rgb(20 34 53 / 8%);
+  --shadow-hover: 0 12px 30px rgb(20 34 53 / 12%);
+  --warning-ink: #693700;
+  --warning-line: #bb7a24;
+  --warning-fill: #fff1d6;
+  accent-color: var(--brand-blue);
+}
+
+body {
+  color: var(--ink);
+  background: var(--page-background);
+}
+
+a { color: var(--accent); }
+
+:where(input, select, option, textarea, button) {
+  background-color: var(--card);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+::placeholder { color: var(--muted); opacity: 1; }
+::selection { background: var(--wash); color: var(--ink); }
+
+:focus-visible {
+  outline: 2px solid var(--brand-blue);
+  outline-offset: 2px;
+}
+
+.site-header :focus-visible {
+  outline-color: var(--card);
+}
