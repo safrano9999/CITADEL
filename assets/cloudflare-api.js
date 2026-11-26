@@ -2,6 +2,7 @@
 (() => {
   const byId = id => document.getElementById(id);
   let token = "", revision = "", rows = [], dirty = false, generation = 0;
+  let editVersion = 0;
   const status = message => { byId("access-status").textContent = message; };
   async function api(method, body) {
     const requestedGeneration = generation;
@@ -26,9 +27,57 @@
   function filterRows() {
     const query = byId("access-filter").value.trim().toLowerCase();
     const candidates = byId("access-candidates").checked;
-    for (const row of rows) row.card.hidden = (!row.confirmed && !row.input.value.trim() && !candidates)
+    for (const row of rows) row.card.hidden = (!row.confirmed && !row.body.rows.length && !candidates)
       || (query && !row.search.includes(query));
   }
+  function markChanged() {
+    editVersion++;
+    dirty = true;
+    status("Unsaved changes.");
+  }
+
+  function addGrant(body, entry = "") {
+    const tr = byId("grant-row").content.firstElementChild.cloneNode(true);
+    const email = tr.querySelector('[data-field="email"]');
+    const client = tr.querySelector('[data-field="client"]');
+    const backend = tr.querySelector('[data-field="backend"]');
+    const [identity, target = ""] = entry.split(";").map(value => value.trim());
+    (identity.includes("@") ? email : client).value = identity;
+    backend.value = target;
+    tr.addEventListener("input", markChanged);
+    const reveal = tr.querySelector('[data-action="reveal"]');
+    reveal.addEventListener("click", () => {
+      const show = client.type === "password";
+      client.type = backend.type = show ? "text" : "password";
+      reveal.textContent = show ? "Hide" : "Show";
+      reveal.setAttribute("aria-label", show ? "Hide bearers" : "Show bearers");
+      reveal.setAttribute("aria-pressed", String(show));
+    });
+    tr.querySelector('[data-action="remove"]').addEventListener("click", () => {
+      tr.remove();
+      markChanged();
+    });
+    body.append(tr);
+    return email;
+  }
+
+  function entriesFor(route) {
+    const entries = Array.from(route.body.rows, (tr, index) => {
+      const fields = Array.from(tr.querySelectorAll("input"));
+      const [email, client, backend] = fields.map(input => input.value.trim());
+      if ((Boolean(email) === Boolean(client)) || (email && !email.includes("@"))
+          || client.includes("@") || fields.some(input => /[,;]/.test(input.value))) {
+        const invalid = fields.find(input => /[,;]/.test(input.value))
+          || (client && (email || client.includes("@")) ? fields[1] : fields[0]);
+        invalid.focus();
+        throw new Error(`${route.title}, row ${index + 1}: enter one OAuth email or one client bearer. Commas and semicolons cannot appear in a field.`);
+      }
+      return [email || client, backend].filter(Boolean).join(";");
+    });
+    const value = entries.join(",");
+    return value === route.initialValue ? route.original : value;
+  }
+
   function render(data) {
     revision = data.revision;
     rows = [];
@@ -43,22 +92,23 @@
       evidence.textContent = route.status === "ready" ? "Protocol detected. Publication depends on configured access."
         : route.status === "authentication-required" ? "Backend credentials required. The next scan uses the backend bearer configured here."
         : (route.evidence || "Saved access is retained but will not be published until the route is verified.");
-      const label = document.createElement("label"); label.textContent = "Access entries (CSV)";
-      const input = document.createElement("input"); input.type = "password"; input.autocomplete = "off";
-      input.spellcheck = false; input.value = route.entries; input.id = `grant-${route.id}`;
-      label.htmlFor = input.id;
-      input.addEventListener("input", () => { dirty = true; status("Unsaved changes."); });
-      const reveal = document.createElement("button"); reveal.type = "button"; reveal.className = "btn-default"; reveal.textContent = "Show";
-      reveal.addEventListener("click", () => {
-        input.type = input.type === "password" ? "text" : "password";
-        reveal.textContent = input.type === "password" ? "Show" : "Hide";
+      const editor = byId("grant-table").content.cloneNode(true);
+      const body = editor.querySelector("tbody");
+      const entries = route.entries.split(",").filter(value => value.trim());
+      for (const entry of entries) addGrant(body, entry);
+      editor.querySelector('[data-action="add"]').addEventListener("click", () => {
+        addGrant(body).focus();
+        markChanged();
       });
-      card.append(heading, identity, evidence, label, input, reveal); list.append(card);
-      rows.push({ id: route.id, input, card, confirmed: route.detected || route.status === "ready",
+      card.append(heading, identity, evidence, editor);
+      list.append(card);
+      rows.push({ id: route.id, body, card, title: heading.textContent, original: route.entries,
+        initialValue: entries.map(entry => entry.split(";").map(value => value.trim()).join(";")).join(","),
+        confirmed: route.detected || route.status === "ready",
         search: `${route.port || ""} ${route.protocol || ""} ${route.path || ""} ${route.id}`.toLowerCase() });
     }
     dirty = false;
-    byId("access-candidate-count").textContent = `(${rows.filter(row => !row.confirmed && !row.input.value.trim()).length})`;
+    byId("access-candidate-count").textContent = `(${rows.filter(row => !row.confirmed && !row.body.rows.length).length})`;
     filterRows();
     byId("access-empty").hidden = rows.length > 0;
     byId("access-login").hidden = true;
@@ -74,10 +124,11 @@
   byId("access-save").addEventListener("click", async () => {
     const button = byId("access-save"); button.disabled = true;
     try {
-      const saved = Object.fromEntries(rows.map(row => [row.id, row.input.value]));
+      const savedVersion = editVersion;
+      const saved = Object.fromEntries(rows.map(row => [row.id, entriesFor(row)]));
       const data = await api("PUT", { revision, routes: saved });
       revision = data.revision;
-      dirty = rows.some(row => saved[row.id] !== row.input.value);
+      dirty = editVersion !== savedVersion;
       status(dirty ? "Saved; additional edits remain unsaved."
         : "Saved. Changes take effect after the next full scan.");
     } catch (error) { if (error.name !== "AbortError") status(error.message); }

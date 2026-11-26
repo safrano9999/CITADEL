@@ -925,17 +925,17 @@ must mount this optional file at the repository root, alongside the ignore file.
 2. Open **API Access** in the dashboard (path `/cloudflare-api`) and enter the
    existing `CITADEL_TOKEN`. Reading and writing the registry require this token;
    leaving it unset disables management. The page does not store it in browser
-   storage. Each row shows its port, protocol, path and scan status. Confirmed
-   endpoints and configured rows appear first; unverified authentication
-   candidates are available through **Auch unbestätigte Kandidaten anzeigen**.
-   Use the port/path filter to locate the desired endpoint.
-3. Enter grants in that row and choose **Speichern für nächsten Scan**. This
-   saves the private file only. It does not contact Cloudflare or start a scan.
+   storage. Use the port or path filter to find a route. Select **Show unverified
+   candidates** to include authentication-required candidates.
+3. Select **Add grant** on the route. Enter either an **OAuth email** or a
+   **Client bearer** in each row. Set **Backend bearer** if the endpoint needs a
+   separate credential. **Show** reveals the bearers in that row for copying.
+   **Remove** removes one grant. Choose **Save for next scan** to write your edits.
 4. Run the next **full scan** to verify the endpoint and synchronize the grants
    to Cloudflare. The page reports pending changes until that snapshot has been
    reconciled successfully. `--add` does not replace deployed grants.
 
-Comma separates entries; semicolon separates a pair:
+In the JSON file, a comma separates grants and a semicolon separates paired values.
 
 | Entry | Client sends | Worker forwards to backend |
 |---|---|---|
@@ -944,12 +944,12 @@ Comma separates entries; semicolon separates a pair:
 | `singleToken` | `Bearer singleToken` | `Bearer singleToken` |
 | `person@example.com` | OAuth token after email/OTP login | No Authorization header |
 
-Multiple users and bearers can be mixed in one row, for example:
+One route can store multiple grants in the same JSON string, for example:
 `person@example.com;userToken,outerToken;innerToken,singleToken,guest@example.com`.
 Do not prefix the stored tokens with `Bearer `. A duplicate email or outer token
 within one route is rejected. Each route has its own permissions; an email
 allowed for one endpoint is not automatically allowed for other endpoints on
-the same port. Clearing a row revokes its grants on the next successful full
+the same port. Removing all grants from a route revokes its access on the next successful full
 scan. A bare email can only use a backend that accepts requests without its own
 bearer. Citadel never extracts tokens from other applications.
 
@@ -1046,8 +1046,8 @@ checked with OpenCode 1.18.34.
 
 1. **Prepare the published OAuth endpoint.** Enable the extension and OAuth,
    configure the OpenCode callback policy, then perform a scan. In
-   **API Access**, add `your-email@example.com;backendToken` for the detected
-   bridge route (or only your email if it needs no backend bearer). Save and
+   **API Access**, add a grant for the detected
+   bridge route and fill in **OAuth email** and the optional **Backend bearer**. Save and
    perform another full scan to publish that OAuth route.
    Copy the endpoint from **API-OAuth**:
 

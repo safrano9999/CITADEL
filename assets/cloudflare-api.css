@@ -1,12 +1,17 @@
 .access-layout { max-width: 1000px; margin: auto; padding: 24px; }
 .access-login, .access-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 20px 0; }
-.access-layout input { min-width: 0; padding: 10px; border: 1px solid #657080; border-radius: 6px; background: #17202d; color: #f4f7fb; }
-.access-help { display: grid; grid-template-columns: minmax(160px, 1fr) 2fr; gap: 10px; }
-.access-help dd { margin: 0; }
-.access-route { margin: 22px 0; padding: 20px; border: 1px solid #657080; border-radius: 10px; overflow-wrap: anywhere; }
+.access-layout input { min-width: 0; padding: 10px; border: 1px solid var(--muted); border-radius: 6px; background: var(--card); color: var(--ink); }
+.access-layout :focus-visible { outline: 2px solid var(--brand-blue); outline-offset: 2px; }
+.access-route { margin: 22px 0; padding: 20px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow-wrap: anywhere; }
 .access-route h2 { font-size: 1.1rem; }
-.access-id { opacity: .75; font-family: monospace; }
-.access-route label { display: block; margin: 12px 0 6px; }
-.access-route input { box-sizing: border-box; width: 100%; margin-bottom: 10px; font-family: monospace; }
+.access-id { color: var(--muted); font-family: monospace; }
+.grant-scroll { overflow-x: auto; margin: 12px 0; }
+.grant-table { width: 100%; min-width: 570px; border-collapse: collapse; }
+.grant-table th, .grant-table td { text-align: left; padding: 6px; }
+.grant-table th { color: var(--ink); background: var(--wash); font-size: .85rem; }
+.grant-table td { border-bottom: 1px solid var(--line); }
+.grant-table input { width: 100%; }
+.grant-table input[data-field="client"], .grant-table input[data-field="backend"] { font-family: monospace; }
+.grant-actions { width: 1%; white-space: nowrap; }
 #access-status { min-height: 1.5em; font-weight: 600; }
-@media (max-width: 600px) { .access-layout { padding: 14px; } .access-help { display: block; } .access-help dt { margin-top: 14px; } }
+@media (max-width: 600px) { .access-layout, .access-route { padding: 14px; } }

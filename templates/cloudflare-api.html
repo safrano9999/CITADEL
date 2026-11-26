@@ -28,13 +28,27 @@
       <button id="access-reload" class="btn-default" type="button">Reload</button>
       <button id="access-lock" class="btn-default" type="button">Lock</button>
     </div>
-    <p>Separate entries with commas and paired values with semicolons. Leave empty to deny access.</p>
-    <dl class="access-help">
-      <dt>Email;Bearer</dt><dd>OAuth user → backend bearer</dd>
-      <dt>Client bearer;Backend bearer</dt><dd>Validate the client bearer → forward the backend bearer</dd>
-      <dt>Single bearer</dt><dd>Validate and forward unchanged</dd>
-      <dt>Single email</dt><dd>OAuth access without a backend bearer</dd>
-    </dl>
+    <p>Each row grants access by OAuth email or client bearer. Leave the backend bearer empty to forward the client bearer or use email login without a backend token.</p>
+    <template id="grant-row">
+      <tr>
+        <td><input data-field="email" type="email" aria-label="OAuth email" autocomplete="off" spellcheck="false"></td>
+        <td><input data-field="client" type="password" aria-label="Client bearer" autocomplete="off" spellcheck="false"></td>
+        <td><input data-field="backend" type="password" aria-label="Backend bearer" autocomplete="off" spellcheck="false"></td>
+        <td class="grant-actions">
+          <button class="btn-default" type="button" data-action="reveal" aria-label="Show bearers" aria-pressed="false">Show</button>
+          <button class="btn-default" type="button" data-action="remove">Remove</button>
+        </td>
+      </tr>
+    </template>
+    <template id="grant-table">
+      <div class="grant-scroll">
+        <table class="grant-table" aria-label="Route access grants">
+          <thead><tr><th scope="col">OAuth email</th><th scope="col">Client bearer</th><th scope="col">Backend bearer</th><th scope="col">Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <button class="btn-default" type="button" data-action="add">Add grant</button>
+    </template>
     <p id="access-empty" hidden>No routes yet. Run a scan with the CLOUDFLARE-API extension enabled.</p>
     <div class="access-filters">
       <label for="access-filter">Search by port or path</label>
