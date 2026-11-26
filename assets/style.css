@@ -80,8 +80,8 @@ body {
 }
 
 .site-header {
-  background: linear-gradient(135deg, var(--ink), var(--accent));
-  color: #f7fafc;
+  background: linear-gradient(135deg, var(--brand-blue), var(--accent));
+  color: #fff;
   padding: 16px 22px;
   display: flex;
   gap: 14px;
@@ -174,7 +174,6 @@ body {
   display: block;
   flex-basis: 100%;
   font-size: 0.7rem;
-  opacity: 0.75;
 }
 
 .alerts {
