@@ -148,6 +148,22 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(rows[0]["operations"], [])
         self.assertFalse(any(row["detected"] for row in self.discover({"/api": reply({"status": "ok"})})))
 
+    def test_swagger_gateway_lists_client_base_despite_unrelated_catchall(self):
+        self.service = {**self.service, "title": "LiteLLM API - Swagger UI"}
+        document = {"openapi": "3.1.0", "security": [{"key": []}], "paths": {
+            "/v1/models": {"get": {}}, "/v1/chat/completions": {"post": {}},
+            "/admin/{path:path}": {"get": {}}}}
+        rows = self.discover({"/openapi.json": reply(document)})
+        self.assertEqual(self.calls[0][0], "/openapi.json")
+        self.assertEqual(sum(call[0] == "/openapi.json" for call in self.calls), 1)
+        client = next(row for row in rows if row["path"] == "/v1")
+        self.assertTrue(client["detected"])
+        self.assertEqual(client["status"], "authentication-required")
+        self.assertEqual({op["path"] for op in client["operations"]},
+                         {"/v1/models", "/v1/chat/completions"})
+        document["servers"] = [{"url": "https://external.example"}]
+        self.assertFalse(any(row["path"] == "/v1" for row in self.discover({"/openapi.json": reply(document)})))
+
     def test_multiple_documents_merge_operations_and_later_root_probe_does_not_erase_them(self):
         first = {"openapi": "3.1.0", "servers": [{"url": "/api"}],
                  "paths": {"/one": {"get": {}}, "/shared": {"get": {}}}}

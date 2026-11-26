@@ -268,6 +268,13 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
             record(path, "rest", response, "authentication-required" if response.status in {401, 403} else "unknown",
                    "Local declaration unverified: read-only JSON probe did not match")
 
+    # Swagger UI already identifies the documentation endpoint. Read it before
+    # slower transport probes can exhaust the per-listener deadline.
+    swagger_document = None
+    if any("swagger ui" in title for title in titles):
+        key = route_id(port, "rest", "/openapi.json")
+        swagger_document = probe("/openapi.json", headers=credentials.get(key, {}))
+
     for path in MCP_PATHS:
         if path in skip_mcp_paths:
             continue
@@ -326,7 +333,10 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
         # Discovery credentials for a protected document use that document's
         # stable candidate ID. Runtime credentials use the resolved API base ID.
         key = route_id(port, "rest", path)
-        response = probe(path, headers=credentials.get(key, {}))
+        if path == "/openapi.json" and swagger_document is not None:
+            response = swagger_document
+        else:
+            response = probe(path, headers=credentials.get(key, {}))
         data = json_message(response)
         source_url = f"{scheme}://127.0.0.1:{port}{path}"
         if response.status == 0:
@@ -344,6 +354,26 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
             continue
         if isinstance(data.get("info"), dict) and str(data["info"].get("title", "")).lower() == "citadel":
             return []
+        # A gateway can document the OpenAI client API alongside unrelated
+        # management routes with unsupported catch-all templates. Recognize
+        # the client base independently using its documented operations.
+        if is_openapi_document(data):
+            paths = data["paths"]
+            models = paths.get("/v1/models")
+            chat = paths.get("/v1/chat/completions")
+            if (isinstance(models, dict) and "get" in models
+                    and isinstance(chat, dict) and "post" in chat):
+                subset = {"/v1/models": models, "/v1/chat/completions": chat}
+                try:
+                    server_base, client_ops = openapi_operations({**data, "paths": subset}, source_url)
+                except ValueError:
+                    pass
+                else:
+                    if server_base == "/":
+                        key = route_id(port, "rest", "/v1")
+                        needs_auth = any(op["requires_auth"] for op in client_ops) and not credentials.get(key)
+                        record("/v1", "rest", response, "authentication-required" if needs_auth else "ready",
+                               "OpenAI-compatible API documented by OpenAPI", client_ops)
         try:
             base, operations = openapi_operations(data, source_url)
         except ValueError as exc:
