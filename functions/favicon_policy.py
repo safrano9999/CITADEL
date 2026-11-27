@@ -256,13 +256,27 @@ def mcp_icon_sources(scheme, port, root):
         except ValueError:
             headers = {}
         try:
-            _, info = initialize_mcp(probe, path, headers)
+            response, info = initialize_mcp(probe, path, headers)
         except http.client.HTTPException:
             return
         icons = info.get("icons") if info else None
         if isinstance(icons, list):
             yield path, [icon["src"] for icon in icons[:MAX_ICON_CANDIDATES]
                          if isinstance(icon, dict) and isinstance(icon.get("src"), str)]
+
+
+        if response.status in {401, 403}:
+            page = probe(path, headers={"Accept": "text/html"})
+            mime = page.headers.get("content-type", "").partition(";")[0].strip().lower()
+            if page.status == 200 and mime == "text/html":
+                links = IconLinks()
+                try:
+                    links.feed(page.body.decode("utf-8", errors="replace"))
+                    links.close()
+                    base = urljoin(path, links.base)
+                except (AssertionError, ValueError):
+                    continue
+                yield base, links.icons + links.touch_icons
 
 
 def scan_icon(html, local_url, effective_url, directory, port, limit, user_agent, *, mcp_sources=(), cached=""):

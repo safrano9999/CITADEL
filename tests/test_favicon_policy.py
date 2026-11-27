@@ -169,6 +169,27 @@ class FaviconPolicyTests(unittest.TestCase):
             request = close_session.call_args.args[0]
             self.assertEqual((request.method, request.full_url), ("DELETE", url + "/api/mcp"))
 
+    def test_protected_mcp_can_publish_an_icon_on_its_browser_page(self):
+        from api_discovery import LocalProbes, Probe
+
+        svg = b"<svg/>"
+        src = "data:image/svg+xml;base64," + base64.b64encode(svg).decode()
+        html = f'<link rel="icon" href="{src}">'.encode()
+
+        def respond(_probe, path, method="GET", payload=None, headers=None):
+            if path != "/api/mcp":
+                return Probe(404, {}, b"")
+            if method == "POST":
+                return Probe(401, {}, b"")
+            self.assertEqual(headers, {"Accept": "text/html"})
+            return Probe(200, {"content-type": "text/html; charset=utf-8"}, html)
+
+        with tempfile.TemporaryDirectory() as tmp, patch.object(LocalProbes, "__call__", respond):
+            sources = mcp_icon_sources("https", 4242, Path(tmp))
+            url = "https://127.0.0.1:4242"
+            self.assertEqual(discover_icon("", url, url, self.fail, 2048, mcp_sources=sources),
+                             (".svg", svg))
+
     def test_invalid_mcp_icon_falls_back_to_http_or_retained_icon(self):
         url = "https://127.0.0.1:4242"
         sources = [("/mcp", ["data:image/png;base64,@@@@", "https://other.example/icon.png"])]
