@@ -301,10 +301,13 @@ if dropped:
 " "$SS_FILE" "$PORT_FILTER_FILE" "$PROVIDERS_DIR"
 echo
 
+# Refuse unreachable sockets quickly, but allow a connected backend time to render.
+PAGE_TIMEOUT=(--connect-timeout 3 --max-time 15)
+
 body_is_html() {
     local url="$1" ssl="$2"
     local body
-    body="$(curl -s "${CURL_USER_AGENT_ARGS[@]}" $ssl --max-time 3 --location -o - "$url" 2>/dev/null | head -c 8192)" || true
+    body="$(curl -s "${CURL_USER_AGENT_ARGS[@]}" $ssl "${PAGE_TIMEOUT[@]}" --location -o - "$url" 2>/dev/null | head -c 8192)" || true
     if echo "$body" | grep -qi "<html" 2>/dev/null; then
         return 0
     fi
@@ -336,7 +339,7 @@ PY
 root_http_status() {
     local url="$1" ssl="$2" body status
     body="$(mktemp)"
-    status="$(curl -s "${CURL_USER_AGENT_ARGS[@]}" $ssl --max-time 3 \
+    status="$(curl -s "${CURL_USER_AGENT_ARGS[@]}" $ssl "${PAGE_TIMEOUT[@]}" \
         --max-filesize "$MAX_FETCH_BYTES" -o "$body" -w "%{http_code}" "$url/" 2>/dev/null || true)"
     # Go/Caddy rejects plaintext on a TLS listener with an HTTP 400 response.
     # That response must never turn an HTTPS-only listener into an HTTP route.
@@ -449,7 +452,7 @@ atomic_write_json(sys.argv[6], {
     printf "%-8s fetching title+icons..." "$SCHEME"
 
     TMP_HTML="$(mktemp)"
-    if ! EFFECTIVE_URL="$(curl -sS "${CURL_USER_AGENT_ARGS[@]}" $LOCAL_SSL --max-time 5 --max-filesize "$MAX_FETCH_BYTES" \
+    if ! EFFECTIVE_URL="$(curl -sS "${CURL_USER_AGENT_ARGS[@]}" $LOCAL_SSL "${PAGE_TIMEOUT[@]}" --max-filesize "$MAX_FETCH_BYTES" \
         --location "$LOCAL_URL/" -o "$TMP_HTML" -w "%{url_effective}" 2>/dev/null)"; then
         EFFECTIVE_URL="$LOCAL_URL/"
         : > "$TMP_HTML"
