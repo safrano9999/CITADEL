@@ -12,9 +12,6 @@ from pathlib import Path
 from urllib.parse import unquote_to_bytes, urljoin, urlsplit, urlunsplit
 from xml.etree import ElementTree
 
-from scan_policy import existing_icon
-
-
 MAX_ICON_CANDIDATES = 16
 ALLOWED_ICON_TYPES = {
     "image/gif": ".gif",
@@ -171,7 +168,7 @@ def fetch_resource(url, local_url, limit, user_agent, temporary):
     return b"", url
 
 
-def discover_icon(html, local_url, effective_url, fetch, limit, *, mcp_sources=(), cached=""):
+def discover_icon(html, local_url, effective_url, fetch, limit, *, mcp_sources=()):
     links = IconLinks()
     try:
         links.feed(html)
@@ -215,8 +212,6 @@ def discover_icon(html, local_url, effective_url, fetch, limit, *, mcp_sources=(
         image = first_image(sources, urljoin(local_url, path))
         if image:
             return image
-    if cached:
-        return None
 
     image = first_image(links.icons + links.touch_icons, base)
     if image:
@@ -264,7 +259,6 @@ def mcp_icon_sources(scheme, port, root):
             yield path, [icon["src"] for icon in icons[:MAX_ICON_CANDIDATES]
                          if isinstance(icon, dict) and isinstance(icon.get("src"), str)]
 
-
         if response.status in {401, 403}:
             page = probe(path, headers={"Accept": "text/html"})
             mime = page.headers.get("content-type", "").partition(";")[0].strip().lower()
@@ -279,16 +273,16 @@ def mcp_icon_sources(scheme, port, root):
                 yield base, links.icons + links.touch_icons
 
 
-def scan_icon(html, local_url, effective_url, directory, port, limit, user_agent, *, mcp_sources=(), cached=""):
+def scan_icon(html, local_url, effective_url, directory, port, limit, user_agent, *, mcp_sources=()):
     with tempfile.TemporaryDirectory(dir=directory, prefix=f".{port}.") as staging:
         temporary = Path(staging) / "icon"
 
         def fetch(url):
             return fetch_resource(url, local_url, limit, user_agent, temporary)
 
-        image = discover_icon(html, local_url, effective_url, fetch, limit, mcp_sources=mcp_sources, cached=cached)
+        image = discover_icon(html, local_url, effective_url, fetch, limit, mcp_sources=mcp_sources)
         if not image:
-            return cached
+            return ""
         ext, data = image
         destination = directory / f"{port}{ext}"
         temporary.write_bytes(data)
@@ -301,10 +295,9 @@ def scan_icon(html, local_url, effective_url, directory, port, limit, user_agent
 
 
 if __name__ == "__main__":
-    local_url, effective_url, icons_dir, port_text, limit_text, user_agent, persist = sys.argv[1:]
+    local_url, effective_url, icons_dir, port_text, limit_text, user_agent = sys.argv[1:7]
     directory = Path(icons_dir)
     port = int(port_text)
-    cached = existing_icon(directory, port) if persist == "true" else ""
     sources = mcp_icon_sources(urlsplit(local_url).scheme, port, Path(__file__).resolve().parents[1])
     print(scan_icon(sys.stdin.buffer.read().decode(errors="replace"), local_url, effective_url,
-                    directory, port, int(limit_text), user_agent, mcp_sources=sources, cached=cached))
+                    directory, port, int(limit_text), user_agent, mcp_sources=sources))

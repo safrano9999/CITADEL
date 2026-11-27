@@ -286,7 +286,7 @@ renders provider buttons, and can run the configured scanner.
 | `CITADEL_TAILSCALE_SERVE` | `full` | `off`: direct HTTPS only; `http_to_https`: proxy HTTP only; `full`: proxy all ports |
 | `CITADEL_OVERWRITE_TITLES` | `0` | Prefer the running container’s `citadel.title` for its dashboard tile. Supports published rootless Podman ports and unambiguous named upstreams behind the user’s Caddy container. Set to `0` to use the configured display name or detected HTML title. |
 | `CITADEL_SCAN_PAGE_TIMEOUT_SECONDS` | `3` | Total timeout per landing page request during a scan, in seconds. |
-| `CITADEL_LOGO_PERSISTENT` | `1` | Retain logos independently; service metadata is always rescanned |
+| `CITADEL_LOGO_PERSISTENT` | `1` | Synchronize saved logos with the current scan; 0 keeps the last image on a miss |
 | `CITADEL_USER_AGENT` | `Mozilla/5.0 (compatible; CITADEL/1.0)` | HTTP probe user agent |
 | `CITADEL_CLOUDFLARE_DOMAIN` | empty | DNS suffix used for generated hostnames |
 | `CITADEL_CLOUDFLARE_SERVERSIDE_PERSISTENCE` | `1` | Keep unchanged Cloudflare bindings; 0 deletes/rebuilds all managed bindings each scan. Local CF output remains ephemeral. |
@@ -360,11 +360,10 @@ For MCP listeners, the scanner reads `result.serverInfo.icons` from a valid
 `initialize` response. An embedded image or an icon on the same listener takes
 priority over the cached or HTML icon. A protected route uses its configured
 backend bearer for initialization. Image downloads receive no bearer.
-If the MCP response has no usable icon, `CITADEL_LOGO_PERSISTENT=1` reuses the
-cached icon. With `0`,
-HTTP services get a fresh download attempt; successful downloads replace that
-port's icon, failed downloads leave the previous icon available. The icon
-directory is not cleared. Discovery, titles and route results are always fresh.
+Each scan checks the available icon sources. With `CITADEL_LOGO_PERSISTENT=1`,
+a full scan removes stored port icons that it could not rediscover, including
+icons for vanished listeners. An add-only scan updates only newly scanned ports.
+With `0`, a successful download replaces the old icon and a miss keeps it.
 The scanner reads HTML icon links (including embedded image data) and icons in
 linked web app manifests. It also checks standard paths such as `/favicon.png`,
 `/favicon.ico`, and `/favicon.svg` on HTTP services. A favicon supplied by

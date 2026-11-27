@@ -124,11 +124,6 @@ CITADEL_PORT_VALUE="$(PYTHONPATH="$SCRIPT_DIR" python3 -c \
 CITADEL_HIDE_HTTP_VALUE="$(PYTHONPATH="$SCRIPT_DIR" python3 -c \
     'from python_header import get_bool; print(str(get_bool("CITADEL_HIDE_HTTP_WEBUI_DUPE", True)).lower())')"
 
-LOGO_PERSISTENT_VALUE="$(PYTHONPATH="$SCRIPT_DIR" python3 -c \
-    'from python_header import get; print(get("CITADEL_LOGO_PERSISTENT", "1"))')"
-LOGO_PERSISTENT=false
-case "${LOGO_PERSISTENT_VALUE,,}" in 1|true|yes|on) LOGO_PERSISTENT=true ;; esac
-
 HOST_IP="${CITADEL_SUBNET_IP:-}"
 HOST_IP="${HOST_IP#"${HOST_IP%%[![:space:]]*}"}"
 HOST_IP="${HOST_IP%"${HOST_IP##*[![:space:]]}"}"
@@ -380,7 +375,7 @@ probe_http() {
 
 scan_icon() {
     python3 "$FUNCTIONS_DIR/favicon_policy.py" "$LOCAL_URL" "$1" "$ICONS_DIR" "$PORT" \
-        "$MAX_FETCH_BYTES" "$CITADEL_USER_AGENT_VALUE" "$LOGO_PERSISTENT"
+        "$MAX_FETCH_BYTES" "$CITADEL_USER_AGENT_VALUE"
 }
 
 echo "=== Probing ports for HTTP/HTTPS ==="
@@ -531,11 +526,12 @@ sys.path.insert(0, str(project))
 sys.path.insert(0, str(project / 'functions'))
 from python_header import get_bool
 from podman_titles import listener_titles
+from scan_policy import existing_icon
 
 label_titles = listener_titles(ss_raw) if get_bool('CITADEL_OVERWRITE_TITLES', False) else {}
 
 
-# Discovery metadata is disposable; retained logos live separately in icons/.
+sync_icons = get_bool('CITADEL_LOGO_PERSISTENT', True)
 active_ports = {str(row['port']) for row in ss_raw}
 for entry in os.scandir(cache_dir):
     stem, suffix = os.path.splitext(entry.name)
@@ -544,7 +540,7 @@ for entry in os.scandir(cache_dir):
 
 http_services = []
 other_ports = []
-icon_exts = ('png', 'svg', 'webp', 'gif', 'ico', 'jpeg', 'jpg')
+icon_suffixes = {'.png', '.svg', '.webp', '.gif', '.ico', '.jpeg', '.jpg'}
 
 for p in ss_raw:
     port = p.get('port')
@@ -569,12 +565,10 @@ for p in ss_raw:
     icon_name = c.get('icon')
     if icon_name and os.path.exists(os.path.join(icons_dir, icon_name)):
         icon = f'icons/{icon_name}'
-    else:
-        for ext in icon_exts:
-            candidate = f'{port}.{ext}'
-            if os.path.exists(os.path.join(icons_dir, candidate)):
-                icon = f'icons/{candidate}'
-                break
+    elif not sync_icons:
+        previous = existing_icon(icons_dir, port)
+        if previous:
+            icon = f'icons/{previous}'
 
     if scheme:
         display_name = label_titles.get(port) or display_names.get(str(port)) or title or f'Port {port}'
@@ -618,6 +612,14 @@ if os.environ.get('CITADEL_SCAN_ADD') == '1':
     from scan_add import merge_services
     payload = merge_services(Path(out_file), payload)
 atomic_write_json(out_file, payload, indent=None)
+if sync_icons:
+    current = {row['icon'] for row in payload['http_services'] if row.get('icon')}
+    add_only = os.environ.get('CITADEL_SCAN_ADD') == '1'
+    for path in Path(icons_dir).iterdir():
+        if (path.stem.isascii() and path.stem.isdecimal() and path.suffix in icon_suffixes
+                and (not add_only or path.stem in active_ports)
+                and f'icons/{path.name}' not in current and path.is_file()):
+            path.unlink(missing_ok=True)
 " "$SS_FILE" "$CACHE_DIR" "$ICONS_DIR" "$SERVICES_FILE" "$PROVIDERS_DIR" "$HTTPS_ONLY" "$EXTENSIONS_DIR/ui.json"
 echo "services.json written"
 echo

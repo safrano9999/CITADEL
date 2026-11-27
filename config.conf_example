@@ -56,7 +56,7 @@ TS_EXTRA_ARGS=--ssh
 #default-preset: 0
 TS_USERSPACE=0
 
-# Keep downloaded logos between scans. Volume mounts are configured separately.
+# Synchronize saved logos on scan. Set to 0 to keep the last logo on a miss.
 #choices: 0 1
 #default-preset: 1
 CITADEL_LOGO_PERSISTENT=1

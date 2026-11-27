@@ -162,7 +162,7 @@ class FaviconPolicyTests(unittest.TestCase):
             old_name = f"{port}.png"
             (directory / old_name).write_bytes(b"old")
             name = scan_icon("", url, url, directory, port, 2048, "",
-                             mcp_sources=mcp_icon_sources("https", port, directory), cached=old_name)
+                             mcp_sources=mcp_icon_sources("https", port, directory))
             self.assertEqual(name, f"{port}.svg")
             self.assertEqual((directory / name).read_bytes(), svg)
             self.assertFalse((directory / old_name).exists())
@@ -190,14 +190,13 @@ class FaviconPolicyTests(unittest.TestCase):
             self.assertEqual(discover_icon("", url, url, self.fail, 2048, mcp_sources=sources),
                              (".svg", svg))
 
-    def test_invalid_mcp_icon_falls_back_to_http_or_retained_icon(self):
+    def test_invalid_mcp_icon_falls_back_to_http(self):
         url = "https://127.0.0.1:4242"
         sources = [("/mcp", ["data:image/png;base64,@@@@", "https://other.example/icon.png"])]
         def fetch(path):
             self.assertEqual(path, url + "/favicon.png")
             return b"<svg/>", path
         self.assertEqual(discover_icon("", url, url, fetch, 2048, mcp_sources=sources), (".svg", b"<svg/>"))
-        self.assertIsNone(discover_icon("", url, url, self.fail, 2048, mcp_sources=sources, cached="4242.png"))
 
     def test_only_passive_supported_image_types_are_accepted(self):
         self.assertEqual(icon_extension("image/png; charset=binary"), ".png")

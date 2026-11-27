@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ScanIntegrationTests(unittest.TestCase):
-    def test_fresh_titles_and_routes_with_independent_logo_reuse(self):
+    def test_fresh_titles_routes_and_logo_synchronization(self):
         fixture = {"title": "First", "icon_requests": 0}
 
         class Handler(BaseHTTPRequestHandler):
@@ -30,7 +30,7 @@ class ScanIntegrationTests(unittest.TestCase):
                 icon = self.path == "/icon.svg"
                 if icon:
                     fixture["icon_requests"] += 1
-                body = ("<svg xmlns='http://www.w3.org/2000/svg'/>" if icon else
+                body = ("<svg xmlns='http://www.w3.org/2000/svg'/>" if icon and not fixture.get("missing_icon") else
                         f'<html><head><title>{fixture["title"]}</title><link rel="icon" href="/icon.svg"></head></html>').encode()
                 if not icon:
                     body += b' ' * fixture.get('padding', 0)
@@ -107,17 +107,25 @@ class ScanIntegrationTests(unittest.TestCase):
             listeners.write_text("")
             self.assertEqual(scan("--add"), first)
             listeners.write_text(f'LISTEN 0 128 127.0.0.1:{port} 0.0.0.0:*\n')
-            # Reuse must work without any old cache metadata at all.
+            # Refresh must work without old discovery metadata.
             (base / f"cache/{port}.json").unlink()
             second = scan()
             service = second["http_services"][0]
             self.assertEqual(service["title"], "Changed")
             self.assertEqual(service["urls"]["localhost"], f"http://127.0.0.1:{port}")
-            self.assertEqual(fixture["icon_requests"], 1)
-            self.assertEqual((logo.read_bytes(), logo.stat().st_mtime_ns), before)
-            env["CITADEL_LOGO_PERSISTENT"] = "0"
-            scan()
             self.assertEqual(fixture["icon_requests"], 2)
+            self.assertEqual(logo.read_bytes(), before[0])
+            self.assertFalse((base / f"CITADEL_DATA/icons/{new_port}.svg").exists())
+            fixture["missing_icon"] = True
+            self.assertIsNone(scan()["http_services"][0]["icon"])
+            self.assertFalse(logo.exists())
+            env["CITADEL_LOGO_PERSISTENT"] = "0"
+            fixture["missing_icon"] = False
+            scan()
+            fixture["missing_icon"] = True
+            self.assertEqual(scan()["http_services"][0]["icon"], f"icons/{port}.svg")
+            self.assertTrue(logo.is_file())
+            fixture["missing_icon"] = False
             fixture['padding'] = 2 * 1048576
             fixture['title'] = 'Large report with default limit'
             self.assertEqual(scan()['http_services'][0]['title'], fixture['title'])
