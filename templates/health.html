@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CITADEL · Health</title><link rel="icon" href="/citadel.svg">
+  <title>CITADEL · Health</title><link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
   <link rel="stylesheet" href="/assets/theme.css">
   <style>
     :root { font-family: system-ui, sans-serif; }
@@ -17,7 +17,7 @@
 </head>
 <body>
 {% set icons = {'PASS': '✅', 'FAIL': '❌', 'SKIP': '⏭️', 'NOT_TESTED': '➖'} %}
-<header><img src="/citadel.svg" alt=""><h1>CITADEL Health</h1></header>
+<header><img src="/assets/favicon.svg" alt=""><h1>CITADEL Health</h1></header>
 <p><a href="/">Dashboard</a> · <a href="/api/health{% if selection %}?extensions={{ selection|urlencode }}{% endif %}">JSON</a></p>
 <h2>{{ icons[data.status] }} {{ data.status }}</h2>
 <p>Last indexed: <strong>{{ data.last_index_at or 'No data' }}</strong></p>

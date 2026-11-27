@@ -7,6 +7,7 @@
   --muted: #536679;
   --line: #ccd7e1;
   --brand-blue: #1975d1;
+  --blue-outline: #8eb7df;
   --accent: #1262b2;
   --wash: #e7f1fc;
   --page-background: linear-gradient(155deg, #f7f9fb 0, var(--paper) 620px, #edf1f5 100%);
@@ -37,8 +38,4 @@ a { color: var(--accent); }
 :focus-visible {
   outline: 2px solid var(--brand-blue);
   outline-offset: 2px;
-}
-
-.site-header :focus-visible {
-  outline-color: var(--card);
 }
