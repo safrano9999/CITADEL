@@ -387,6 +387,12 @@ separately from URL providers' `routes.json`.
 
 ### Caddyfile export
 
+The enabled `discover-3rdparty` extension matches scanned display names and page
+titles against the full, case-insensitive patterns in its `whitelist.json`.
+A rule can set a dashboard title and supply a missing icon from
+`assets/3rd-party/`. The extension writes its matches after scanning. Moving
+the extension to `extensions/disabled/` removes these overrides from the dashboard.
+
 `extensions/enabled/caddy/` is an optional, file-only export extension. Set:
 
 ```dotenv

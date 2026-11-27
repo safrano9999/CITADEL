@@ -1,0 +1,8 @@
+{
+  "id": "discover-3rdparty",
+  "label": "Third-party tile metadata",
+  "kind": "export",
+  "enabled": true,
+  "provider": "discover_3rdparty",
+  "version": 1
+}

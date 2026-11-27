@@ -49,6 +49,7 @@ COPY extensions/disabled/CLOUDFLARE-API/extension.json ./extensions/disabled/CLO
 COPY assets/ ./assets/
 COPY templates/ ./templates/
 COPY extensions/ui.json ./extensions/
+COPY extensions/enabled/discover-3rdparty/ ./extensions/enabled/discover-3rdparty/
 COPY extensions/enabled/caddy/extension.json ./extensions/enabled/caddy/
 COPY extensions/enabled/cloudflare/extension.json extensions/enabled/cloudflare/config.json ./extensions/enabled/cloudflare/
 COPY extensions/enabled/localhost/extension.json extensions/enabled/localhost/config.json ./extensions/enabled/localhost/

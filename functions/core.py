@@ -141,6 +141,7 @@ def _load_providers() -> dict:
     provider_urls_by_port: dict[str, dict[str, str]] = {}
     provider_endpoints_by_port: dict[str, dict[str, list[dict]]] = {}
     provider_header_meta: list[dict[str, str]] = []
+    tile_metadata = {}
 
     # Collect dispatch errors
     for err in providers_state.get("errors") or []:
@@ -170,6 +171,8 @@ def _load_providers() -> dict:
         kind = ext.get("kind", "provider")
         if kind == "export":
             status = _read_json(provider_output(provider_dir.parents[2], pid, "export"), {})
+            if pid == "discover-3rdparty" and ext.get("enabled", True) and status.get("available"):
+                tile_metadata = _read_json(data_directory(provider_dir.parents[2]) / "discover-3rdparty-tiles.json", {})
             for err in status.get("errors") or []:
                 if err:
                     alerts.append(f"[{pid}] {err}")
@@ -275,6 +278,7 @@ def _load_providers() -> dict:
         "provider_urls_by_port": provider_urls_by_port,
         "provider_endpoints_by_port": provider_endpoints_by_port,
         "provider_header_meta": provider_header_meta,
+        "tile_metadata": tile_metadata,
         "provider_order": list(provider_options.keys()),
         "cloudflare_available": "cloudflare" in available and "cloudflare" in provider_options,
         "alerts": alerts,
@@ -340,6 +344,12 @@ def build_dashboard() -> dict:
     # Build tile URL maps for template
     for tile in http_tiles:
         port = str(int(tile.get("port", 0)))
+        metadata = providers.get("tile_metadata", {})
+        fields = metadata.get(tile.get("name")) or metadata.get(tile.get("title")) or {}
+        if fields.get("icon") and not tile.get("icon"):
+            tile["icon"] = fields["icon"]
+        if fields.get("name"):
+            tile["name"] = fields["name"]
         name = str(tile.get("name") or tile.get("title") or f"Port {port}")
         tile["featured"] = _is_citadel_service(tile)
         tile["display_name"] = f"⭐ {name} ⭐" if tile["featured"] else name

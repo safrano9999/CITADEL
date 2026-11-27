@@ -1,0 +1,9 @@
+[
+  {"match": "Text Embeddings(?: · BGE-M3)?", "icon": "bge-m3.svg"},
+  {"match": "CUPS Web", "icon": "cups.png"},
+  {"match": "(?:Tika|Welcome to the Apache Tika(?: [0-9]+(?:[.][0-9]+)*)? Server)", "title": "Tika", "icon": "tika.png"},
+  {"match": "Gotenberg", "title": "Gotenberg", "icon": "gotenberg.png"},
+  {"match": "Paperless-ngx(?: sign in)?", "title": "Paperless-ngx"},
+  {"match": "DataForSEO MCP", "icon": "dataforseo-mcp.svg"},
+  {"match": "Gluet(?:o|u)n(?: USA)?", "icon": "vpn-eagle.png"}
+]
