@@ -310,7 +310,7 @@ PAGE_TIMEOUT=(--connect-timeout 3 --max-time "$page_seconds")
 body_is_html() {
     local url="$1" ssl="$2"
     local body
-    body="$(curl -s "${CURL_USER_AGENT_ARGS[@]}" $ssl "${PAGE_TIMEOUT[@]}" --location -o - "$url" 2>/dev/null | head -c 8192)" || true
+    body="$(curl -s "${CURL_USER_AGENT_ARGS[@]}" $ssl "${PAGE_TIMEOUT[@]}" --cookie '' --location -o - "$url" 2>/dev/null | head -c 8192)" || true
     if echo "$body" | grep -qi "<html" 2>/dev/null; then
         return 0
     fi
@@ -456,7 +456,7 @@ atomic_write_json(sys.argv[6], {
 
     TMP_HTML="$(mktemp)"
     if ! EFFECTIVE_URL="$(curl -sS "${CURL_USER_AGENT_ARGS[@]}" $LOCAL_SSL "${PAGE_TIMEOUT[@]}" --max-filesize "$MAX_FETCH_BYTES" \
-        --location "$LOCAL_URL/" -o "$TMP_HTML" -w "%{url_effective}" 2>/dev/null)"; then
+        --cookie '' --location "$LOCAL_URL/" -o "$TMP_HTML" -w "%{url_effective}" 2>/dev/null)"; then
         EFFECTIVE_URL="$LOCAL_URL/"
         : > "$TMP_HTML"
     fi
