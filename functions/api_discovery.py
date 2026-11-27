@@ -6,6 +6,7 @@ Probes identify protocols; a status code or path name alone is not evidence.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import http.client
 import json
 import re
 import ssl
@@ -27,7 +28,7 @@ METHODS = {"get", "head", "post", "put", "patch", "delete", "options"}
 MAX_BODY = 4 * 1024 * 1024
 MAX_REQUESTS = 26
 MAX_OPERATIONS = 2000
-PROTOCOL_VERSION = "2025-06-18"
+PROTOCOL_VERSION = "2025-11-25"
 GRAPHQL_QUERY = "query CitadelDiscovery { __typename }"
 TOOLS_INVOKE_PATH = "/tools/invoke"
 MISSING_PATH = "/.well-known/citadel-discovery-missing"
@@ -59,7 +60,7 @@ def json_message(probe: Probe):
             return None
         if content_type == "application/json" or content_type.endswith("+json"):
             return json.loads(probe.body)
-    except (ValueError, UnicodeError):
+    except (ValueError, UnicodeError, RecursionError):
         pass
     return None
 
@@ -215,6 +216,34 @@ def documentation_links(response: Probe, source_url: str) -> list[str]:
     return list(dict.fromkeys(paths))[:4]
 
 
+def initialize_mcp(probe, path, headers):
+    response = probe(path, "POST", {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": PROTOCOL_VERSION, "capabilities": {},
+        "clientInfo": {"name": "citadel-discovery", "version": "1"}}}, headers)
+    message = json_message(response)
+    result = message.get("result") if isinstance(message, dict) else None
+    valid = (200 <= response.status < 300 and isinstance(result, dict)
+             and message.get("jsonrpc") == "2.0" and message.get("id") == 1
+             and isinstance(result.get("capabilities"), dict) and isinstance(result.get("serverInfo"), dict)
+             and result.get("protocolVersion") in {"2025-03-26", "2025-06-18", "2025-11-25"})
+    if not valid:
+        return response, None
+    session = response.headers.get("mcp-session-id")
+    if session and isinstance(probe, LocalProbes) and re.fullmatch(r"[!-~]{1,512}", session):
+        # Close only the session this probe just opened, on the exact same route.
+        request = urllib.request.Request(probe.base + path, method="DELETE", headers={
+            **headers, "Mcp-Session-Id": session, "MCP-Protocol-Version": result["protocolVersion"],
+            "Accept": "application/json, text/event-stream"})
+        try:
+            with probe.opener.open(request, timeout=1):
+                pass
+        except urllib.error.HTTPError as error:
+            error.close()
+        except (OSError, http.client.HTTPException):
+            pass
+    return response, result["serverInfo"]
+
+
 def discover_service(service: dict, credentials: dict, *, probe=None, admin_ports=(), rules=(), skip_mcp_paths=()) -> list[dict]:
     port, scheme = service.get("port"), service.get("scheme")
     if type(port) is not int or not 1 <= port <= 65535 or scheme not in {"http", "https"}:
@@ -272,15 +301,8 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
         if path in skip_mcp_paths:
             continue
         key = route_id(port, "mcp", path)
-        response = probe(path, "POST", {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-            "protocolVersion": PROTOCOL_VERSION, "capabilities": {},
-            "clientInfo": {"name": "citadel-discovery", "version": "1"}}}, credentials.get(key, {}))
-        data = json_message(response)
-        result = data.get("result") if isinstance(data, dict) else None
-        if (200 <= response.status < 300 and isinstance(data, dict) and data.get("jsonrpc") == "2.0"
-                and data.get("id") == 1 and isinstance(result, dict)
-                and isinstance(result.get("serverInfo"), dict) and isinstance(result.get("capabilities"), dict)
-                and result.get("protocolVersion") in {"2025-03-26", "2025-06-18", "2025-11-25"}):
+        response, info = initialize_mcp(probe, path, credentials.get(key, {}))
+        if info is not None:
             record(path, "mcp", response, "ready", "MCP initialize result", [
                 {"path": path, "method": method} for method in ("GET", "POST", "DELETE")])
         elif response.status in {401, 403}:

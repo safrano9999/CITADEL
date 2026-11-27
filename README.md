@@ -355,10 +355,20 @@ CITADEL_DATA/CADDY/
 
 CITADEL writes directly into `CITADEL_DATA/`; no state symlinks are needed.
 Cloudflare output remains ephemeral in `cache/`. Provider code is not hidden by the mount.
-`CITADEL_LOGO_PERSISTENT=1` reuses downloaded icons between scans. With `0`,
-HTML services get a fresh download attempt; successful downloads replace that
+For MCP listeners, the scanner reads `result.serverInfo.icons` from a valid
+`initialize` response. An embedded image or an icon on the same listener takes
+priority over the cached or HTML icon. A protected route uses its configured
+backend bearer for initialization. Image downloads receive no bearer.
+If the MCP response has no usable icon, `CITADEL_LOGO_PERSISTENT=1` reuses the
+cached icon. With `0`,
+HTTP services get a fresh download attempt; successful downloads replace that
 port's icon, failed downloads leave the previous icon available. The icon
 directory is not cleared. Discovery, titles and route results are always fresh.
+The scanner reads HTML icon links (including embedded image data) and icons in
+linked web app manifests. It also checks standard paths such as `/favicon.png`,
+`/favicon.ico`, and `/favicon.svg` on HTTP services. A favicon supplied by
+a bind mount or a reverse proxy works when the service exposes it at one of
+these paths or links to it in HTML. Icon requests stay on the scanned endpoint.
 
 ## Extensions: URL providers and file exporters
 

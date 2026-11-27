@@ -372,36 +372,9 @@ probe_http() {
     fi
 }
 
-try_fetch_icon() {
-    local url="$1" port="$2" ssl="$3"
-    local tmp result status content_type ext size
-    tmp="$(mktemp "$ICONS_DIR/${port}.XXXXXX")"
-    if ! result="$(curl -sS "${CURL_USER_AGENT_ARGS[@]}" $ssl --max-time 5 --max-filesize "$MAX_FETCH_BYTES" \
-        -o "$tmp" -w $'%{http_code}\t%{content_type}' "$url" 2>/dev/null)"; then
-        rm -f "$tmp"
-        echo ""
-        return
-    fi
-    status="${result%%$'\t'*}"
-    content_type="${result#*$'\t'}"
-    size="$(stat -c %s "$tmp" 2>/dev/null || echo 0)"
-    ext="$(PYTHONPATH="$FUNCTIONS_DIR" python3 -c \
-        'from favicon_policy import icon_extension; import sys; print(icon_extension(sys.argv[1]))' \
-        "$content_type")"
-    if [[ "$status" == "200" && -n "$ext" && -s "$tmp" && "$size" -le "$MAX_FETCH_BYTES" ]]; then
-        local dest="$ICONS_DIR/${port}${ext}"
-        mv "$tmp" "$dest"
-        chmod 644 "$dest"
-        # A refreshed logo replaces all older formats for this exact port.
-        local old_icon
-        for old_icon in "$ICONS_DIR/$port".{png,svg,webp,gif,ico,jpeg,jpg}; do
-            [[ "$old_icon" == "$dest" ]] || rm -f -- "$old_icon"
-        done
-        echo "${port}${ext}"
-    else
-        rm -f "$tmp"
-        echo ""
-    fi
+scan_icon() {
+    python3 "$FUNCTIONS_DIR/favicon_policy.py" "$LOCAL_URL" "$1" "$ICONS_DIR" "$PORT" \
+        "$MAX_FETCH_BYTES" "$CITADEL_USER_AGENT_VALUE" "$LOGO_PERSISTENT"
 }
 
 echo "=== Probing ports for HTTP/HTTPS ==="
@@ -453,37 +426,23 @@ atomic_write_json(f, d)
     NET_LABEL=""
     [[ -n "$NETWORK_IP" ]] && NET_LABEL=" [+net ${NETWORK_IP}]"
 
-    if [[ "$PROBE_KIND" == "openai-v1" ]]; then
+    if [[ "$PROBE_KIND" != "html" ]]; then
+        ICON_NAME="$(scan_icon "$LOCAL_URL/" </dev/null)"
+        SERVICE_TITLE="HTTP Service"
+        [[ "$PROBE_KIND" != "openai-v1" ]] || SERVICE_TITLE="OpenAI v1 API"
         python3 -c "
 import sys
-sys.path.insert(0, sys.argv[5])
+sys.path.insert(0, sys.argv[7])
 from atomic_io import atomic_write_json
-atomic_write_json(sys.argv[4], {
-        'title': 'OpenAI v1 API',
-        'icon': None,
-        'scheme': sys.argv[1],
-        'network_ip': sys.argv[2] or None,
-        'kind': sys.argv[3],
-    })
-" "$SCHEME" "$NETWORK_IP" "$PROBE_KIND" "$CACHE_FILE" "$PROVIDERS_DIR"
-        printf "%s     OpenAI v1 API%s\n" "$SCHEME" "$NET_LABEL"
-        continue
-    fi
-
-    if [[ "$PROBE_KIND" == "http-service" ]]; then
-        python3 -c "
-import sys
-sys.path.insert(0, sys.argv[6])
-from atomic_io import atomic_write_json
-atomic_write_json(sys.argv[5], {
+atomic_write_json(sys.argv[6], {
         'title': sys.argv[1],
-        'icon': None,
-        'scheme': sys.argv[2],
-        'network_ip': sys.argv[3] or None,
-        'kind': sys.argv[4],
+        'icon': sys.argv[2] or None,
+        'scheme': sys.argv[3],
+        'network_ip': sys.argv[4] or None,
+        'kind': sys.argv[5],
     })
-" "HTTP Service" "$SCHEME" "$NETWORK_IP" "$PROBE_KIND" "$CACHE_FILE" "$PROVIDERS_DIR"
-        printf "%s     HTTP service%s\n" "$SCHEME" "$NET_LABEL"
+" "$SERVICE_TITLE" "$ICON_NAME" "$SCHEME" "$NETWORK_IP" "$PROBE_KIND" "$CACHE_FILE" "$PROVIDERS_DIR"
+        printf "%s     %s%s\n" "$SCHEME" "$SERVICE_TITLE" "$NET_LABEL"
         continue
     fi
 
@@ -496,7 +455,6 @@ atomic_write_json(sys.argv[5], {
         : > "$TMP_HTML"
     fi
     HTML="$(cat "$TMP_HTML")"
-    rm -f "$TMP_HTML"
     BROWSER_PAGE="$(printf '%s' "$HTML" | PYTHONPATH="$FUNCTIONS_DIR" python3 -c \
         'import sys; from scan_policy import is_browser_page; print(int(is_browser_page(sys.stdin.read())))')"
     TITLE="$(echo "$HTML" | python3 -c "
@@ -508,51 +466,8 @@ from html import unescape
 print(unescape(m.group(1).strip()) if m else '')
 " || true)"
 
-    FAVICON_CANDIDATES="$(echo "$HTML" | python3 -c '
-import re
-import sys
-html = sys.stdin.read()
-candidates = []
-for tag in re.finditer(r"<link([^>]+)>", html, re.IGNORECASE):
-    attrs = tag.group(1)
-    rel_m = re.search(r"rel=[\"'"'"'](.*?)[\"'"'"']", attrs, re.IGNORECASE)
-    href_m = re.search(r"href=[\"'"'"'](.*?)[\"'"'"']", attrs, re.IGNORECASE)
-    if rel_m and href_m and "icon" in rel_m.group(1).lower():
-        href = href_m.group(1).strip()
-        priority = 0 if any(x in href.lower() for x in [".png", ".svg", ".webp"]) else 1
-        candidates.append((priority, href))
-candidates.sort(key=lambda x: x[0])
-for _, href in candidates:
-    print(href)
-' || true)"
-
-    mapfile -t ICON_URLS < <(
-        printf '%s\n' "$FAVICON_CANDIDATES" |
-            PYTHONPATH="$FUNCTIONS_DIR" python3 -c '
-import sys
-from favicon_policy import safe_icon_urls
-
-for url in safe_icon_urls(sys.argv[1], sys.argv[2], list(sys.stdin)):
-    print(url)
-' "$LOCAL_URL" "$EFFECTIVE_URL"
-    )
-
-    ICON_URLS+=("${LOCAL_URL}/favicon.png")
-    ICON_URLS+=("${LOCAL_URL}/favicon.ico")
-    ICON_URLS+=("${LOCAL_URL}/apple-touch-icon.png")
-
-    ICON_NAME=""
-    if "$LOGO_PERSISTENT"; then
-        ICON_NAME="$(PYTHONPATH="$FUNCTIONS_DIR" python3 -c \
-            'from scan_policy import existing_icon; import sys; print(existing_icon(sys.argv[1], int(sys.argv[2])))' \
-            "$ICONS_DIR" "$PORT")"
-    fi
-    if [[ -z "$ICON_NAME" ]]; then
-        for FAVICON_URL in "${ICON_URLS[@]}"; do
-            ICON_NAME="$(try_fetch_icon "$FAVICON_URL" "$PORT" "$LOCAL_SSL")"
-            [[ -n "$ICON_NAME" ]] && break
-        done
-    fi
+    ICON_NAME="$(scan_icon "$EFFECTIVE_URL" < "$TMP_HTML")"
+    rm -f "$TMP_HTML"
 
     python3 -c "
 import sys

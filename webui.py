@@ -134,6 +134,10 @@ class InstanceIdentifiedFastAPI(FastAPI):
         async def identify_response(message: Message) -> None:
             if message["type"] == "http.response.start":
                 MutableHeaders(scope=message)["X-Citadel-Instance"] = _instance_id
+                if scope.get("path", "").startswith("/icons/"):
+                    headers = MutableHeaders(scope=message)
+                    headers["X-Content-Type-Options"] = "nosniff"
+                    headers["Content-Security-Policy"] = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:"
                 if scope.get("path", "").startswith(("/api/cloudflare/access", "/cloudflare-api")):
                     headers = MutableHeaders(scope=message)
                     headers["Cache-Control"] = "no-store"
