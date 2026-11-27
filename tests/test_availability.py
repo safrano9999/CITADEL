@@ -1,6 +1,7 @@
 import asyncio
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 import threading
 import unittest
 from unittest.mock import MagicMock, patch
@@ -50,6 +51,17 @@ class AvailabilityTests(unittest.TestCase):
                 actual, tooltip = availability.probe(self.url + path)
                 self.assertEqual(actual, state)
                 self.assertIn(detail, tooltip)
+
+    def test_availability_uses_configured_scan_timeout_across_redirects(self):
+        redirect = MagicMock(status=302, headers={"Location": "/login"}, reason="Found")
+        redirect.__enter__.return_value = redirect
+        with patch.dict(os.environ, {"CITADEL_SCAN_PAGE_TIMEOUT_SECONDS": "10"}), \
+                patch.object(availability, "monotonic", side_effect=[100, 100, 106]), \
+                patch.object(availability, "build_opener") as build:
+            opener = build.return_value
+            opener.open.side_effect = [redirect, TimeoutError()]
+            self.assertEqual(availability.probe(self.url), ("down", "Connection or response timed out (10 s)"))
+            self.assertEqual([call.kwargs["timeout"] for call in opener.open.call_args_list], [10, 4])
 
     def test_redirect_cookies_are_limited_to_one_probe(self):
         self.assertEqual(availability.probe(self.url + "/start")[0], "up")

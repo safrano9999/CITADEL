@@ -6,9 +6,12 @@ from http.cookiejar import CookieJar
 import json
 import socket
 import ssl
+from time import monotonic
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import HTTPCookieProcessor, HTTPRedirectHandler, ProxyHandler, Request, build_opener
+
+from python_header import get_int
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -31,6 +34,10 @@ def tile_urls(dashboard, mode, ports):
 
 
 def probe(url):
+    timeout = get_int("CITADEL_SCAN_PAGE_TIMEOUT_SECONDS", 3)
+    if timeout <= 0:
+        return "down", "CITADEL_SCAN_PAGE_TIMEOUT_SECONDS must be positive"
+    deadline = monotonic() + timeout
     opener = build_opener(ProxyHandler({}), HTTPCookieProcessor(CookieJar()), NoRedirect())
     try:
         initial = urlsplit(url)
@@ -39,7 +46,10 @@ def probe(url):
         for _ in range(6):
             request = Request(url, headers={"User-Agent": "CITADEL-Availability/1", "Accept": "*/*"})
             try:
-                response = opener.open(request, timeout=4)
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise TimeoutError
+                response = opener.open(request, timeout=remaining)
             except HTTPError as error:
                 response = error
             with response:
@@ -79,7 +89,7 @@ def probe(url):
         if isinstance(reason, socket.gaierror):
             return "down", f"DNS lookup failed: {reason.strerror}"
         if isinstance(reason, TimeoutError):
-            return "down", "Connection or response timed out (4 s)"
+            return "down", f"Connection or response timed out ({timeout} s)"
         return "down", f"{type(reason).__name__}: {reason}"
 
 
