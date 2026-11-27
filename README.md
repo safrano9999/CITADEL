@@ -285,6 +285,7 @@ renders provider buttons, and can run the configured scanner.
 | `CITADEL_HTTPS_ONLY` | `0` | When enabled, route only services that already speak HTTPS on localhost; HTTP services remain visible |
 | `CITADEL_TAILSCALE_SERVE` | `full` | `off`: direct HTTPS only; `http_to_https`: proxy HTTP only; `full`: proxy all ports |
 | `CITADEL_OVERWRITE_TITLES` | `0` | Prefer the running container’s `citadel.title` for its dashboard tile. Supports published rootless Podman ports and unambiguous named upstreams behind the user’s Caddy container. Set to `0` to use the configured display name or detected HTML title. |
+| `CITADEL_SCAN_PAGE_TIMEOUT_SECONDS` | `3` | Total timeout per landing page request during a scan, in seconds. |
 | `CITADEL_LOGO_PERSISTENT` | `1` | Retain logos independently; service metadata is always rescanned |
 | `CITADEL_USER_AGENT` | `Mozilla/5.0 (compatible; CITADEL/1.0)` | HTTP probe user agent |
 | `CITADEL_CLOUDFLARE_DOMAIN` | empty | DNS suffix used for generated hostnames |

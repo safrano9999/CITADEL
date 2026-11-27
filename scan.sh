@@ -302,7 +302,10 @@ if dropped:
 echo
 
 # Refuse unreachable sockets quickly, but allow a connected backend time to render.
-PAGE_TIMEOUT=(--connect-timeout 3 --max-time 15)
+page_seconds="$(PYTHONPATH="$SCRIPT_DIR" python3 -c \
+    'from python_header import get_int; print(get_int("CITADEL_SCAN_PAGE_TIMEOUT_SECONDS", 3))')"
+[[ "$page_seconds" -gt 0 ]] || { echo "CITADEL_SCAN_PAGE_TIMEOUT_SECONDS must be positive" >&2; exit 2; }
+PAGE_TIMEOUT=(--connect-timeout 3 --max-time "$page_seconds")
 
 body_is_html() {
     local url="$1" ssl="$2"
