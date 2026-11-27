@@ -61,6 +61,11 @@ TS_USERSPACE=0
 #default-preset: 1
 CITADEL_LOGO_PERSISTENT=1
 
+# Prefer a running container's citadel.title label for its dashboard tile.
+#choices: 0 1
+#default-preset: 0
+CITADEL_OVERWRITE_TITLES=0
+
 # Maximum HTML report download size in MiB; empty uses 5.
 #default-preset: 5
 CITADEL_REPORT_MAX_MB=

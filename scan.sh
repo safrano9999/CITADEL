@@ -586,14 +586,33 @@ import sys
     out_file,
     providers_dir,
     https_only_raw,
-) = sys.argv[1:7]
+    ui_config_file,
+) = sys.argv[1:8]
 sys.path.insert(0, providers_dir)
 from atomic_io import atomic_write_json
+
+try:
+    with open(ui_config_file) as handle:
+        display_names = json.load(handle).get('display_names', {})
+except (OSError, ValueError, AttributeError):
+    display_names = {}
+if not isinstance(display_names, dict):
+    display_names = {}
 
 with open(ss_file) as handle:
     ss_raw = json.load(handle)
 if not isinstance(ss_raw, list):
     raise ValueError('invalid listener inventory')
+
+from pathlib import Path
+project = Path(providers_dir).resolve().parents[1]
+sys.path.insert(0, str(project))
+sys.path.insert(0, str(project / 'functions'))
+from python_header import get_bool
+from podman_titles import listener_titles
+
+label_titles = listener_titles(ss_raw) if get_bool('CITADEL_OVERWRITE_TITLES', False) else {}
+
 
 # Discovery metadata is disposable; retained logos live separately in icons/.
 active_ports = {str(row['port']) for row in ss_raw}
@@ -637,7 +656,7 @@ for p in ss_raw:
                 break
 
     if scheme:
-        display_name = title or f'Port {port}'
+        display_name = label_titles.get(port) or display_names.get(str(port)) or title or f'Port {port}'
         http_services.append({
             'port': port,
             'addr': p.get('addr'),
@@ -678,7 +697,7 @@ if os.environ.get('CITADEL_SCAN_ADD') == '1':
     from scan_add import merge_services
     payload = merge_services(Path(out_file), payload)
 atomic_write_json(out_file, payload, indent=None)
-" "$SS_FILE" "$CACHE_DIR" "$ICONS_DIR" "$SERVICES_FILE" "$PROVIDERS_DIR" "$HTTPS_ONLY"
+" "$SS_FILE" "$CACHE_DIR" "$ICONS_DIR" "$SERVICES_FILE" "$PROVIDERS_DIR" "$HTTPS_ONLY" "$EXTENSIONS_DIR/ui.json"
 echo "services.json written"
 echo
 

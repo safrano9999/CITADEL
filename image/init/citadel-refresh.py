@@ -28,6 +28,7 @@ SETTINGS = {
     "CADDYFILE_STEPS": "1",
     "CITADEL_TAILSCALE_SERVE": "full",
     "CITADEL_LOGO_PERSISTENT": "1",
+    "CITADEL_OVERWRITE_TITLES": "0",
     "CITADEL_HIDE_HTTP_WEBUI_DUPE": "1",
 }
 UNITS = ("citadel.service", "citadel-scan.service")
