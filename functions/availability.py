@@ -2,12 +2,13 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from http.client import HTTPException
+from http.cookiejar import CookieJar
 import json
 import socket
 import ssl
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
-from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+from urllib.request import HTTPCookieProcessor, HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -30,7 +31,7 @@ def tile_urls(dashboard, mode, ports):
 
 
 def probe(url):
-    opener = build_opener(ProxyHandler({}), NoRedirect())
+    opener = build_opener(ProxyHandler({}), HTTPCookieProcessor(CookieJar()), NoRedirect())
     try:
         initial = urlsplit(url)
         if initial.scheme not in {"https", "http"} or not initial.hostname or initial.username is not None:

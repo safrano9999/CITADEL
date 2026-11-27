@@ -17,6 +17,8 @@ class Routes(BaseHTTPRequestHandler):
             "/challenge": (403, {"cf-mitigated": "challenge"}),
             "/auth": (401, {"WWW-Authenticate": 'Bearer realm="fixture"'}),
             "/down": (503, {}),
+            "/start": (302, {"Location": "/login", "Set-Cookie": "visit=1; Path=/"}),
+            "/login": (200, {}) if self.headers.get("Cookie") == "visit=1" else (302, {"Location": "/login"}),
         }
         code, headers = routes[self.path]
         self.send_response(code)
@@ -48,6 +50,10 @@ class AvailabilityTests(unittest.TestCase):
                 actual, tooltip = availability.probe(self.url + path)
                 self.assertEqual(actual, state)
                 self.assertIn(detail, tooltip)
+
+    def test_redirect_cookies_are_limited_to_one_probe(self):
+        self.assertEqual(availability.probe(self.url + "/start")[0], "up")
+        self.assertEqual(availability.probe(self.url + "/login"), ("down", "Redirect limit exceeded"))
 
     def test_https_upgrade_uses_final_response_and_rejects_downgrade(self):
         def response(code, headers):
