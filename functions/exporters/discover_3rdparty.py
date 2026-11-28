@@ -24,7 +24,7 @@ def load_rules(directory, root):
             fields["icon"] = f"assets/3rd-party/{icon}"
         if not fields:
             raise ValueError(f"Missing tile metadata for {pattern.pattern!r}")
-        rules.append((pattern, fields))
+        rules.append((pattern, entry.get("process"), fields))
     return rules
 
 
@@ -34,9 +34,15 @@ def match_tiles(services, rules):
         for value in (service.get("name"), service.get("title")):
             if not isinstance(value, str) or not value.strip():
                 continue
-            for pattern, fields in rules:
+            for pattern, _, fields in rules:
                 if pattern.fullmatch(value.strip()):
                     matches[value] = fields
+                    break
+        process = service.get("process")
+        if process:
+            for _, expected_process, fields in rules:
+                if process == expected_process:
+                    matches[f"process:{process}"] = fields
                     break
     return matches
 

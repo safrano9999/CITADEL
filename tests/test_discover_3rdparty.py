@@ -30,3 +30,12 @@ class ThirdPartyMetadataTests(unittest.TestCase):
         self.assertEqual(set(matches), set(names))
         self.assertEqual(matches[names[1]], matches[names[2]])
         self.assertEqual(matches[names[-1]]["name"], "Firefly III Data Importer")
+
+
+    def test_protected_opencode_is_identified_by_its_listener(self):
+        root = Path(__file__).resolve().parents[1]
+        rules = load_rules(root / "extensions/enabled/discover-3rdparty", root)
+        result = match_tiles([{"title": "HTTP Service", "process": "opencode"},
+                              {"title": "HTTP Service", "process": "caddy"}], rules)
+        self.assertEqual(result, {"process:opencode": {"name": "OpenCode",
+                                                      "icon": "assets/3rd-party/opencode.svg"}})

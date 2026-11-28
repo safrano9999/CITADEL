@@ -348,7 +348,8 @@ def build_dashboard() -> dict:
     for tile in http_tiles:
         port = str(int(tile.get("port", 0)))
         metadata = providers.get("tile_metadata", {})
-        fields = metadata.get(tile.get("name")) or metadata.get(tile.get("title")) or {}
+        fields = (metadata.get(tile.get("name")) or metadata.get(tile.get("title")) or
+                  metadata.get(f"process:{tile.get('process')}") or {})
         if fields.get("icon") and not tile.get("icon"):
             tile["icon"] = fields["icon"]
         if fields.get("name"):

@@ -1,4 +1,6 @@
 [
+  {"match": "OpenCode", "process": "opencode", "title": "OpenCode", "icon": "opencode.svg"},
+  {"match": "(?:Sign in [—-] Hermes Agent|Hermes Agent(?: [—-] Dashboard)?)", "title": "Hermes Agent"},
   {"match": "Text Embeddings(?: · BGE-M3)?", "icon": "bge-m3.svg"},
   {"match": "CUPS Web", "icon": "cups.png"},
   {"match": "(?:Tika|Welcome to the Apache Tika(?: [0-9]+(?:[.][0-9]+)*)? Server)", "title": "Tika", "icon": "tika.png"},
