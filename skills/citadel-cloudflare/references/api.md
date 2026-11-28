@@ -13,6 +13,7 @@ Use a scoped API token. Never request or store a Global API Key.
 - Zone: Zone, Edit
 - Zone: DNS, Edit
 - Zone: Zone Settings, Edit
+- Zone → Dynamic URL Redirects → Edit on the routed zone for the default HTTP-to-HTTPS rule (`CITADEL_CLOUDFLARE_HTTP_TO_HTTPS=1`) and the optional www redirect. Check this permission if redirect reconciliation returns HTTP 403.
 - Zone: SSL and Certificates, Edit
 - User: User Details, Read when available
 
