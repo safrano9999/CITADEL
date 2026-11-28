@@ -14,3 +14,9 @@
 .grant-actions { width: 1%; white-space: nowrap; }
 #access-status { min-height: 1.5em; font-weight: 600; }
 @media (max-width: 600px) { .access-layout, .access-route { padding: 14px; } }
+
+.bearer-field { display: flex; align-items: center; gap: 4px; }
+.bearer-field input { flex: 1; min-width: 6ch; }
+.bearer-field button { flex: none; min-height: 32px; }
+.bearer-generate { padding: 4px 9px; color: var(--accent); background: var(--wash); }
+.bearer-icon { width: 32px; padding: 0; }

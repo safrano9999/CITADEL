@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CITADEL · API Access</title>
-  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
   <link rel="stylesheet" href="/assets/theme.css">
   <link rel="stylesheet" href="/assets/style.css">
   <link rel="stylesheet" href="/assets/cloudflare-api.css">
@@ -29,12 +29,21 @@
       <button id="access-reload" class="btn-default" type="button">Reload</button>
       <button id="access-lock" class="btn-default" type="button">Lock</button>
     </div>
-    <p>Each row grants access by OAuth email or client bearer. Leave the backend bearer empty to forward the client bearer or use email login without a backend token.</p>
+    <p>An OAuth email and a client bearer each grant access independently. Both can use the same backend bearer. Leave the backend bearer empty to forward the client bearer or use email login without a backend token.</p>
     <template id="grant-row">
       <tr>
         <td><input data-field="email" type="email" aria-label="OAuth email" autocomplete="off" spellcheck="false"></td>
-        <td><input data-field="client" type="password" aria-label="Client bearer" autocomplete="off" spellcheck="false"></td>
-        <td><input data-field="backend" type="password" aria-label="Backend bearer" autocomplete="off" spellcheck="false"></td>
+        <td><div class="bearer-field">
+          <input data-field="client" type="password" aria-label="Client bearer" autocomplete="off" spellcheck="false">
+          <button class="btn-default bearer-generate" type="button" data-action="generate" aria-label="Generate client bearer">Generate</button>
+          <button class="btn-default bearer-icon" type="button" data-action="copy" title="Copy client bearer" aria-label="Copy client bearer" hidden>📋</button>
+          <button class="btn-default bearer-icon" type="button" data-action="delete" title="Delete" aria-label="Delete client bearer" hidden>❌</button>
+          <button class="btn-default bearer-icon" type="button" data-action="rotate" title="Rotate" aria-label="Rotate client bearer" hidden>♻️</button>
+        </div></td>
+        <td><div class="bearer-field">
+          <input data-field="backend" type="password" aria-label="Backend bearer" autocomplete="off" spellcheck="false">
+          <button class="btn-default bearer-icon" type="button" data-action="copy" title="Copy backend bearer" aria-label="Copy backend bearer" hidden>📋</button>
+        </div></td>
         <td class="grant-actions">
           <button class="btn-default" type="button" data-action="reveal" aria-label="Show bearers" aria-pressed="false">Show</button>
           <button class="btn-default" type="button" data-action="remove">Remove</button>

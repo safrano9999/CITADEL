@@ -105,7 +105,7 @@ def scaffold(root: Path, inventory: list[dict]) -> None:
                 identity = route_id(row["port"], row["protocol"], row["path"])
                 routes.setdefault(identity, "")
         if routes != before or not (root / FILENAME).exists():
-            atomic_write_json(root / FILENAME, {"routes": routes}, mode=0o600)
+            atomic_write_json(root / FILENAME, {"routes": routes}, mode=0o600, preserve_owner=True)
 
 
 def save_access(root: Path, routes: dict, expected_revision: str) -> dict[str, str]:
@@ -119,7 +119,7 @@ def save_access(root: Path, routes: dict, expected_revision: str) -> dict[str, s
         # The UI cannot invent target addresses or unknown route IDs.
         if set(routes) - set(current):
             raise ValueError("Unknown access route; run a scan first")
-        atomic_write_json(root / FILENAME, {"routes": routes}, mode=0o600)
+        atomic_write_json(root / FILENAME, {"routes": routes}, mode=0o600, preserve_owner=True)
     return routes
 
 
@@ -147,7 +147,7 @@ def compiled_access(identity: str, grant: RouteAccess, key: str) -> dict:
 def mark_applied(root: Path, routes: dict[str, str]) -> None:
     path = root / "CITADEL_DATA/cloudflare-api/access-applied.json"
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    atomic_write_json(path, {"revision": revision(routes)}, mode=0o600)
+    atomic_write_json(path, {"revision": revision(routes)}, mode=0o600, preserve_owner=True)
 
 
 def management_view(root: Path) -> dict:

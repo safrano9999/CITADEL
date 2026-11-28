@@ -76,11 +76,12 @@ def legacy_sse(probe: Probe) -> bool:
 
 
 class LocalProbes:
-    def __init__(self, scheme: str, port: int, *, seconds: float = 10, initialize_timeout: float = 8):
+    def __init__(self, scheme: str, port: int, *, seconds: float = 10, schema_timeout: float = 3, initialize_timeout: float = 8):
         if scheme not in {"http", "https"} or type(port) is not int or not 1 <= port <= 65535:
             raise ValueError("Invalid local listener")
         self.base = f"{scheme}://127.0.0.1:{port}"
         self.deadline = time.monotonic() + seconds
+        self.schema_timeout = schema_timeout
         self.initialize_timeout = initialize_timeout
         self.count = 0
         # Caddy's local listeners may use an internal CA, as in the normal scan.
@@ -114,7 +115,7 @@ class LocalProbes:
                 # Streamable HTTP bridges may start their stdio child during
                 # initialize. Allow that startup while retaining the overall
                 # listener deadline and the short timeout for other probes.
-                timeout = self.initialize_timeout if mcp_initialize else 3.0 if path in DOC_PATHS else 1.0
+                timeout = self.initialize_timeout if mcp_initialize else self.schema_timeout if path in DOC_PATHS else 1.0
                 response = self.opener.open(request, timeout=min(timeout, remaining))
             except urllib.error.HTTPError as exc:
                 response = exc
@@ -252,7 +253,10 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
     titles = {str(service.get(key) or "").strip().lower() for key in ("name", "title")}
     if port in admin_ports or service.get("citadel_webui") or "citadel" in titles:
         return []
-    probe = probe or LocalProbes(scheme, port)
+    swagger_ui = any("swagger ui" in title for title in titles)
+    if probe is None:
+        # Some gateways build their multi-megabyte schema on the first request.
+        probe = LocalProbes(scheme, port, seconds=30, schema_timeout=18) if swagger_ui else LocalProbes(scheme, port)
     rows = {}
 
     def record(path, protocol, response, status, evidence, operations=(), *, detected=False):
@@ -297,6 +301,13 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
         else:
             record(path, "rest", response, "authentication-required" if response.status in {401, 403} else "unknown",
                    "Local declaration unverified: read-only JSON probe did not match")
+
+    # Swagger UI already identifies the documentation endpoint. Read it before
+    # slower transport probes can exhaust the per-listener deadline.
+    swagger_document = None
+    if swagger_ui:
+        key = route_id(port, "rest", "/openapi.json")
+        swagger_document = probe("/openapi.json", headers=credentials.get(key, {}))
 
     for path in MCP_PATHS:
         if path in skip_mcp_paths:
@@ -349,7 +360,10 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
         # Discovery credentials for a protected document use that document's
         # stable candidate ID. Runtime credentials use the resolved API base ID.
         key = route_id(port, "rest", path)
-        response = probe(path, headers=credentials.get(key, {}))
+        if path == "/openapi.json" and swagger_document is not None:
+            response = swagger_document
+        else:
+            response = probe(path, headers=credentials.get(key, {}))
         data = json_message(response)
         source_url = f"{scheme}://127.0.0.1:{port}{path}"
         if response.status == 0:
@@ -367,6 +381,26 @@ def discover_service(service: dict, credentials: dict, *, probe=None, admin_port
             continue
         if isinstance(data.get("info"), dict) and str(data["info"].get("title", "")).lower() == "citadel":
             return []
+        # A gateway can document the OpenAI client API alongside unrelated
+        # management routes with unsupported catch-all templates. Recognize
+        # the client base independently using its documented operations.
+        if is_openapi_document(data):
+            paths = data["paths"]
+            models = paths.get("/v1/models")
+            chat = paths.get("/v1/chat/completions")
+            if (isinstance(models, dict) and "get" in models
+                    and isinstance(chat, dict) and "post" in chat):
+                subset = {"/v1/models": models, "/v1/chat/completions": chat}
+                try:
+                    server_base, client_ops = openapi_operations({**data, "paths": subset}, source_url)
+                except ValueError:
+                    pass
+                else:
+                    if server_base == "/":
+                        key = route_id(port, "rest", "/v1")
+                        needs_auth = any(op["requires_auth"] for op in client_ops) and not credentials.get(key)
+                        record("/v1", "rest", response, "authentication-required" if needs_auth else "ready",
+                               "OpenAI-compatible API documented by OpenAPI", client_ops)
         try:
             base, operations = openapi_operations(data, source_url)
         except ValueError as exc:

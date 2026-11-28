@@ -198,6 +198,9 @@ def _load_providers() -> dict:
                         continue
                     port = str(endpoint.get("port"))
                     status = endpoint.get("status")
+                    # An unsupported OpenAPI map identifies a schema document, not a callable REST base.
+                    if endpoint.get("protocol") == "rest" and status == "unsupported":
+                        continue
                     detected.setdefault(port, {})[endpoint.get("id")] = {
                         **{key: endpoint.get(key) for key in ("id", "protocol", "path")},
                         "url": "", "status": "not-published" if status == "ready" else status,

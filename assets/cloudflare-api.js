@@ -36,14 +36,54 @@
     status("Unsaved changes.");
   }
 
-  function addGrant(body, entry = "") {
+  function addGrant(body, entry = "", pairedClient = "") {
     const tr = byId("grant-row").content.firstElementChild.cloneNode(true);
     const email = tr.querySelector('[data-field="email"]');
     const client = tr.querySelector('[data-field="client"]');
     const backend = tr.querySelector('[data-field="backend"]');
     const [identity, target = ""] = entry.split(";").map(value => value.trim());
     (identity.includes("@") ? email : client).value = identity;
+    if (pairedClient) client.value = pairedClient;
     backend.value = target;
+    for (const field of [client, backend]) {
+      const copy = field.parentElement.querySelector('[data-action="copy"]');
+      const syncCopy = () => { copy.hidden = !field.value.trim(); };
+      syncCopy();
+      field.addEventListener("input", syncCopy);
+      copy.addEventListener("click", async () => {
+        const label = field.getAttribute("aria-label");
+        try {
+          await navigator.clipboard.writeText(field.value.trim());
+          if (tr.isConnected) status(label + " copied." + (dirty ? " Unsaved changes." : ""));
+        } catch {
+          if (tr.isConnected) status("Clipboard unavailable. Use Show to copy the " + label.toLowerCase() + " manually.");
+        }
+      });
+    }
+    const generate = tr.querySelector('[data-action="generate"]');
+    const removeClient = tr.querySelector('[data-action="delete"]');
+    const rotate = tr.querySelector('[data-action="rotate"]');
+    function syncClientActions() {
+      const populated = Boolean(client.value.trim());
+      generate.hidden = populated;
+      removeClient.hidden = rotate.hidden = !populated;
+    }
+    function setClient(value) {
+      client.value = value;
+      tr.dataset.clientDeleted = String(!value);
+      client.dispatchEvent(new Event("input", { bubbles: true }));
+      (value ? rotate : generate).focus();
+    }
+    function generateClient() {
+      const bytes = crypto.getRandomValues(new Uint8Array(32));
+      setClient(Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join(""));
+    }
+    generate.addEventListener("click", generateClient);
+    rotate.addEventListener("click", generateClient);
+    removeClient.addEventListener("click", () => setClient(""));
+    client.addEventListener("input", syncClientActions);
+    backend.addEventListener("input", () => { delete tr.dataset.clientDeleted; });
+    syncClientActions();
     tr.addEventListener("input", markChanged);
     const reveal = tr.querySelector('[data-action="reveal"]');
     reveal.addEventListener("click", () => {
@@ -62,17 +102,18 @@
   }
 
   function entriesFor(route) {
-    const entries = Array.from(route.body.rows, (tr, index) => {
+    const entries = Array.from(route.body.rows).flatMap((tr, index) => {
       const fields = Array.from(tr.querySelectorAll("input"));
       const [email, client, backend] = fields.map(input => input.value.trim());
-      if ((Boolean(email) === Boolean(client)) || (email && !email.includes("@"))
+      if (!email && !client && (!backend || tr.dataset.clientDeleted === "true")) return [];
+      if ((!email && !client) || (email && !email.includes("@"))
           || client.includes("@") || fields.some(input => /[,;]/.test(input.value))) {
         const invalid = fields.find(input => /[,;]/.test(input.value))
-          || (client && (email || client.includes("@")) ? fields[1] : fields[0]);
+          || (client.includes("@") ? fields[1] : fields[0]);
         invalid.focus();
-        throw new Error(`${route.title}, row ${index + 1}: enter one OAuth email or one client bearer. Commas and semicolons cannot appear in a field.`);
+        throw new Error(`${route.title}, row ${index + 1}: enter a valid OAuth email or client bearer. Commas and semicolons cannot appear in a field.`);
       }
-      return [email || client, backend].filter(Boolean).join(";");
+      return [email, client].filter(Boolean).map(identity => [identity, backend].filter(Boolean).join(";"));
     });
     const value = entries.join(",");
     return value === route.initialValue ? route.original : value;
@@ -95,7 +136,13 @@
       const editor = byId("grant-table").content.cloneNode(true);
       const body = editor.querySelector("tbody");
       const entries = route.entries.split(",").filter(value => value.trim());
-      for (const entry of entries) addGrant(body, entry);
+      for (let index = 0; index < entries.length; index++) {
+        const [identity, backend] = entries[index].trim().split(";").map(part => part.trim());
+        const [next, nextBackend] = (entries[index + 1] || "").split(";").map(part => part.trim());
+        const paired = identity.includes("@") && next && !next.includes("@") && backend === nextBackend;
+        addGrant(body, entries[index], paired ? next : "");
+        if (paired) index++;
+      }
       editor.querySelector('[data-action="add"]').addEventListener("click", () => {
         addGrant(body).focus();
         markChanged();

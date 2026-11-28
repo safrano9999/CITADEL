@@ -335,6 +335,9 @@ export async function handle(request, env, fetcher = fetch) {
     if (route.protocol === "mcp" && !/^[a-f0-9]{64}$/.test(env.SESSION_KEY || "")) return deny(503, "Session key unavailable");
     const headers = new Headers();
     for (const name of inputHeaders) if (request.headers.has(name)) headers.set(name, request.headers.get(name));
+    if (route.protocol === "rest" && request.method === "PATCH" && request.headers.get("x-vikunja-format") === "markdown") {
+      headers.set("x-vikunja-format", "markdown");
+    }
     if (route.protocol === "mcp" && request.headers.has("mcp-session-id")) {
       try {
         headers.set("mcp-session-id", await openSession(request.headers.get("mcp-session-id"), route.id, principal, env.SESSION_KEY));

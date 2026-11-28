@@ -87,6 +87,10 @@ class RetainedMCPTests(unittest.TestCase):
         output(self.table, considered=True, authenticated=True, inventory=kept,
                retained_statuses=statuses, verify=verify)
         self.assertEqual(verify.call_count, 2)
+        verify.reset_mock()
+        output(table, considered=True, authenticated=True, inventory=kept,
+               retained_statuses={name: "not-checked" for name in statuses}, verify=verify)
+        self.assertEqual(verify.call_count, 2)
 
     def test_saved_display_status_is_reused_without_requiring_a_local_cache(self):
         _, statuses = self.retain()

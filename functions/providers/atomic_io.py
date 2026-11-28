@@ -13,6 +13,7 @@ def atomic_write_json(
     *,
     indent: int | None = 2,
     mode: int = 0o644,
+    preserve_owner: bool = False,
 ) -> None:
     """Durably replace a JSON file without exposing a partial write."""
     path = Path(path_value)
@@ -20,8 +21,10 @@ def atomic_write_json(
         path = path.resolve(strict=False)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        target_mode = path.stat().st_mode & 0o777
+        target_stat = path.stat()
+        target_mode = target_stat.st_mode & 0o777
     except FileNotFoundError:
+        target_stat = None
         target_mode = mode
 
     descriptor, temporary_name = tempfile.mkstemp(
@@ -32,6 +35,8 @@ def atomic_write_json(
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            if preserve_owner and target_stat is not None and os.geteuid() == 0:
+                os.fchown(handle.fileno(), target_stat.st_uid, target_stat.st_gid)
             json.dump(payload, handle, indent=indent)
             handle.write("\n")
             handle.flush()
