@@ -6,7 +6,8 @@
 <title>CITADEL</title>
 <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
 <link rel="stylesheet" href="/assets/theme.css?v=20261127-outline">
-<link rel="stylesheet" href="/assets/style.css?v=20261127-black-titles">
+<link rel="stylesheet" href="/assets/style.css?v=20261128-fit-titles">
+<script defer src="/assets/tile-titles.js"></script>
 </head>
 <body
     data-default-mode="{{ data.default_mode|e }}"
@@ -78,6 +79,7 @@
             {% if (data.default_mode in ['api-bearer', 'api-oauth'] and not (svc.provider_endpoints|default({})).get(data.default_mode)) or (svc.api_only|default(false) and data.default_mode not in ['api-bearer', 'api-oauth']) %}hidden{% endif %}
             data-port="{{ port|e }}"
             data-api-only="{{ '1' if svc.api_only|default(false) else '0' }}"
+            data-mcp-tile="{{ '1' if svc.mcp_tile else '0' }}"
             data-protocol-filters="{{ svc.protocol_filters|default([])|join(',')|e }}"
             data-service-name="{{ svc.display_name|default(svc.name|default('Port ' ~ port))|e }}"
             data-process="{{ svc.process|default('—', true)|e }}"
@@ -167,6 +169,7 @@ const cloudflareEditBtn = document.getElementById('cloudflare-edit-btn');
 const cloudflareSaveBtn = document.getElementById('cloudflare-save-btn');
 const modeDefaultHint = document.getElementById('mode-default-hint');
 const tiles = Array.from(document.querySelectorAll('.tile'));
+
 const protocolFilters = document.getElementById('protocol-filters');
 const filterButtons = Array.from(document.querySelectorAll('[data-protocol-filter]'));
 const enabledProtocols = {mcp: true, api: true};
@@ -361,8 +364,9 @@ function applyMode(mode) {
     let endpoints = [];
     try { endpoints = JSON.parse(tile.dataset.apiEndpoints || '{}')[mode] || []; } catch {}
     const categories = splitCsv(tile.dataset.protocolFilters);
-    const filtered = !apiMode && tile.dataset.apiOnly !== '1' && tile.dataset.browserHttp !== '1' && categories.length > 0
-      && !categories.some(category => enabledProtocols[category]);
+    const protocolHidden = tile.dataset.mcpTile === '1' ? !enabledProtocols.mcp
+      : tile.dataset.browserHttp !== '1' && categories.length > 0 && !categories.some(category => enabledProtocols[category]);
+    const filtered = !apiMode && tile.dataset.apiOnly !== '1' && protocolHidden;
     tile.hidden = (apiMode && !endpoints.length) || (!apiMode && tile.dataset.apiOnly === '1') || filtered;
     if (filtered && filteredRows) {
       const row = document.createElement('tr');

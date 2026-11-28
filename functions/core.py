@@ -382,7 +382,11 @@ def build_dashboard() -> dict:
         }
         protocols = {endpoint.get("protocol") for endpoints in tile["provider_endpoints"].values()
                      for endpoint in endpoints}
-        tile["protocol_filters"] = (["mcp"] if "mcp" in protocols else []) + (
+        # Discovery landing pages and explicitly named MCP services belong to the MCP filter,
+        # even when the service also has a login page or has no published API route.
+        tile["mcp_tile"] = ((probe.get("kind") == "html" and probe.get("browser_page") is False)
+                            or name.casefold().split()[-1:] == ["mcp"])
+        tile["protocol_filters"] = (["mcp"] if tile["mcp_tile"] or "mcp" in protocols else []) + (
             ["api"] if protocols & {"rest", "graphql", "rpc"} or probe.get("kind") == "openai-v1" else [])
         # Display known direct interfaces too, without pretending that an
         # unpublished API has a managed OAuth route.

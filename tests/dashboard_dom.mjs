@@ -17,6 +17,7 @@ const tiles = input.tiles.map(attrs => {
   const label = element(), endpoints = element(), cardLink = element();
   tile.dataset = {port: attrs['data-port'], apiEndpoints: attrs['data-api-endpoints'], interfaceLinks: attrs['data-interface-links'], browserHttp: attrs['data-browser-http'], serviceReachable: attrs['data-service-reachable'], accessConfigured: attrs['data-access-configured'], protocolFilters: attrs['data-protocol-filters'], serviceName: attrs['data-service-name'], process: attrs['data-process']};
   tile.dataset.apiOnly = attrs['data-api-only'];
+  tile.dataset.mcpTile = attrs['data-mcp-tile'];
   tile.getAttribute = name => attrs[name];
   tile.querySelector = selector => ({'.tile-url': label, '.api-endpoints': endpoints, '.tile-link': cardLink})[selector] ?? null;
   tile.classList = {toggle(name, active) { active ? classes.add(name) : classes.delete(name); }};

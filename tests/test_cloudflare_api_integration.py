@@ -425,6 +425,20 @@ class APIIntegrationTests(unittest.TestCase):
         self.assertEqual(restored['filtered'], [])
         self.assertFalse(restored['otherHidden'])
 
+    def test_mcp_filter_hides_discovery_and_named_mcp_login_pages(self):
+        from dashboard_dom import simulate_dashboard
+        from jinja2 import Environment, FileSystemLoader
+
+        names = ["X MCP", "Archidekt MCP", "Refusal Logger MCP", "Discovery", "Browser"]
+        self.write("CITADEL_DATA/services.json", {"http_services": [
+            {"port": 3100 + i, "scheme": "https", "name": name} for i, name in enumerate(names)]})
+        for i in range(len(names)):
+            self.write(f"cache/{3100 + i}.json", {"kind": "html", "browser_page": i != 3})
+        page = Environment(loader=FileSystemLoader(ROOT / "templates"), autoescape=True).get_template(
+            "index.html").render(data=self.dashboard())
+        result = simulate_dashboard(page, [{"mode": "cloudflare", "toggle": "mcp"}])
+        self.assertEqual([tile["port"] for tile in result["actions"][-1]["visible"]], [3104])
+
     def test_protocol_buttons_only_appear_for_present_categories(self):
         from jinja2 import Environment, FileSystemLoader
         from dashboard_dom import simulate_dashboard
