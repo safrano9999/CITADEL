@@ -20,3 +20,13 @@ class ThirdPartyMetadataTests(unittest.TestCase):
         self.assertEqual(result["Welcome to the Apache Tika 10.2 Server"]["name"], "Tika")
         self.assertEqual(result["Paperless-ngx sign in"], {"name": "Paperless-ngx"})
         self.assertTrue((root / result["Gotenberg"]["icon"]).is_file())
+
+    def test_importer_and_third_party_mcp_names(self):
+        root = Path(__file__).resolve().parents[1]
+        rules = load_rules(root / "extensions/enabled/discover-3rdparty", root)
+        names = ["Mailfathom MCP", "Mailfathom MCP 0.6.0", "Mailfathom 0.8.0 MCP",
+                 "Nextcloud MCP", "Firefly III Data Importer // Index"]
+        matches = match_tiles([{"title": name} for name in names], rules)
+        self.assertEqual(set(matches), set(names))
+        self.assertEqual(matches[names[1]], matches[names[2]])
+        self.assertEqual(matches[names[-1]]["name"], "Firefly III Data Importer")

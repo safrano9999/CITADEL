@@ -234,7 +234,7 @@ def discover_icon(html, local_url, effective_url, fetch, limit, *, mcp_sources=(
     return first_image(FALLBACK_PATHS, local_url)
 
 
-def mcp_icon_sources(scheme, port, root):
+def mcp_icon_sources(scheme, port, root, *, timeout=8):
     from api_discovery import MCP_PATHS, LocalProbes, initialize_mcp
     from cloudflare_api_access import load_access, parse_entries, probe_credentials
     from cloudflare_api_policy import route_id
@@ -243,7 +243,7 @@ def mcp_icon_sources(scheme, port, root):
         access = load_access(root)
     except (OSError, ValueError):
         access = {}
-    probe = LocalProbes(scheme, port, seconds=8)
+    probe = LocalProbes(scheme, port, seconds=timeout, initialize_timeout=timeout)
     for path in MCP_PATHS:
         key = route_id(port, "mcp", path)
         try:
@@ -298,6 +298,8 @@ if __name__ == "__main__":
     local_url, effective_url, icons_dir, port_text, limit_text, user_agent = sys.argv[1:7]
     directory = Path(icons_dir)
     port = int(port_text)
-    sources = mcp_icon_sources(urlsplit(local_url).scheme, port, Path(__file__).resolve().parents[1])
+    page_seconds = int(sys.argv[7]) if len(sys.argv) > 7 and sys.argv[7].isdecimal() else 0
+    sources = mcp_icon_sources(urlsplit(local_url).scheme, port, Path(__file__).resolve().parents[1],
+                               timeout=max(8, page_seconds))
     print(scan_icon(sys.stdin.buffer.read().decode(errors="replace"), local_url, effective_url,
                     directory, port, int(limit_text), user_agent, mcp_sources=sources))

@@ -5,5 +5,8 @@
   {"match": "Gotenberg", "title": "Gotenberg", "icon": "gotenberg.png"},
   {"match": "Paperless-ngx(?: sign in)?", "title": "Paperless-ngx"},
   {"match": "DataForSEO MCP", "icon": "dataforseo-mcp.svg"},
-  {"match": "Gluet(?:o|u)n(?: USA)?", "icon": "vpn-eagle.png"}
+  {"match": "Gluet(?:o|u)n(?: USA)?", "icon": "vpn-eagle.png"},
+  {"match": "Firefly III Data Importer(?: // Index)?", "title": "Firefly III Data Importer", "icon": "firefly-importer.png"},
+  {"match": "Mailfathom(?: MCP(?: v?0[.](?:6|8)[.]0)?| v?0[.](?:6|8)[.]0(?: MCP)?)", "icon": "mailfathom-mcp.png"},
+  {"match": "Nextcloud MCP", "icon": "nextcloud-mcp.png"}
 ]

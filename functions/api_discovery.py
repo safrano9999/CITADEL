@@ -76,11 +76,12 @@ def legacy_sse(probe: Probe) -> bool:
 
 
 class LocalProbes:
-    def __init__(self, scheme: str, port: int, *, seconds: float = 10):
+    def __init__(self, scheme: str, port: int, *, seconds: float = 10, initialize_timeout: float = 8):
         if scheme not in {"http", "https"} or type(port) is not int or not 1 <= port <= 65535:
             raise ValueError("Invalid local listener")
         self.base = f"{scheme}://127.0.0.1:{port}"
         self.deadline = time.monotonic() + seconds
+        self.initialize_timeout = initialize_timeout
         self.count = 0
         # Caddy's local listeners may use an internal CA, as in the normal scan.
         self.opener = urllib.request.build_opener(
@@ -113,7 +114,7 @@ class LocalProbes:
                 # Streamable HTTP bridges may start their stdio child during
                 # initialize. Allow that startup while retaining the overall
                 # listener deadline and the short timeout for other probes.
-                timeout = 8.0 if mcp_initialize else 3.0 if path in DOC_PATHS else 1.0
+                timeout = self.initialize_timeout if mcp_initialize else 3.0 if path in DOC_PATHS else 1.0
                 response = self.opener.open(request, timeout=min(timeout, remaining))
             except urllib.error.HTTPError as exc:
                 response = exc

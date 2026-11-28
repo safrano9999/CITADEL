@@ -375,7 +375,7 @@ probe_http() {
 
 scan_icon() {
     python3 "$FUNCTIONS_DIR/favicon_policy.py" "$LOCAL_URL" "$1" "$ICONS_DIR" "$PORT" \
-        "$MAX_FETCH_BYTES" "$CITADEL_USER_AGENT_VALUE"
+        "$MAX_FETCH_BYTES" "$CITADEL_USER_AGENT_VALUE" "$page_seconds"
 }
 
 echo "=== Probing ports for HTTP/HTTPS ==="
