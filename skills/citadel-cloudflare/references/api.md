@@ -27,6 +27,16 @@ Before whitelist reconciliation, create or reuse the Zero Trust organization thr
 - **Webmail, IMAP, and SMTP.** If users connect through names under the migrated domain, restore the provider’s A, AAAA, or CNAME records for the names they actually use. Use **DNS only** for IMAP, SMTP, and any in-zone MX target. Follow the provider’s HTTPS and certificate instructions for a custom webmail hostname. A provider-owned webmail URL uses the provider’s own DNS. [Cloudflare mail DNS troubleshooting](https://developers.cloudflare.com/dns/troubleshooting/email-issues/)
 - **Optional forwarding.** If the operator chooses Cloudflare Email Routing, use its MX configuration and verify the destination mailbox. Forwarded mail is read at that destination. Keep the provider’s MX records when direct delivery to its mailboxes is intended. [Cloudflare Email Routing](https://developers.cloudflare.com/email-service/get-started/route-emails/)
 
+### ALL-INKL example
+
+This account’s verified zone entry is shown in DNS zone-file format. In the Cloudflare dashboard, the name is `@` and the priority is `10`.
+
+```dns
+@ IN MX 10 w0203fda.kasserver.com.
+```
+
+The target is account-specific. For another ALL-INKL account, look up its assigned `<login>.kasserver.com` hostname in KAS or query the previous authoritative nameservers. [ALL-INKL mail server settings](https://all-inkl.com/wichtig/anleitungen/kas/tools/dns-werkzeuge/a-record-fuer-domain-aendern_241.html)
+
 ## Runtime ownership
 
 CITADEL owns only resources recorded in `extensions/enabled/cloudflare/routes.json`:
