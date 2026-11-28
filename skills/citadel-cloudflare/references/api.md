@@ -13,13 +13,19 @@ Use a scoped API token. Never request or store a Global API Key.
 - Zone: Zone, Edit
 - Zone: DNS, Edit
 - Zone: Zone Settings, Edit
-- Zone → Dynamic URL Redirects → Edit on the routed zone for the default HTTP-to-HTTPS rule (`CITADEL_CLOUDFLARE_HTTP_TO_HTTPS=1`) and the optional www redirect. Check this permission if redirect reconciliation returns HTTP 403.
+- Zone → Single Redirect → Edit (API permission `Dynamic URL Redirects Write`) on the routed zone for the default HTTP-to-HTTPS rule (`CITADEL_CLOUDFLARE_HTTP_TO_HTTPS=1`) and the optional www redirect. Check this permission if redirect reconciliation returns HTTP 403.
 - Zone: SSL and Certificates, Edit
 - User: User Details, Read when available
 
 During deterministic setup, include all accounts and all zones. The token can be narrowed after setup and verification.
 
 Before whitelist reconciliation, create or reuse the Zero Trust organization through `POST /accounts/{account_id}/access/organizations`, then create or reuse the `onetimepin` identity provider through `POST /accounts/{account_id}/access/identity_providers`. Error `9999` from the organization lookup means Access is not initialized and creation should continue; error `10000` during creation or reconciliation means the token lacks the required Access permission.
+
+## Mail during a nameserver change
+
+- **Incoming mail.** If the existing provider hosts the mailboxes, copy its complete MX record set, including priorities, for each domain that receives mail. Use the provider’s control panel or query its previous authoritative nameserver. After delegation, compare `dig @<cloudflare-nameserver> <domain> MX +short` on each assigned nameserver with the provider’s values. Restore any missing entries in Cloudflare DNS.
+- **Webmail, IMAP, and SMTP.** If users connect through names under the migrated domain, restore the provider’s A, AAAA, or CNAME records for the names they actually use. Use **DNS only** for IMAP, SMTP, and any in-zone MX target. Follow the provider’s HTTPS and certificate instructions for a custom webmail hostname. A provider-owned webmail URL uses the provider’s own DNS. [Cloudflare mail DNS troubleshooting](https://developers.cloudflare.com/dns/troubleshooting/email-issues/)
+- **Optional forwarding.** If the operator chooses Cloudflare Email Routing, use its MX configuration and verify the destination mailbox. Forwarded mail is read at that destination. Keep the provider’s MX records when direct delivery to its mailboxes is intended. [Cloudflare Email Routing](https://developers.cloudflare.com/email-service/get-started/route-emails/)
 
 ## Runtime ownership
 

@@ -11,7 +11,7 @@ Keep setup agent-assisted and runtime deterministic. Never replace `scan.sh` or 
 
 1. Read `config.conf_example`, `env.example`, and `references/api.md`.
 2. Require `CLOUDFLARE_API_TOKEN`; never ask for a Global API Key. Prefer the broad setup token documented in `CITADEL_CLOUDFLARE.md`, scoped to all accounts and all zones, so setup does not stop halfway through.
-3. Create or reuse the requested zone and print its assigned Cloudflare nameservers. Wait until the user has entered them at the domain provider and the zone reports `active`.
+3. Create or reuse the requested zone and print its assigned Cloudflare nameservers. For a domain that receives mail, compare the new zone with the mail provider’s records before changing nameservers. When the zone is active, verify the records on each assigned nameserver. Follow [mail checks for a nameserver change](references/api.md#mail-during-a-nameserver-change).
 4. Create or reuse the named Tunnel for this host. If multiple Tunnels exist, show them and ask which one to use; never modify an unrelated Tunnel.
 5. Run discovery without printing the token:
 
