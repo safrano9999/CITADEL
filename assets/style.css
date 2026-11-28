@@ -440,7 +440,7 @@ body {
 @media (max-width: 760px) {
   .site-header {
     margin: 12px 14px 0;
-    padding: 14px;
+    padding: 16px 14px;
   }
 
   .header-meta {
